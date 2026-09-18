@@ -1,0 +1,4 @@
+{
+  "type": "module",
+  "comment": "只为了告诉 Node：src/ 下是 ES module。根目录那份必须保持 CJS（main.js 是 CommonJS）。"
+}

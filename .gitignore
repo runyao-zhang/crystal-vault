@@ -1,0 +1,6 @@
+node_modules/
+# 构建产物：**不进仓库**，只作为 Release 附件发布。
+# 社区插件政策要求仓库里放源码，产物走 release。
+main.js
+styles.css
+*.js.map

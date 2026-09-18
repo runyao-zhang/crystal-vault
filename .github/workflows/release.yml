@@ -1,0 +1,58 @@
+# 打一个 tag 就出一次发布。
+#
+# ⚠️ **tag 必须和 `manifest.json` 里的 `version` 逐字一致，而且不带 `v` 前缀。**
+#    写 `v1.0.0` 的话 Obsidian 找不到这个版本、用户永远收不到更新——
+#    而 GitHub 那边一切正常，看不出任何问题。下面第一个 step 专门挡它。
+#
+# 产物三份，**逐个当附件传**（不是塞进 zip）：main.js / manifest.json / styles.css。
+# Obsidian 是按 release 的附件去取的，打包成压缩包它读不到。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+
+      - name: Tag 必须和 manifest 的 version 一致
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER=$(node -p "require('./manifest.json').version")
+          if [ "$TAG" != "$VER" ]; then
+            echo "tag 是 '$TAG'，而 manifest.json 里写的是 '$VER' —— 必须逐字一致、且不带 v 前缀"
+            exit 1
+          fi
+          echo "tag 与 manifest 一致：$TAG"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: 确认三份产物都在
+        run: |
+          for f in main.js manifest.json styles.css; do
+            test -f "$f" || { echo "缺 $f"; exit 1; }
+          done
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF#refs/tags/}" \
+            --title "${GITHUB_REF#refs/tags/}" \
+            --generate-notes \
+            main.js manifest.json styles.css
