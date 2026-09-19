@@ -108,6 +108,29 @@
  *   composeCard），与 writeCard 同一条分工：适配层不解析、不序列化 YAML。
  *
  * @property {(folder: string) => Promise<{ok: boolean, path?: string, reason?: string, message?: string}>} createFolder
+ *
+ * 3.0 刀 12（用户 2026-09-19 点名要的「删除晶体」）：
+ *
+ * @property {(path: string) => Promise<{ok: boolean, path?: string, reason?: string, message?: string}>} trashFile
+ *
+ *   **把一个文件或文件夹丢进回收站。⚠️ 语义是「丢进回收站」，不是「永久删除」——这一条是硬的。**
+ *
+ *   名字叫 trashFile 而不是 trashFolder：它两个都管（宿主那侧就是同一个
+ *   `fileManager.trashFile`），而调用方两个都用得上——「删除晶体」扔的是文件夹，
+ *   阅读器的「返回」扔的是刚建出来的那一个 .md。
+ *
+ *   删一整个文件夹意味着里面**所有卡片一起没了**，而这是核心发起的最不可逆的一个
+ *   动作。所以契约里定的是「请宿主把它丢进回收站」，而不是「请宿主删掉它」：
+ *   Obsidian 侧走 `fileManager.trashFile`，它会尊重用户在
+ *   「文件与链接 → 删除的文件」里自己选的那一档（系统回收站 / vault 里的 .trash /
+ *   永久删除）。**用户早就选好了丢掉的东西该去哪儿，这里不该替他改主意。**
+ *
+ *   反过来，适配层**不许**自己退化成 `vault.delete`——那是永久删除，用它在用户
+ *   选了回收站的情况下等于绕过他的设置。没有回收站能力的宿主回 `reason: "unsupported"`，
+ *   核心据此**不显示那颗按钮**（摆一颗按了没反应的按钮比不摆更糟）。
+ *
+ *   `reason` 与别的写盘方法同一套三态：`missing`（本来就不在）/ `unsupported`
+ *   （这个宿主没这能力）/ `error`。
  *   建一个文件夹（= **一颗新晶体**）。3.0 刀 9 第三版加的：阅读器里读着文献，
  *   当场就能开一颗新晶体来装接下来的卡，不必先回晶体库、回文件管理器。
  *
@@ -235,6 +258,9 @@ export const ADAPTER_METHODS = [
   "mountEditor",
   "createFolder",
   "listFolders",
+  // 3.0 刀 12：「删除晶体」与阅读器的「返回」。
+  // ⚠️ 名字是 trash**File** 不是 trashFolder——它同时管文件和文件夹（见下面那段）。
+  "trashFile",
 ];
 
 /**

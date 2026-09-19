@@ -1753,6 +1753,16 @@ const READER = [
   // ⚠️ 切档只靠右栏上这一个类，所以两边的显隐都必须写在这儿——漏一条的表现是
   // 「两个都在」或者「两个都没有」，而用户只会看到一栏乱掉的界面。
   ".kb-v13-reader-nativebar{display:flex;gap:6px;align-items:center;}",
+  // 草稿纸那条（3.0 刀 12 第二半）。收起时整条不占位置（同「在编辑器里写」那条）。
+  ".kb-v13-reader-scratchbar{display:none;gap:6px;align-items:center;margin-top:6px;}",
+  ".kb-v13-reader-scratch-on .kb-v13-reader-scratchbar{display:flex;}",
+  ".kb-v13-reader-scratchlab{font-size:11px;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.7));}",
+  ".kb-v13-reader-scratchback{",
+  "  cursor:pointer;font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.28));",
+  "  background:none;color:var(--text-muted, rgba(170,205,235,.85));",
+  "}",
+  ".kb-v13-reader-scratchback:hover{color:var(--text-normal, rgba(215,232,250,.95));}",
   ".kb-v13-reader-nativeopen{",
   "    cursor:pointer;padding:6px 10px;border-radius:7px;font-size:11px;font-family:inherit;",
   "    border:1px dashed var(--background-modifier-border, rgba(0,200,255,.28));",
@@ -1808,6 +1818,19 @@ const READER = [
   "}",
   ".kb-v13-newcrystal-open:hover{background:var(--background-modifier-hover, rgba(0,90,150,.18));color:var(--text-normal, rgba(215,232,250,.9));}",
   ".kb-v13-newcrystal.open .kb-v13-newcrystal-open{display:none;}",
+  // 3.0 刀 12：新建在左、删除在右，同一行。
+  // **表单打开时整行收起**（不是只藏新建那颗）——不然「删除晶体」会孤零零留在
+  // 一个正在填表单的框上面，看着像它属于那个表单。
+  ".kb-v13-newcrystal-row{display:flex;gap:6px;align-items:stretch;}",
+  ".kb-v13-newcrystal.open .kb-v13-newcrystal-row{display:none;}",
+  ".kb-v13-newcrystal-row .kb-v13-newcrystal-open{flex:1 1 auto;min-width:0;}",
+  // 删除那颗用暖色描边，和旁边那颗长得不一样——它是**这一栏里唯一会动你笔记的按钮**。
+  ".kb-v13-newcrystal-del{",
+  "  flex:0 0 auto;cursor:pointer;font:inherit;font-size:12px;padding:7px 10px;",
+  "  border:1px solid rgba(255,150,140,.35);border-radius:7px;background:none;",
+  "  color:rgba(255,175,165,.9);white-space:nowrap;",
+  "}",
+  ".kb-v13-newcrystal-del:hover{background:rgba(120,30,30,.28);color:rgba(255,205,195,.98);}",
   ".kb-v13-newcrystal-form{display:none;gap:6px;}",
   ".kb-v13-newcrystal.open .kb-v13-newcrystal-form{display:flex;flex-wrap:wrap;}",
   ".kb-v13-newcrystal-form input{",

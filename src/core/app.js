@@ -459,6 +459,12 @@ export async function mount({
   // 两条路**只能走一条**：注入的那份挂在 `<head>` 末尾、后到的赢，两份并存的后果
   // 是覆盖顺序随形态而变，某个选择器看着「时灵时不灵」。
   injectStyles = true,
+  // 3.0 刀 12 第二半：「草稿纸」那台原生编辑器落在哪儿。
+  //
+  // `{ folder, name }`，由**宿主给**——它是 vault 里的一条路径，是宿主知识，
+  // 核心不该知道 `草稿纸` 这三个字（同 cardsFolder 那条纪律）。
+  // 不给就是 `null`，阅读器**不显示那颗按钮**（摆一颗按了没反应的比不摆更糟）。
+  scratch = null,
 }) {
   assertAdapter(adapter);
 
@@ -1006,6 +1012,16 @@ export async function mount({
     openCardPanel: (card) => showHologram(ctx, card, ctx.state.currentHue),
     // 幽灵节点点一下要真能过去，否则它只是个装饰
     gotoCrystal: (key) => expandCrystal(ctx, key),
+    // 3.0 刀 12：删掉一颗晶体之后的收场。
+    //
+    // 要处理的是**「你正站在被删掉的那颗里」**：不退的话 `state.openCrystal`
+    // 指着一条已经不存在的路径，`resolveChain` 拿不到 → 舞台上是一片空，
+    // 而面包屑还写着那颗已经没了的晶体。**不报错，只是整块屏幕空着。**
+    afterCrystalRemoved: () => {
+      const cur = ctx.state.openCrystal;
+      if (cur && !ctx.model.hasNode(cur)) collapseCrystal(ctx);
+      renderCrystals(ctx);
+    },
     // 晶体拖完那一下，落点判定由 modules.js 做
     onCrystalDropped: (key) => dropCrystal(ctx, key),
     savePrefs: () => adapter.savePrefs(collectPrefs(ctx.state)),
@@ -1080,7 +1096,7 @@ export async function mount({
   // 一次就多一个监听，而且每个都指向一棵已经摘下来的树——与 __kbV13Watch /
   // __kbV13Keydown 是同一个套路。
   if (win.__kbV13Reader) win.__kbV13Reader.destroy();
-  ctx.reader = createReader(ctx, { el: readerEl, pdfRenderer, injectStyles });
+  ctx.reader = createReader(ctx, { el: readerEl, pdfRenderer, injectStyles, scratch });
   win.__kbV13Reader = ctx.reader;
 
   // ---- 粒子 ----

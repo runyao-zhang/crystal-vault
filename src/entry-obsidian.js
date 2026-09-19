@@ -411,6 +411,44 @@ export function createObsidianAdapter({
       }
     },
 
+    /**
+     * 把一个文件或文件夹丢进回收站——**不是永久删除**（3.0 刀 12）。
+     *
+     * 删一整个文件夹 = 里面所有卡片一起没了，这是核心发起的最不可逆的动作。
+     * 所以这里**只请宿主丢回收站**，让用户自己在「文件与链接 → 删除的文件」
+     * 里选的那一档说了算（系统回收站 / vault 里的 .trash / 永久删除）。
+     *
+     * ⚠️ **不许退化成 `vault.delete`**：那是永久删除。用户把设置选成回收站的时候
+     * 用它，等于绕过他的设置——而这一下删掉的是他的笔记。
+     *
+     * 老版本 Obsidian 没有 `fileManager.trashFile`，退到 `vault.trash(f, true)`
+     * （那个也尊重用户的设置）。两个都没有就回 `unsupported`，核心据此不显示按钮。
+     */
+    async trashFile(folder) {
+      const path = toStr(folder).replace(/\/+$/, "");
+      if (!path) return { ok: false, reason: "error", message: "空路径" };
+      let target = null;
+      try {
+        target = app.vault.getAbstractFileByPath(path);
+      } catch (e) {
+        target = null;
+      }
+      if (!target) return { ok: false, reason: "missing", path };
+      try {
+        const fm = app.fileManager;
+        if (fm && typeof fm.trashFile === "function") {
+          await fm.trashFile(target);
+        } else if (typeof app.vault.trash === "function") {
+          await app.vault.trash(target, true); // true = 用系统回收站那一档
+        } else {
+          return { ok: false, reason: "unsupported", path };
+        }
+        return { ok: true, path };
+      } catch (e) {
+        return { ok: false, reason: "error", message: errText(e) };
+      }
+    },
+
     async mountEditor(el, opts = {}) {
       const path = toStr(opts.path);
       const wantLine = Math.max(1, Math.round(Number(opts.line)) || 1);

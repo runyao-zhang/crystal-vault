@@ -256,6 +256,11 @@ export function createReader(ctx, opts = {}) {
   // 样式由谁来放（见 app.js 的 mount）：插件形态下是仓库里的 styles.css，
   // 那结构窗那份也不能再自己注一份——同一个道理。
   const injectStyles = opts.injectStyles !== false;
+  // 草稿纸落在哪儿（见 app.js 那段）。null = 宿主没给，那颗按钮整颗不出现。
+  const scratchSpec = opts.scratch && opts.scratch.folder ? opts.scratch : null;
+  const scratchPath = scratchSpec
+    ? String(scratchSpec.folder).replace(/\/+$/, "") + "/" + (scratchSpec.name || "_") + ".md"
+    : "";
   const el = opts.el;
 
   const st = {
@@ -305,6 +310,13 @@ export function createReader(ctx, opts = {}) {
     // 也不用重摆桌面。阅读器**收起来但不销毁**（suspend），切回来时开着的文献、
     // 桌面那几扇窗、页码缩放原样都在。反向那颗按钮不用新加：顶栏本来就常驻一颗
     // 「文献」（app.js 的 #kb-fs-reader），任何 stage 下都点得到，点它就 resume。
+    // 3.0 刀 12 第二半「草稿纸」（用户 09-19）：读文献时手边那块用 Obsidian
+    // 原生编辑器写的便签。**不是卡片**——它落在宿主指定的草稿纸文件夹里，
+    // 不参与晶体库的关系图。宿主没给位置时这颗整颗不出现。
+    (scratchSpec
+      ? '<button type="button" class="kb-v13-reader-nav" id="kb-reader-scratch"' +
+        ' title="草稿纸：一块用 Obsidian 原生编辑器写的便签，不建成卡片。">草稿纸</button>'
+      : '') +
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-storyline"' +
     ' title="去看故事线：晶体库收在这块屏下面，阅读器原样留着，点顶栏「文献」就回来。">故事线</button>' +
     // 3.0 刀 9-D「结构窗」。和左边那颗「故事线」成对，但**结果是两件事**：
@@ -369,8 +381,22 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-reader-nativeopen" id="kb-reader-nativeopen"' +
     ' title="按上面的卡片名先把这张卡建出来，正文改用 Obsidian 自己的编辑器写（边写边渲染、自动存盘）">✎ 在编辑器里写</button>' +
     '<button type="button" class="kb-v13-reader-nativeback" id="kb-reader-nativeback">写下一张</button>' +
+    // 3.0 刀 12 第二半「返回」（用户 09-19）：**撤掉刚建出来的那张卡**，
+    // 正文原封不动转进草稿纸。排在「写下一张」右边——两颗都是「离开这台编辑器」，
+    // 但一颗是**继续**（卡留着）、一颗是**反悔**（卡删掉）。
+    '<button type="button" class="kb-v13-reader-nativeback" id="kb-reader-nativereturn"' +
+    ' title="撤掉刚建出来的这张卡（进回收站），正文转进草稿纸——一个字不丢。">返回</button>' +
     '</div>' +
     '<div class="kb-v13-reader-nativehost" id="kb-reader-nativehost"></div>' +
+    // 草稿纸那条（3.0 刀 12 第二半）。与上面那条**共用 nativehost**——
+    // 两者互斥（开着这个就开不了那个），共用一块地方最简单。
+    '<div class="kb-v13-reader-scratchbar" id="kb-reader-scratchbar">' +
+    '<span class="kb-v13-reader-scratchlab">草稿纸</span>' +
+    // ⚠️ **不能复用 `kb-v13-reader-nativeback`**：那个类的显隐挂在 `native-on` 上
+    // （它默认 `display:none`，只有「在编辑器里写」那一档才亮出来），
+    // 于是草稿纸开着时这颗「收起」还是看不见——**按钮在、点不到**。
+    '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratchback">收起</button>' +
+    '</div>' +
     // 「将建在」那一行（3.0 刀 9 第二版）。从前它是一句死文案「将建在：文献/xxx/」，
     // 卡只能长在文献自己那个文件夹里。用户要的是**自己挑一个文件夹**，
     // 而且挑的那个界面要复用首页「文件夹」面板那棵树。
@@ -393,7 +419,12 @@ export function createReader(ctx, opts = {}) {
     // 不必先回晶体库、回文件管理器。**建在「将建在」那个文件夹里面**（用户 09-18 选的），
     // 所以它跟着上面那行走——想建哪里，先把「将建在」指到哪儿。
     '<div class="kb-v13-newcrystal" id="kb-reader-newcrystal">' +
+    // 3.0 刀 12：新建在左、删除在右（用户 09-19 点名要的位置）。
+    '<div class="kb-v13-newcrystal-row">' +
     '<button type="button" class="kb-v13-newcrystal-open" id="kb-reader-newcrystal-open">＋ 新建晶体</button>' +
+    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystaldel"' +
+    ' title="删掉一颗晶体（连同里面的卡片）。走回收站——按你在「文件与链接 → 删除的文件」里选的那一档，能捡回来。">删除晶体</button>' +
+    '</div>' +
     '<div class="kb-v13-newcrystal-form" id="kb-reader-newcrystal-form">' +
     '<input type="text" id="kb-reader-newcrystal-name" placeholder="晶体名（= 一个文件夹）" autocomplete="off">' +
     '<button type="button" class="kb-v13-newcrystal-go" id="kb-reader-newcrystal-go">建</button>' +
@@ -1347,7 +1378,20 @@ export function createReader(ctx, opts = {}) {
     // （它是文件视图，装不下「一段」），所以「一扇窗 = 从第 a 行看起」这件事由
     // 「打开时定位到第 a 行」+ 底下那个「回到第 __ 行」来实现（用户 09-18 拍板）。
     const field = await mountEditArea(box, {
-      native: w.kind === "markdown", // 原生编辑器只给 markdown 文献窗，见 mountEditArea
+      // 3.0 刀 12（用户 2026-09-19）：**卡片窗也给原生编辑器**。
+      //
+      // 原来是只给 markdown 文献窗的，理由是卡片那一路要「只改正文那一截、带基线、
+      // 有撤销」，而宿主的编辑器是**文件视图**：整篇、自己存盘——两条正好反着。
+      // 用户真机用下来要的是**实时渲染那一档**，所以这条改了。
+      //
+      // ⚠️ 换来的东西写在这儿，免得以后有人当成 bug：
+      //   · 写盘变成**整篇**（编辑器里是什么就写什么），不再是「只动正文那一截」。
+      //     YAML 因此也**可编辑**了——那是要的；但「手写的注释/键序不会被重排」
+      //     那条保证，从现在起只剩全息面板的 ✎（`editform.js`）守着。
+      //   · **不带基线比对**：宿主自己会存盘，拿打开那一刻的原文去比必然假冲突
+      //     （见 `saveDeskEdit` 里那段）。所以多设备同步下「别处改过就不覆盖」
+      //     在这条路上是关掉的。要那两样保护的走全息面板的 ✎，那条路一点没动。
+      native: true,
       path: w.path,
       text,
       label,
@@ -1454,10 +1498,12 @@ export function createReader(ctx, opts = {}) {
     const shell = EL("div", "kb-v13-editarea");
     box.appendChild(shell);
     let handle = null;
-    // `native` 为假就**根本不去问宿主**：卡片窗这一支要的是「只改正文那一截、
-    // 带基线、有撤销」，而宿主的编辑器是**文件视图**——它一上手就是整篇、
-    // 而且自己存盘，那两条正好都反着。用户 09-18 只点名要 markdown 文献窗换，
-    // 所以这里按窗的类型分开，别顺手把卡片那一支也改了。
+    // `native` 为假就**根本不去问宿主**，直接给输入框（原型和全部自动化测试
+    // 走的就是这一支：那边没有宿主编辑器）。
+    //
+    // 09-18 时这里只给 markdown 文献窗开原生编辑器，卡片窗被排除在外；09-19
+    // 用户真机用下来要卡片窗也有，于是 `renderDeskEditor` 传的已经是 `true`。
+    // **代价（整篇写盘、不带基线）记在那边**，这一层不重复。
     if (!opts.native) {
       return textareaFallback(shell, opts);
     }
@@ -2421,6 +2467,9 @@ export function createReader(ctx, opts = {}) {
   //   "story"        —— 挑看哪颗晶体的故事线，选中直接落进那颗晶体。
   // 之所以不是两套 DOM：用户点名要的就是「复用首页文件夹那棵树」，
   // 而且两边要看的本来就是同一批晶体/文件夹，分开画只会长出两处要同步的代码。
+  // 草稿纸那台编辑器（3.0 刀 12 第二半）。null = 没开着。
+  let scratch = null;
+
   const folderPick = { query: "", open: new Set(), el: null, body: null, purpose: "target" };
 
   /** 现在到底会建到哪儿。空串表示「跟着文献所在的文件夹」。 */
@@ -2515,9 +2564,11 @@ export function createReader(ctx, opts = {}) {
     story: { hd: "看哪颗晶体的故事线", find: "搜晶体" },
     // 结构窗那一档（用户 09-19：看哪颗晶体要自己选）
     crystal: { hd: "结构窗看哪颗晶体", find: "搜晶体" },
+    // 3.0 刀 12：删哪颗晶体
+    delete: { hd: "删除哪颗晶体", find: "搜晶体" },
   };
-  /** 这两档挑的是**晶体**（收 key），只有 target 挑文件夹（收宿主路径）。 */
-  const pickIsCrystal = (p) => p === "story" || p === "crystal";
+  /** 这几档挑的是**晶体**（收 key），只有 target 挑文件夹（收宿主路径）。 */
+  const pickIsCrystal = (p) => p === "story" || p === "crystal" || p === "delete";
 
   /** 打开这棵树。`purpose` 见 folderPick 那只常量上面那段。 */
   function openFolderPick(purpose) {
@@ -2615,6 +2666,182 @@ export function createReader(ctx, opts = {}) {
   let nativeCompose = null; // { handle, path, title }
 
   /** 把这一栏切回「填表单 → 存进晶体库」那一档。 */
+  /**
+   * 「草稿纸」（3.0 刀 12 第二半，用户 09-19）。
+   *
+   * 读文献时手边那块**用 Obsidian 原生编辑器写的便签**。它**不是卡片**：
+   * 落在宿主指定的草稿纸文件夹里、不参与晶体库的关系图。
+   *
+   * 和「在编辑器里写」的分工：那个是「我要建一张卡」，这个是「我先记下来再说」。
+   *
+   * ⚠️ **关掉不删文件**。它是常驻的便签——用户按「收起」的意思是「先不看了」，
+   * 不是「把刚才写的扔掉」。删的那条路在「返回」那边，而且只删**刚建出来的卡**。
+   */
+  /**
+   * 确保草稿纸那个文件在。**已经在了不算错**——它就是同一张便签。
+   *
+   * ⚠️ 「返回」那条路**必须先叫它**：那个流程是直接往草稿纸里写的，
+   * 而写盘对**不存在的路径**回的是 `missing`（真机也一样，`writeCard` 的语义是
+   * 「写一张已经存在的卡」）。少了这一步，用户第一次用「返回」——
+   * 也就是还没开过草稿纸的时候——正文会卡在半路上，而界面上只说「没能写进草稿纸」。
+   * 这是 scratch 那条用例抓出来的。
+   */
+  async function ensureScratchFile() {
+    if (!scratchSpec) return { ok: false, reason: "unsupported" };
+    let res = null;
+    try {
+      res = await adapter.createCard(scratchSpec.name || "_", "", scratchSpec.folder);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (res && res.ok) return res;
+    if (res && res.reason === "exists") return { ok: true, path: scratchPath };
+    return res || { ok: false, reason: "error" };
+  }
+
+  async function openScratch() {
+    if (!scratchSpec) return;
+    if (nativeCompose) {
+      say("先把上面那张卡写完（或者点「返回」）。", false);
+      return;
+    }
+    if (scratch) {
+      closeScratch();
+      return;
+    }
+    const made = await ensureScratchFile();
+    if (!made.ok) {
+      say("草稿纸没建起来：" + toStr(made.message || made.reason || ""), false);
+      return;
+    }
+    let handle = null;
+    try {
+      handle = await adapter.mountEditor(nativeHost, { path: scratchPath, line: 0, text: "" });
+    } catch (e) {
+      handle = null;
+    }
+    if (!handle) {
+      say("这个宿主没给出编辑器，草稿纸开不了。", false);
+      return;
+    }
+    scratch = { handle, path: scratchPath };
+    sideEl.classList.add("kb-v13-reader-scratch-on");
+    say("草稿纸开着——它由 Obsidian 自己存盘，**不是卡片**，不进关系图。", true);
+    try {
+      handle.focus();
+    } catch (e) {
+      /* 聚焦失败无所谓 */
+    }
+  }
+
+  /** 收起草稿纸。**不删文件**（见 openScratch 那段）。 */
+  function closeScratch() {
+    if (scratch) {
+      try {
+        scratch.handle.destroy(); // 背后挂着宿主一个视图对象，不摘就是每开一次漏一个
+      } catch (e) {
+        /* 收尾失败不该挡住界面 */
+      }
+      scratch = null;
+    }
+    sideEl.classList.remove("kb-v13-reader-scratch-on");
+    nativeHost.textContent = "";
+  }
+
+  /**
+   * 「返回」：**撤掉刚建出来的那张卡**，正文原封不动转进草稿纸。
+   *
+   * 用户 09-19 的原话：「删除刚才创建的文件，并且所有正文内容原封不动复制到编辑器中」。
+   *
+   * 这条要存在，是因为「在编辑器里写」**一进去就已经把文件建出来了**
+   * （宿主的编辑器是文件视图，没有文件挂不上）——所以写了两行发现不对、
+   * 想退回表单，会剩下一张半成品卡在库里。这个是那个的出口。
+   *
+   * ⚠️ 顺序：先**读正文**，再删文件，最后才动界面。反过来的话编辑器一拆就读不到了。
+   * ⚠️ 删卡走 `model.removeCard`（摘一张卡），**不是** `removeFolder`（那是摘一棵子树）。
+   */
+  async function returnFromNativeCompose() {
+    const nc = nativeCompose;
+    if (!nc) return;
+    // 1) 先把正文抓出来——拆了编辑器就读不到了
+    // ⚠️ **契约里的编辑器句柄是 `getValue()`，不是 `value()`。**
+    // `value()` 是 `mountEditArea` 那层包装的口径（`saveDeskEdit` 用的是它），
+    // 而这里拿到的是**适配层直接给的** handle——两个不是同一个对象。
+    // 第一版写成 `.value()`，`try/catch` 把 TypeError 吃成空串：
+    // 卡删掉了、正文没了，**而且一声不响**。这是全流程最不能接受的一种收场。
+    let text = "";
+    try {
+      text = toStr(nc.handle.getValue());
+    } catch (e) {
+      text = "";
+    }
+    const title = nc.title;
+    const path = nc.path;
+
+    closeNativeCompose(true);
+
+    // 2) 删掉刚建出来的那张卡（回收站），模型跟着摘
+    let res = null;
+    try {
+      res = await adapter.trashFile(path);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (!res || !res.ok) {
+      say("那张卡没删掉，" + (res && res.reason === "missing" ? "文件已经不在了。" : "它在库里还留着。"), false);
+      return;
+    }
+    if (ctx.model.removeCard) ctx.model.removeCard(path);
+    if (ctx.renderCrystals) ctx.renderCrystals();
+    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+    if (ctx.refreshOrphans) ctx.refreshOrphans();
+    if (ctx.refreshFolders) ctx.refreshFolders();
+
+    // 3) 正文转进草稿纸。**没有草稿纸位置就直接说清正文去哪了**——
+    //    静默丢掉用户刚写的东西是最不能接受的一种收场。
+    if (!scratchSpec || !text.trim()) {
+      say(
+        text.trim()
+          ? "「" + title + "」撤掉了，但这个宿主没有草稿纸——刚写的正文没了，对不住。"
+          : "「" + title + "」撤掉了。",
+        !text.trim()
+      );
+      return;
+    }
+    // 草稿纸里已经有东西就**接着写**，不覆盖——那是一张便签，不是一次性缓冲。
+    //
+    // 读旧内容走 `readBinary` + 解码：契约里只有这一个通用的「读文件」入口
+    // （`listDocs` 只列清单）。**读不到就当空的**——那样最坏是覆盖一张空便签，
+    // 而「因为读不了就干脆不写」会把用户刚写的正文扔掉，那个后果重得多。
+    let prev = "";
+    try {
+      const bytes = await adapter.readBinary(scratchPath);
+      if (bytes) prev = new TextDecoder().decode(bytes);
+    } catch (e) {
+      prev = "";
+    }
+    const content = prev.trim() ? prev.replace(/\s+$/, "") + "\n\n" + text : text;
+    // ⚠️ **写之前先确保那个文件在**——`writeCard` 对不存在的路径回 `missing`
+    // （它是「写一张已经存在的卡」）。用户还没开过草稿纸时，这是必经的一步。
+    const ensured = await ensureScratchFile();
+    if (!ensured.ok) {
+      say("「" + title + "」撤掉了，但草稿纸没建起来，正文没能转过去。", false);
+      return;
+    }
+    let w = null;
+    try {
+      w = await adapter.writeCard(scratchPath, content, {});
+    } catch (e) {
+      w = { ok: false };
+    }
+    if (!w || !w.ok) {
+      say("「" + title + "」撤掉了，但正文没能写进草稿纸。", false);
+      return;
+    }
+    await openScratch();
+    say("「" + title + "」撤掉了，正文转到草稿纸里了。", true);
+  }
+
   function closeNativeCompose(keepSource) {
     if (nativeCompose) {
       try {
@@ -2625,7 +2852,8 @@ export function createReader(ctx, opts = {}) {
       nativeCompose = null;
     }
     sideEl.classList.remove("kb-v13-reader-native-on");
-    nativeHost.textContent = "";
+    // ⚠️ 草稿纸开着时**不能清**——两者共用 nativeHost，清了就把它的编辑器摘了
+    if (!scratch) nativeHost.textContent = "";
     nameEl.value = "";
     conceptEl.value = "";
     bodyEl.value = "";
@@ -2640,6 +2868,10 @@ export function createReader(ctx, opts = {}) {
    */
   async function openNativeCompose() {
     if (nativeCompose) return;
+    // 草稿纸和这台编辑器**共用同一块地方**（nativeHost），不能同时开。
+    // 不挡的话后开的那个会把先开的 DOM 顶掉，而先开的那个 handle 还挂着
+    // ——「关掉的时候收不干净」那类漏，症状是关阅读器时才炸。
+    if (scratch) closeScratch();
     if (!st.doc) {
       say("先选一份文献", false);
       return;
@@ -2720,9 +2952,114 @@ export function createReader(ctx, opts = {}) {
   // ⚠️ 建完要说清一件事：**它在晶体库里暂时看不见**。那棵树是从**卡片**长出来的，
   // 一个还没有卡的文件夹不会是节点。不说这句，用户体验到的就是「点了没反应」——
   // 本仓最不受欢迎的一种反馈（见 adapter.js 里 createFolder 那一段）。
-  function sayNewCrystal(text, ok) {
-    newCrystalMsg.textContent = text;
+  /**
+   * 这一栏底下那行提示。`action` 给一颗按钮（与卡片盒那条同一个形状）——
+   * 「确认删除」就靠它：删除是**唯一会动用户笔记**的动作，不能只问一句「确定吗」。
+   */
+  function sayNewCrystal(text, ok, action) {
+    newCrystalMsg.textContent = "";
     newCrystalMsg.classList.toggle("kb-v13-newcrystal-bad", !ok);
+    const span = EL("span", "kb-v13-newcrystal-msgtext");
+    span.textContent = text;
+    newCrystalMsg.appendChild(span);
+    if (action) {
+      const btn = EL("button", "kb-v13-cardbox-act", action.label);
+      btn.type = "button";
+      btn.addEventListener("click", action.onClick);
+      newCrystalMsg.appendChild(btn);
+    }
+  }
+
+  /**
+   * 「删除晶体」：先摊开树让他**挑哪一颗**，再确认（3.0 刀 12）。
+   *
+   * 为什么不复用「将建在」那个当前选中：它的默认是**跟着文献走**，
+   * 而删除的默认绝不该是「删掉文献所在的那个文件夹」。**删除必须是一次明确的指认。**
+   */
+  function deleteCrystalFlow() {
+    hidePicker();
+    // 一栏都没有的库没什么可删的——摆一颗按了没反应的按钮比不摆更糟
+    if (!(ctx.model.crystalKeys || []).length) {
+      sayNewCrystal("这张库里还没有晶体。", false);
+      return;
+    }
+    openFolderPick("delete");
+    sayNewCrystal("挑一颗要删的晶体。", true);
+  }
+
+  /** 这一颗晶体（含子树）里有多少张卡——删除要让人**看见代价**。 */
+  function countCardsUnder(key) {
+    let n = (ctx.model.cardsAt([key]) || []).length;
+    for (const k of ctx.model.keysAt([key]) || []) n += countCardsUnder(k);
+    return n;
+  }
+
+  /**
+   * 确认那一下。
+   *
+   * **这是这一栏里唯一会动用户笔记的动作**，所以两件事不能省：
+   *   · 说清「进回收站」——不写「删除」就完事，那会让人以为不可逆；
+   *   · 把代价摆出来——里面有几张卡、会跟着一起走。
+   */
+  function confirmDeleteCrystal(key) {
+    const k = toStr(key);
+    // ⚠️ **走公开的那棵树拿节点，不要碰 `ctx.model.byKey`** —— 它是模型内部的
+    // 索引，没有导出。第一版就是这么写的，`byKey` 是 undefined，一点进去就
+    // `TypeError: Cannot read properties of undefined`，而界面上的表现就是
+    // **「点了没反应」**（这一次是选择器那条用例把它抓出来的）。
+    const node = findFolderNode(cardTree(), k);
+    hideFolderPick();
+    hidePicker();
+    if (!node) return;
+    const n = countCardsUnder(k);
+    sayNewCrystal(
+      "删掉「" + (node.name || k) + "」？" + (n ? "里面有 " + n + " 张卡，会一起进回收站。" : "它是空的。"),
+      true,
+      { label: "确认删除", onClick: () => doTrashCrystal(k) }
+    );
+  }
+
+  /**
+   * 真删。**走契约的 `trashFile`（回收站），不是永久删除**——理由见 adapter.js 那一段：
+   * 用户在「文件与链接 → 删除的文件」里自己选过丢掉的东西该去哪儿，这里不该替他改主意。
+   *
+   * 删完三件事，顺序不能换：模型 → 视图状态收场 → 重画。
+   */
+  async function doTrashCrystal(key) {
+    const node = findFolderNode(cardTree(), toStr(key));
+    if (!node) return;
+    // ⚠️ 模型那层收的是**宿主路径**，不是 key（同 model.removeFolder 的注释）
+    const folder = node.folder;
+    const label = node.name || key;
+    if (typeof adapter.trashFile !== "function") {
+      sayNewCrystal("这个宿主没有回收站能力，没有删。", false);
+      return;
+    }
+    let res;
+    try {
+      res = await adapter.trashFile(folder);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (!res || !res.ok) {
+      sayNewCrystal(
+        res && res.reason === "missing"
+          ? "这个文件夹已经不在了。"
+          : res && res.reason === "unsupported"
+            ? "这个宿主没有回收站能力，没有删。"
+            : "删不掉：" + ((res && res.message) || "未知错误"),
+        false
+      );
+      return;
+    }
+    // 1) 模型：摘掉那棵子树（卡片、节点、groups 上的残留 —— 见 model.removeFolder）
+    if (ctx.model.removeFolder) ctx.model.removeFolder(folder);
+    // 2) 视图状态：**正站在被删的那颗里**的话退回环上，不然面包屑指着一条不存在的路
+    if (ctx.afterCrystalRemoved) ctx.afterCrystalRemoved();
+    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+    if (ctx.refreshCards) ctx.refreshCards();
+    if (ctx.flushViewState) ctx.flushViewState();
+    sayNewCrystal("已删除「" + label + "」——进了回收站，能捡回来。", true);
   }
 
   function openNewCrystal() {
@@ -2969,11 +3306,16 @@ export function createReader(ctx, opts = {}) {
   folderPick.body = $("kb-reader-folderbody");
   targetBtn.addEventListener("click", () => toggleFolderPick());
   $("kb-reader-nativeopen").addEventListener("click", () => openNativeCompose());
+  // 草稿纸那两颗（宿主没给位置时那颗按钮压根不在，所以绑之前先问一句）
+  if (scratchSpec) $("kb-reader-scratch").addEventListener("click", () => openScratch());
+  $("kb-reader-scratchback").addEventListener("click", () => closeScratch());
+  $("kb-reader-nativereturn").addEventListener("click", () => returnFromNativeCompose());
   $("kb-reader-nativeback").addEventListener("click", () => {
     closeNativeCompose(true); // 留着来源：边看边记是一串同一份文献里的小卡
     say("", true);
   });
   $("kb-reader-newcrystal-open").addEventListener("click", () => openNewCrystal());
+  $("kb-reader-crystaldel").addEventListener("click", () => deleteCrystalFlow());
   $("kb-reader-newcrystal-cancel").addEventListener("click", () => closeNewCrystal());
   $("kb-reader-newcrystal-go").addEventListener("click", () => createCrystal());
   // 输入框里的按键不许漏给阅读器（方向键会去翻屏、Esc 会关掉整块阅读器）。
@@ -3001,6 +3343,7 @@ export function createReader(ctx, opts = {}) {
       // 挑晶体那两档要的是**晶体 key**。两个都在 node 上，别拿错了。
       if (folderPick.purpose === "story") gotoStoryline(node.key);
       else if (folderPick.purpose === "crystal") chooseStoryCrystal(node.key);
+      else if (folderPick.purpose === "delete") confirmDeleteCrystal(node.key);
       else chooseFolder(node.folder);
       return;
     }
@@ -3169,6 +3512,7 @@ export function createReader(ctx, opts = {}) {
     // 边看边记里那台宿主编辑器也得摘掉——它背后挂着宿主一个视图对象，
     // 不摘就是每关一次阅读器漏一个（同 app.js 里 __kbV13Reader.destroy 那条）。
     closeNativeCompose(false);
+    closeScratch();
     // ⚠️ `st.doc = null` **必须排在 `closeSource()` 前面**：releaseSource 看到
     // 网格还占着这份就不肯关，那份 source（连同它的 worker）就漏在那儿了。
     st.doc = null;

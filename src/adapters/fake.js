@@ -49,6 +49,7 @@ export function createFakeAdapter({
   onWriteCard,
   onCreateCard,
   onCreateFolder,
+  onTrashFolder,
   onMountEditor,
   storageKey,
 } = {}) {
@@ -284,6 +285,45 @@ export function createFakeAdapter({
       });
       if (used) return Promise.resolve({ ok: false, reason: "exists" });
       folders.add(path);
+      return Promise.resolve({ ok: true, path });
+    },
+
+    trashFile(folder) {
+      // 探针先跑（与 createFolder 同一套）：让测试**看得见删了哪个路径**。
+      // 「删对了没有」是这条功能唯一要钉的东西——返回值只说成功与否。
+      if (onTrashFolder) {
+        const injected = onTrashFolder(folder);
+        if (injected !== undefined) return Promise.resolve(injected);
+      }
+      const path = String(folder == null ? "" : folder).replace(/\/+$/, "");
+      if (!path) return Promise.resolve({ ok: false, reason: "error", message: "空路径" });
+      // ⚠️ **文件和文件夹都要认。** 真机那边走 `getAbstractFileByPath`，
+      // 两者本来就都拿得到；这里第一版只查了 `folders`，于是传一个**卡的文件路径**
+      // 进来会被判成 `missing`——核心据此以为「文件已经不在了」直接返回，
+      // 阅读器的「返回」就把用户刚写的正文丢在半路上（而且不报错）。
+      // 是 scratch 那条用例抓出来的。
+      const isFile = cards.some((c) => c.path === path);
+      if (isFile) {
+        const i = cards.findIndex((c) => c.path === path);
+        if (i >= 0) cards.splice(i, 1);
+        return Promise.resolve({ ok: true, path });
+      }
+      const hasCards = cards.some((c) => {
+        const f = String(c.folder == null ? "" : c.folder);
+        return f === path || f.indexOf(path + "/") === 0;
+      });
+      const known = folders.has(path) || hasCards;
+      if (!known) return Promise.resolve({ ok: false, reason: "missing", path });
+      // 丢掉这一棵子树上的卡片与子文件夹——原型里「删了就是删了」，
+      // 但**回收站那件事原型验不了**（假适配层没有回收站），
+      // 真实现在 entry-obsidian.js，那一支由契约与真机负责。
+      for (const c of cards.slice()) {
+        const f = String(c.folder == null ? "" : c.folder);
+        if (f === path || f.indexOf(path + "/") === 0) cards.splice(cards.indexOf(c), 1);
+      }
+      for (const f of Array.from(folders)) {
+        if (f === path || f.indexOf(path + "/") === 0) folders.delete(f);
+      }
       return Promise.resolve({ ok: true, path });
     },
 

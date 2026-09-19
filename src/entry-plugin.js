@@ -49,7 +49,18 @@ const RIBBON_ICON = "gem";
  * 插件形态下它必须可配——别人的 vault 不会正好也叫 `3.资产舱/知识卡片`。
  * 默认值仍取它，是为了你自己从 dataviewjs 切过来时**什么都不用填**。
  */
-const DEFAULT_SETTINGS = { cardsFolder: DEFAULT_CARDS_FOLDER };
+/**
+ * 草稿纸落在 vault 的哪个文件夹。
+ *
+ * **vault 根目录下一个叫「草稿纸」的文件夹**——特意不放在卡片目录底下：
+ * 放那儿它就会变成环上的一颗晶体，而草稿纸不是晶体，是便签。
+ *
+ * 可配（设置页有那一格）：一个公开插件往别人 vault 根上钉一个中文文件夹名，
+ * 得让人能改。
+ */
+const DEFAULT_SCRATCH_FOLDER = "草稿纸";
+
+const DEFAULT_SETTINGS = { cardsFolder: DEFAULT_CARDS_FOLDER, scratchFolder: DEFAULT_SCRATCH_FOLDER };
 
 class CrystalVaultView extends ItemView {
   constructor(leaf, plugin) {
@@ -123,6 +134,9 @@ class CrystalVaultView extends ItemView {
         }),
         container: host,
         pdfRenderer: this.pdfRenderer,
+        // 阅读器顶栏那颗「草稿纸」落在哪儿。不传就没有那颗按钮
+        // （宿主没这个能力时**整颗不出现**，不是摆一颗点了没反应的）。
+        scratch: { folder: this.plugin.settings.scratchFolder, name: "_" },
         // 样式走仓库根目录的 styles.css（Obsidian 自己加载），运行时一份都不注。
         injectStyles: false,
       });
@@ -204,6 +218,22 @@ class CrystalVaultSettingTab extends PluginSettingTab {
     };
     this.paintProbe();
 
+    new Setting(containerEl)
+      .setName("草稿纸文件夹")
+      .setDesc(
+        "阅读器顶栏那颗「草稿纸」把便签建在哪儿。**它不是卡片**，不参与晶体库的关系图——" +
+          "所以默认放在 vault 根目录，不放进卡片目录（放进去它就会变成一颗晶体）。"
+      )
+      .addText((t) => {
+        t.setPlaceholder(DEFAULT_SCRATCH_FOLDER).setValue(this.plugin.settings.scratchFolder);
+        const commit = () =>
+          Promise.resolve(this.plugin.setScratchFolder(t.inputEl.value));
+        t.inputEl.addEventListener("blur", commit);
+        t.inputEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") commit();
+        });
+      });
+
     containerEl.createEl("p", {
       cls: "setting-item-description",
       text: "改完会自动重开一次视图（换目录等于换了一整份数据）。",
@@ -246,6 +276,7 @@ export default class CrystalVaultPlugin extends Plugin {
     const raw = (await this.loadData()) || {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
     if (!this.settings.cardsFolder) this.settings.cardsFolder = DEFAULT_CARDS_FOLDER;
+    if (!this.settings.scratchFolder) this.settings.scratchFolder = DEFAULT_SCRATCH_FOLDER;
     // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
     // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），
     // 而且状态写得极频繁，没理由让每次滚动都去动设置页看的那几个值。
@@ -283,6 +314,22 @@ export default class CrystalVaultPlugin extends Plugin {
    * 不重挂的话，用户改完目录、切回那个标签页，看到的还是旧目录的数据——
    * 而设置页上明明写着改了。那比不支持修改更糟。
    */
+  /** 改草稿纸位置。同样要重挂视图——阅读器是拿着这个路径建起来的。 */
+  async setScratchFolder(v) {
+    const next = String(v || "").trim().replace(/\/+$/, "");
+    if (!next || next === this.settings.scratchFolder) return;
+    this.settings.scratchFolder = next;
+    await this.flush();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view && typeof view.dispose === "function" && typeof view.renderInto === "function") {
+        view.dispose();
+        await view.renderInto(view.contentEl);
+      }
+    }
+    new Notice("晶体库：草稿纸改到 " + this.settings.scratchFolder);
+  }
+
   async setCardsFolder(v) {
     const next = String(v || "").trim().replace(/\/+$/, "");
     if (!next || next === this.settings.cardsFolder) return;

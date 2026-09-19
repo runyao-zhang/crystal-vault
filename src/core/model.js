@@ -752,6 +752,109 @@ export function createModel(rawCards, adapter, rawFolders = []) {
     return true;
   }
 
+  /**
+   * 摘掉一颗晶体（连同它的子树）——3.0 刀 12「删除晶体」。
+   *
+   * 形状照着 `addFolder` 的**反面**写。两个方向之所以要对称着写，是因为这个模型
+   * 有五处索引同时记着同一件事，漏掉任何一处都是**不报错、只是屏幕上不对**：
+   *
+   *   · `nodes` / `byKey` / `allNodes` —— 树与身份，三处都要摘
+   *   · 父节点的 `children` —— 不摘的话它会留在环上（一个 Map 里没有的孤儿）
+   *   · `allCards` + `byPath` —— 卡片本身
+   *   · **`groups` 里那些 key** —— 见下面那条 ⚠️，这是最容易漏的一处
+   *   · `byTitle` / `linkGraph` / `backLinkGraph` / `orphanPaths` / `crystalEdges`
+   *     —— 这五个由 `rebuildRelations()` **整体重建**，不用手摘
+   *
+   * ⚠️ **`groups` 必须显式 delete。** `rebuildGroups()` 只做
+   * `for (const n of allNodes) groups[n.key] = …` —— 它**只写不删**。
+   * 摘完节点不删这个 key 的话，`groups` 上会留一条指向已经不存在的晶体的旧数组；
+   * 于是 `renderCrystals` 拿 `crystalKeys` 渲染时看着正常，而任何按 key 取
+   * 卡片的地方（卫星、孤岛、跨晶体关系）都可能捞到一堆已经删掉的卡。
+   *
+   * ⚠️ **收的是「宿主路径」，不是晶体 key**（与 `addFolder` 一致——`nodes` 那张表
+   * 就是 `folder -> node`）。这两个在这份代码里到处并存、长得又像：
+   * `Python/数据分析` 是 **key**，`3.资产舱/知识卡片/Python/数据分析` 才是**路径**。
+   * 传错的表现是**静默不删**（`nodes.get()` 拿不到，直接返回 false），
+   * 而调用方多半没接返回值——那就是「点了删除，什么都没发生」。
+   * 核心那边要 key→路径时用 `model.byKey.get(key).folder`。
+   *
+   * `root` 摘不掉（它是 `nodes` 里那条基准）——传空、传根、传不存在的都返回 false。
+   *
+   * @returns {boolean} 真的摘掉了吗
+   */
+  function removeFolder(folder) {
+    const f = toStr(folder).replace(/\/+$/, "");
+    if (!f) return false;
+    const node = nodes.get(f);
+    if (!node || node === root) return false;
+
+    // 这一棵子树上的全部卡片（含它自己那一层）
+    const doomed = [];
+    (function walk(n) {
+      doomed.push(n);
+      for (const ch of n.children) walk(ch);
+    })(node);
+    const goneNodes = new Set(doomed);
+    const gonePaths = new Set();
+    for (const n of doomed) for (const c of n.cards) gonePaths.add(c.path);
+
+    // 卡片：`allCards` 与 `byPath` 都要摘。`byTitle` 交给 rebuildRelations。
+    for (let i = allCards.length - 1; i >= 0; i--) {
+      if (gonePaths.has(allCards[i].path)) allCards.splice(i, 1);
+    }
+    for (const p of gonePaths) byPath.delete(p);
+
+    // 节点：三处索引 + 父节点的 children + `groups` 里那几个 key（见上面那条 ⚠️）
+    for (const n of doomed) {
+      nodes.delete(n.folder);
+      byKey.delete(n.key);
+      delete groups[n.key];
+    }
+    for (let i = allNodes.length - 1; i >= 0; i--) {
+      if (goneNodes.has(allNodes[i])) allNodes.splice(i, 1);
+    }
+    if (node.parent) node.parent.children = node.parent.children.filter((c) => c !== node);
+
+    // 重算三样。**原地改、不换对象**——同 `rebuildGroups` 那条规矩：
+    // 这些是按引用挂在返回值上的，换一个新的会让外部持有者拿着一个死对象。
+    assignHue(root); // 环上少一颗 ⇒ 顶层色相按同一个公式重排
+    rebuildGroups();
+    rebuildRelations();
+    return true;
+  }
+
+  /**
+   * 摘掉**一张卡**（3.0 刀 12 第二半：阅读器的「返回」要撤掉刚建出来的那张）。
+   *
+   * 与 `removeFolder` 是两件事，别混：那个摘一棵子树（连同里面的卡），
+   * 这个只摘一张卡、**晶体本身留着**。
+   *
+   * ⚠️ **摘完可能留下一颗空晶体**——节点不跟着消失。这是**有意的**：
+   * 那个文件夹在盘上确实存在（卡建出来的），盘上有、屏幕上没有才是骗人。
+   * 不想要它，用「删除晶体」删掉（那个连带把文件夹丢回收站）。
+   *
+   * @returns {boolean} 真的摘掉了吗
+   */
+  function removeCard(path) {
+    const p = toStr(path);
+    if (!p) return false;
+    const card = byPath.get(p);
+    if (!card) return false;
+    const i = allCards.indexOf(card);
+    if (i >= 0) allCards.splice(i, 1);
+    byPath.delete(p);
+    // 卡片自己也挂在节点的 `cards` 上——不摘的话 `cardsUnder` 还会数到它
+    if (card.node && card.node.cards) {
+      card.node.cards = card.node.cards.filter((c) => c !== card);
+    }
+    // `byTitle` / 关系图 / 孤岛 / 跨晶体边由 rebuildRelations 整体重建；
+    // groups 与 crystalKeys 由 rebuildGroups；色相按数量重排。
+    rebuildGroups();
+    rebuildRelations();
+    assignHue(root);
+    return true;
+  }
+
   /** 与某颗晶体相连的其它晶体（按出现顺序去重），带上是哪张卡连的 */
   function neighborsOf(key) {
     const edges = crystalEdges.get(key) || [];
@@ -933,6 +1036,8 @@ export function createModel(rawCards, adapter, rawFolders = []) {
     orphanGroups,
     folderTree,
     addFolder,
+    removeFolder,
+    removeCard,
     hasNode,
     resolveChain,
     // 以卡片根目录为起点、逐层走一遍（恢复视图状态时用）

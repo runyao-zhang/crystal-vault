@@ -21,6 +21,7 @@ let handle = null;
  * @param {Function} [opts.onMountEditor] (el, {path, text}) => (EditorHandle|null|undefined)，
  *   原生编辑器探针（3.0 刀 9 第三版）。浏览器里没有真的宿主编辑器，注入假的才验得到那条分支。
  * @param {Function} [opts.onCreateFolder] (path) => (result|undefined)，建文件夹探针。
+ * @param {Function} [opts.onTrashFolder] (path) => (result|undefined)，**删**文件夹探针（刀 12）。
  *   测试靠它验「新晶体建在哪个路径」——返回值只能验成功与否，建在哪儿才是要点。
  * @param {Function} [opts.onWriteCard] (path, content, opts) => (WriteResult|undefined)，
  *   写盘探针兼故障注入：返回非 undefined 时该结果原样采用、不写盘
@@ -41,6 +42,8 @@ export async function boot({
   onWriteCard,
   onMountEditor,
   onCreateFolder,
+  onTrashFolder,
+  scratch,
   pdfRenderer = null,
   storyLayout,
 } = {}) {
@@ -67,6 +70,8 @@ export async function boot({
     // 「宿主给了编辑器、核心真的用它」那条分支。
     onMountEditor,
     onCreateFolder,
+    onTrashFolder,
+    scratch,
     render: (md, el, srcPath) => {
       renderer = renderer || customRender || createWebRenderer({ assetUrl: adapter.assetUrl });
       return renderer(md, el, srcPath);
@@ -76,7 +81,7 @@ export async function boot({
   // 3.0 刀 5 / 刀 6：storyLayout 与 pdfRenderer 都从参数透传给 mount。
   // **两个都不走适配层契约**——契约的语义是「宿主能力」，而一个纯核心的排布算法、
   // 一个纯核心的渲染实现都不是；测试注入 stub 就能证明可替换。
-  handle = await mount({ adapter, container: mountEl, storyLayout, pdfRenderer });
+  handle = await mount({ adapter, container: mountEl, storyLayout, pdfRenderer, scratch });
   window.__ARI__ = handle;
   // 适配层也交出去：假适配层上的 emitModify（模拟「卡片在别处被改了」）没有别的
   // 入口能调到，而 #18 那条路只能从宿主侧发起。真宿主没有这个需要——它的事件
