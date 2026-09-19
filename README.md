@@ -8,6 +8,14 @@ Your cards stay plain Markdown in plain folders. Nothing is locked in a database
 
 ---
 
+## Why not just the graph view?
+
+The graph view answers **"what is this note connected to?"** It starts from notes, the links are the subject — and **folders do not appear in it at all**. If you organise your knowledge by subject and chapter, the graph mixes all of it into one cloud. That is why so many people find it beautiful and useless: they cannot find the line they organised their knowledge along.
+
+Crystal Vault answers a different question: **"what is in this collection, and how far along is it?"** It starts from folders. The structure *is* the subject.
+
+It is not a better graph. It is a different starting point.
+
 ## What it does
 
 **A folder is a crystal.** Every subfolder under your card folder becomes one crystal on the ring. Nested folders become nested crystals — drill in and out, and the breadcrumb always tells you where you are.
@@ -17,6 +25,10 @@ Your cards stay plain Markdown in plain folders. Nothing is locked in a database
 **Orphans are a signal, not an error.** A card nobody links to and that links to nobody is flagged. It is not a mistake; it is a card that has not been connected to anything yet.
 
 **Read and take notes at the same time.** The built-in reader opens PDFs, images and Markdown side by side, and lets you write a card without leaving the page. Choose a page of a PDF, and a card can keep a link back to exactly that page.
+
+**Keep the structure beside you, not behind a mode switch.** The reader's **Structure window** puts the vault's structure in a *window on the same desk* as the document you are reading — not a screen you switch to. Switching away is *leaving*: you come back and have to find your line again. A window beside you is just a glance.
+
+Drag a line between two cards in that window and it writes a real `[[link]]` into the note — with a field for *why* you linked them, and one undo.
 
 **Recall before you peek.** In recall mode every card's content is hidden until you click. Say it to yourself first, then check. Switch to review mode when you just want to read through.
 
