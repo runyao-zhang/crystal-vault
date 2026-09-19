@@ -78,12 +78,50 @@ function errText(e) {
  *   @param {Function}    [renderMd]  自己实现渲染时用（插件版传 MarkdownRenderer 的封装）。
  *                                   给了它就不看 `dv`。
  */
-export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLDER, renderMd = null }) {
+export function createObsidianAdapter({
+  dv = null,
+  app,
+  cardsFolder = CARDS_FOLDER,
+  renderMd = null,
+  store = null,
+}) {
   // 键带卡片目录路径：同一个人的多个 vault 不能共用一个全局键。
   // 代价是各端布局独立（桌面排好的画布不会同步到手机），这条在 #9 里已记录接受。
   const viewKey = viewStateKey(cardsFolder);
   // #22 偏好另存一个键：清「上次看到哪儿」不该把用户调好的颜色也清掉
   const prefKey = prefsKey(cardsFolder);
+
+  /**
+   * 「上次看到哪儿」和偏好往哪儿写。
+   *
+   * 契约是**两个方法、进出都是 JSON 字符串**（不是解析好的对象）：
+   *   `store.get(key) -> string | null`、`store.set(key, str)`
+   *
+   * 定成字符串是有意的——这样默认那条路（localStorage）和从前**逐字节等价**，
+   * 而它是真正被日常使用和测试覆盖的那一条；换后端只是换一个实现，
+   * 解析、容错、脏数据兜底那些逻辑一份都不用重写。
+   *
+   * 插件形态传自己的 store（落在 `plugin.saveData` 里，跟着 vault 走），
+   * dataviewjs 形态不传，用下面这个默认的。
+   */
+  const backing =
+    store ||
+    {
+      get(key) {
+        try {
+          return window.localStorage.getItem(key);
+        } catch (e) {
+          return null;
+        }
+      },
+      set(key, str) {
+        try {
+          window.localStorage.setItem(key, str);
+        } catch (e) {
+          // 存储写满或被禁用：状态丢就丢了，不该影响界面能用
+        }
+      },
+    };
 
   // 读全文的唯一入口。**loadCards 与 writeCard 的基线比对必须走同一条路**——
   // 两条路要是在行尾规范化（CRLF/LF）或解码上有任何差别，核心每次保存都会拿到
@@ -126,6 +164,44 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
     };
   }
 
+  /**
+   * 卡片目录那一棵子树里的**全部文件与文件夹**。
+   *
+   * ⚠️ 这里**故意不用 `vault.getFiles()` / `getMarkdownFiles()` / `getAllLoadedFiles()`**
+   * （3.0 刀 11）。那三个返回的都是**整个 vault** 的文件表——这个插件只管知识卡片，
+   * 却把用户所有笔记的路径都过了一遍。内容一个字节都没读，但「列了一遍」这件事
+   * 本身，在社区目录的自动审查里是一条独立的建议项（Vault Enumeration），
+   * 而**它还说得对**。
+   *
+   * 换成从卡片目录顺着 `children` 往下走。好处不只是过审：
+   * **范围就是用户在设置里指的那个目录**，换成哪个就只看哪个，
+   * 别的文件夹连名字都不进内存。dataviewjs 形态下这个目录是写死的常量，
+   * 那时这条改进照样成立（只是没有设置可换）。
+   *
+   * 目录不存在（还没建、或者路径填错）时返回空——那时库里本来就一张卡都没有，
+   * **空是对的答案**，不是错误。
+   */
+  function walkCardsFolder() {
+    const rootPath = toStr(cardsFolder).replace(/\/+$/, "");
+    const root = rootPath && app.vault.getFolderByPath ? app.vault.getFolderByPath(rootPath) : null;
+    const files = [];
+    const folders = [];
+    if (!root) return { rootPath, root: null, files, folders };
+    const walk = (folder) => {
+      for (const child of folder.children || []) {
+        // 宿主用 `children` 区分文件夹与文件（同下面 listFolders 的老判据）
+        if (child.children !== undefined) {
+          folders.push(child);
+          walk(child);
+        } else {
+          files.push(child);
+        }
+      }
+    };
+    walk(root);
+    return { rootPath, root, files, folders };
+  }
+
   return {
     // ⚠️ 这里**故意不用 `dv.pages()`**，别改回去。
     //
@@ -138,9 +214,7 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
     // 本块在 Dataview 眼里从此**没有任何依赖**，写盘不再触发重跑。
     // 「外部改动要能自动出现」由契约里的 watchCards 负责，那条路是增量的。
     async loadCards() {
-      const files = app.vault
-        .getMarkdownFiles()
-        .filter((f) => f.path.startsWith(cardsFolder + "/"));
+      const files = walkCardsFolder().files.filter((f) => f.path.toLowerCase().endsWith(".md"));
       // 并行读：原来是逐个 await，30 张卡就是 30 个来回串起来。
       // 这一趟现在只在挂载时跑一次，但仍然是最长的等待，没有理由串着做。
       return Promise.all(files.map((f) => readCard(f)));
@@ -286,18 +360,14 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
      */
     async listFolders() {
       try {
-        const root = cardsFolder;
+        const { rootPath: root, files, folders } = walkCardsFolder();
         const under = (p) => p === root || p.indexOf(root + "/") === 0;
         const hasFile = new Set(); // 这个文件夹（含子树）里有文件吗
         const hasMd = new Set(); // ……有卡片吗
-        const dirs = [];
-        for (const f of app.vault.getAllLoadedFiles()) {
+        const dirs = folders.map((d) => toStr(d.path)).filter((p) => p && p !== root);
+        for (const f of files) {
           const p = toStr(f.path);
           if (!p || !under(p)) continue;
-          if (f.children !== undefined) {
-            if (p !== root) dirs.push(p); // 文件夹（宿主用 children 区分）
-            continue;
-          }
           // 文件：从它所在那一层往上，每一级祖先都记一笔
           const isMd = p.toLowerCase().endsWith(".md");
           let cur = toStr(f.parent && f.parent.path);
@@ -586,8 +656,7 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
     async listDocs() {
       try {
         const out = [];
-        for (const f of app.vault.getFiles()) {
-          if (!f.path.startsWith(cardsFolder + "/")) continue;
+        for (const f of walkCardsFolder().files) {
           const kind = DOC_KINDS[String(f.extension || "").toLowerCase()];
           if (!kind) continue;
           out.push({
@@ -655,7 +724,7 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
 
     loadViewState() {
       try {
-        const raw = window.localStorage.getItem(viewKey);
+        const raw = backing.get(viewKey);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === "object" ? parsed : null;
@@ -665,18 +734,14 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
     },
 
     saveViewState(state) {
-      try {
-        window.localStorage.setItem(viewKey, JSON.stringify(state));
-      } catch (e) {
-        // 存储写满或被禁用：视图状态丢就丢了，不该影响界面能用
-      }
+      backing.set(viewKey, JSON.stringify(state));
     },
 
     // #22 偏好。读写都不校验字段——形状由核心定、核心自己兜底，
     // 适配层加一层校验只会让「加一个新偏好」变成要动两个地方。
     loadPrefs() {
       try {
-        const raw = window.localStorage.getItem(prefKey);
+        const raw = backing.get(prefKey);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === "object" ? parsed : null;
@@ -686,11 +751,7 @@ export function createObsidianAdapter({ dv = null, app, cardsFolder = CARDS_FOLD
     },
 
     savePrefs(prefs) {
-      try {
-        window.localStorage.setItem(prefKey, JSON.stringify(prefs));
-      } catch (e) {
-        // 同 saveViewState：存不下就算了，不该影响界面能用
-      }
+      backing.set(prefKey, JSON.stringify(prefs));
     },
   };
 }

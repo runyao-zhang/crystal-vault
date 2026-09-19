@@ -16,6 +16,12 @@ on:
 
 permissions:
   contents: write
+  # 下面那一步「构建来源证明」要用的两个权限。
+  # `id-token` 给它签名的身份，`attestations` 让它把记录写进仓库。
+  # 少任何一个，那一步会直接失败——而失败信息是「permissions」，
+  # 看着像仓库设置的问题，其实只是这里少一行。
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -47,6 +53,24 @@ jobs:
           for f in main.js manifest.json styles.css; do
             test -f "$f" || { echo "缺 $f"; exit 1; }
           done
+
+      # ---- 构建来源证明（artifact attestation）----
+      #
+      # 给三份产物签一张「这个文件确实是从这个仓库的这次提交、由这条 workflow
+      # 构建出来的」的证明。用户可以拿 GitHub CLI 验：
+      #
+      #     gh attestation verify main.js --repo runyao-zhang/crystal-vault
+      #
+      # 为什么值得做：插件是**下载下来直接在你库里跑**的东西，而 release 附件
+      # 在原理上是可以被换掉的。有了证明，「我下到的这份和源码对得上」
+      # 就不再需要用户信任谁。社区目录的自动审查也会看这一项。
+      - name: 给产物出构建来源证明
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: 发布
         env:

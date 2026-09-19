@@ -102,6 +102,9 @@ class CrystalVaultView extends ItemView {
           // Component 传这个视图自己；不要自己 unload 它，Obsidian 随视图一起收。
           renderMd: (md, el, srcPath) =>
             MarkdownRenderer.render(this.app, md, el, srcPath || "", this),
+          // 「上次看到哪儿」和偏好改走 plugin.saveData（跟着 vault 走），
+          // 不再用 localStorage（跟着这台机器走）。见下面 makeStore。
+          store: makeStore(this.plugin),
         }),
         container: host,
         pdfRenderer: this.pdfRenderer,
@@ -139,17 +142,20 @@ class CrystalVaultSettingTab extends PluginSettingTab {
         "知识卡片放在哪个文件夹里。**每个子文件夹是一颗晶体**，文件夹名就是晶体名。" +
           "改了之后原来那份布局还在（存储键带着目录路径），换回来就回来了。"
       )
-      .addText((t) =>
-        t
-          .setPlaceholder(CARDS_FOLDER)
-          .setValue(this.plugin.settings.cardsFolder)
-          .onChange(async (v) => {
-            const next = String(v || "").trim().replace(/\/+$/, "");
-            if (!next || next === this.plugin.settings.cardsFolder) return;
-            this.plugin.settings.cardsFolder = next;
-            await this.plugin.saveSettings();
-          })
-      );
+      .addText((t) => {
+        t.setPlaceholder(CARDS_FOLDER).setValue(this.plugin.settings.cardsFolder);
+        // ⚠️ **提交时机是「失焦 / 回车」，不是 onChange。**
+        //
+        // 提交要重挂视图（换目录等于换了一整份数据），而 `onChange` 是**每敲一个
+        // 字符**触发一次——用 onChange 的话，用户打「Python」这几个字母，
+        // 视图会被拆了重挂六遍：卡顿、闪烁，中途还会因为路径不存在而空一下。
+        // （第一版就是这么写的，这是修。）
+        const commit = () => this.plugin.setCardsFolder(t.inputEl.value);
+        t.inputEl.addEventListener("blur", commit);
+        t.inputEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") commit();
+        });
+      });
 
     containerEl.createEl("p", {
       cls: "setting-item-description",
@@ -174,10 +180,8 @@ export default class CrystalVaultPlugin extends Plugin {
     this.addSettingTab(new CrystalVaultSettingTab(this.app, this));
   }
 
-  async onunload() {
-    // 视图由 Obsidian 拆（它会调每个 ItemView 的 onClose），这里不用手动遍历。
-    // **不要** detachLeavesOfType：那会让用户重开插件后视图全没了。
-  }
+  // ⚠️ 这里**不要** detachLeavesOfType：那会让用户重开插件后视图全没了。
+  // 视图由 Obsidian 自己拆（它会调每个 ItemView 的 onClose）。
 
   async activateView() {
     const { workspace } = this.app;
@@ -192,18 +196,51 @@ export default class CrystalVaultPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const raw = (await this.loadData()) || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
     if (!this.settings.cardsFolder) this.settings.cardsFolder = CARDS_FOLDER;
+    // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
+    // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），
+    // 而且状态写得极频繁，没理由让每次滚动都去动设置页看的那几个值。
+    this.store = raw.__state && typeof raw.__state === "object" ? raw.__state : {};
+    this.saving = 0;
   }
 
   /**
-   * 存设置，并**把开着的视图重挂一遍**。
+   * 落盘。**防抖**——视图状态是随滚动和拖动写的，一次交互能来几十下，
+   * 每一下都写一次 data.json 是没必要的 IO。
+   *
+   * 与核心那侧 250ms 的视图状态防抖同一个量级，取 400 是因为到这里已经是
+   * 「一件事办完了没有」的量级了。
+   */
+  persist() {
+    if (this.saving) clearTimeout(this.saving);
+    this.saving = setTimeout(() => {
+      this.saving = 0;
+      this.saveData({ ...this.settings, __state: this.store });
+    }, 400);
+  }
+
+  /** 立刻落盘（关插件、改设置这类「不能等」的场合） */
+  async flush() {
+    if (this.saving) {
+      clearTimeout(this.saving);
+      this.saving = 0;
+    }
+    await this.saveData({ ...this.settings, __state: this.store });
+  }
+
+  /**
+   * 改卡片目录：存下来，并**把开着的视图重挂一遍**。
    *
    * 不重挂的话，用户改完目录、切回那个标签页，看到的还是旧目录的数据——
    * 而设置页上明明写着改了。那比不支持修改更糟。
    */
-  async saveSettings() {
-    await this.saveData(this.settings);
+  async setCardsFolder(v) {
+    const next = String(v || "").trim().replace(/\/+$/, "");
+    if (!next || next === this.settings.cardsFolder) return;
+    this.settings.cardsFolder = next;
+    await this.flush();
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       const view = leaf.view;
       if (view && typeof view.dispose === "function" && typeof view.renderInto === "function") {
@@ -213,4 +250,41 @@ export default class CrystalVaultPlugin extends Plugin {
     }
     new Notice("晶体库：卡片目录已改成 " + this.settings.cardsFolder);
   }
+
+  async onunload() {
+    // 关插件（或者用户禁用）时把还在防抖窗口里的那一笔写下去。
+    // 不写的话，最后一次滚动/拖动就丢了——而用户多半就是摆完位置就关了。
+    await this.flush();
+  }
+}
+
+/**
+ * 视图状态/偏好的存储后端，落在 `plugin.saveData` 里。
+ *
+ * 契约是「进出都是 JSON 字符串」（见 entry-obsidian.js 里 backing 那段）。
+ *
+ * ⚠️ `get` 有一层 **localStorage 回退**，是给第一版用户的一次性迁移：
+ * 插件 1.0.0 把那坨状态存在 localStorage 里，直接切到 saveData 会让用户
+ * **已经摆好的画布、推到的镜头、调过的颜色凭空消失**——而屏幕上没有任何东西
+ * 说明为什么。读的时候顺手看一眼旧地方，读到就自然带过来，下次写盘就落新家了。
+ *
+ * 只读回退、不回写 localStorage：迁移是一次性的，两边都写会让「哪个是真的」变得
+ * 说不清（用户清一次浏览器数据就退回旧值）。
+ */
+function makeStore(plugin) {
+  return {
+    get(key) {
+      const v = plugin.store[key];
+      if (typeof v === "string") return v;
+      try {
+        return window.localStorage.getItem(key);
+      } catch (e) {
+        return null;
+      }
+    },
+    set(key, str) {
+      plugin.store[key] = str;
+      plugin.persist();
+    },
+  };
 }
