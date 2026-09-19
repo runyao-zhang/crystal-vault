@@ -2760,6 +2760,9 @@ export function createReader(ctx, opts = {}) {
    * ⚠️ 顺序：先**读正文**，再删文件，最后才动界面。反过来的话编辑器一拆就读不到了。
    * ⚠️ 删卡走 `model.removeCard`（摘一张卡），**不是** `removeFolder`（那是摘一棵子树）。
    */
+  /** 有一件破坏性的事在等用户点头（目前只有「删除晶体」）。Esc 认它。 */
+  let pendingDelete = null;
+
   async function returnFromNativeCompose() {
     const nc = nativeCompose;
     if (!nc) return;
@@ -2956,16 +2959,20 @@ export function createReader(ctx, opts = {}) {
    * 这一栏底下那行提示。`action` 给一颗按钮（与卡片盒那条同一个形状）——
    * 「确认删除」就靠它：删除是**唯一会动用户笔记**的动作，不能只问一句「确定吗」。
    */
-  function sayNewCrystal(text, ok, action) {
+  function sayNewCrystal(text, ok, actions) {
     newCrystalMsg.textContent = "";
     newCrystalMsg.classList.toggle("kb-v13-newcrystal-bad", !ok);
     const span = EL("span", "kb-v13-newcrystal-msgtext");
     span.textContent = text;
     newCrystalMsg.appendChild(span);
-    if (action) {
-      const btn = EL("button", "kb-v13-cardbox-act", action.label);
+    // 收一颗或一排（`{label, onClick, danger}`）。**删除那条要两颗**：
+    // 只有「确认」没有「取消」的话，用户唯一的退路是按 Esc——而 Esc 在这个界面里
+    // 是「退出阅读器」（用户 09-19 报的）。一颗不可逆的按钮配不上这样的出口。
+    for (const act of [].concat(actions || [])) {
+      if (!act) continue;
+      const btn = EL("button", "kb-v13-cardbox-act" + (act.danger ? " kb-v13-cardbox-danger" : ""), act.label);
       btn.type = "button";
-      btn.addEventListener("click", action.onClick);
+      btn.addEventListener("click", act.onClick);
       newCrystalMsg.appendChild(btn);
     }
   }
@@ -2978,6 +2985,7 @@ export function createReader(ctx, opts = {}) {
    */
   function deleteCrystalFlow() {
     hidePicker();
+    pendingDelete = null; // 上一次那个待确认作废（再点一次 = 重新挑）
     // 一栏都没有的库没什么可删的——摆一颗按了没反应的按钮比不摆更糟
     if (!(ctx.model.crystalKeys || []).length) {
       sayNewCrystal("这张库里还没有晶体。", false);
@@ -3012,11 +3020,24 @@ export function createReader(ctx, opts = {}) {
     hidePicker();
     if (!node) return;
     const n = countCardsUnder(k);
+    // 「取消」放**左边**、破坏性的那颗放右边——手顺着读下来先撞到的是安全那个。
     sayNewCrystal(
       "删掉「" + (node.name || k) + "」？" + (n ? "里面有 " + n + " 张卡，会一起进回收站。" : "它是空的。"),
       true,
-      { label: "确认删除", onClick: () => doTrashCrystal(k) }
+      [
+        { label: "取消", onClick: () => cancelDeleteCrystal() },
+        { label: "确认删除", danger: true, onClick: () => doTrashCrystal(k) },
+      ]
     );
+    // 挂上「有一件事在等你点头」。**Esc 要认它**——见 onKeydown 里那一支：
+    // 不认的话，用户唯一的退路是按 Esc，而那一下会退出整块阅读器。
+    pendingDelete = k;
+  }
+
+  /** 取消待确认的删除。清掉那行提示，什么也不动。 */
+  function cancelDeleteCrystal() {
+    pendingDelete = null;
+    sayNewCrystal("", true);
   }
 
   /**
@@ -3026,6 +3047,7 @@ export function createReader(ctx, opts = {}) {
    * 删完三件事，顺序不能换：模型 → 视图状态收场 → 重画。
    */
   async function doTrashCrystal(key) {
+    pendingDelete = null; // 点下去就不再「待确认」了，第二下不该再触发一次
     const node = findFolderNode(cardTree(), toStr(key));
     if (!node) return;
     // ⚠️ 模型那层收的是**宿主路径**，不是 key（同 model.removeFolder 的注释）
@@ -3234,6 +3256,16 @@ export function createReader(ctx, opts = {}) {
     if (!st.open || st.hidden) return;
     if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Escape") {
+      // ⚠️ **有一件事在等你点头时，Esc 是「取消那件事」，不是「退出」**（用户 09-19 报的）。
+      // 排在打字那一条**前面**：待确认的那些事（删除晶体）是此刻屏幕上最「当前」
+      // 的东西，它该先拿到这一下。不认它的话，用户唯一的退路是关掉整块阅读器——
+      // 一颗不可逆的按钮配不上这样的出口。
+      if (pendingDelete) {
+        cancelDeleteCrystal();
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
       // **正在输入框里时 Esc 只做一件事：从那个框里出来。**
       // 交给 app.js 的总调度的话，用户写着笔记按一下 Esc（想取消这次输入），
       // 整块阅读器会当场关掉——一屏没保存的字就没了。而那个调度**读不到焦点在

@@ -1757,6 +1757,12 @@ const READER = [
   ".kb-v13-reader-scratchbar{display:none;gap:6px;align-items:center;margin-top:6px;}",
   ".kb-v13-reader-scratch-on .kb-v13-reader-scratchbar{display:flex;}",
   ".kb-v13-reader-scratchlab{font-size:11px;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.7));}",
+  // 破坏性那颗（「确认删除」）：暖色描边，和旁边那颗「取消」分得开。
+  // 这一栏里唯一会动用户笔记的按钮，长一样不合适。
+  ".kb-v13-cardbox-danger{",
+  "  border-color:rgba(255,150,140,.6)!important;color:rgba(255,185,175,.98)!important;",
+  "}",
+  ".kb-v13-cardbox-danger:hover{background:rgba(120,30,30,.35)!important;}",
   ".kb-v13-reader-scratchback{",
   "  cursor:pointer;font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;",
   "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.28));",
