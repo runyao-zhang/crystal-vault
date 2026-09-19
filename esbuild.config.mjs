@@ -34,6 +34,12 @@ const ctx = await esbuild.context({
   logLevel: "info",
   sourcemap: process.argv.includes("--watch") ? "inline" : false,
   treeShaking: true,
+  // ⚠️ **发布要压缩。** 官方插件守则里明写着「Do minimize `main.js` for releasing」。
+  //
+  // 而且源仓库那份（`scripts/build.mjs` 的插件目标）**本来就压**——两份构建
+  // 各写各的，迟早会像这样分叉，而分叉的症状是「本地试的和用户下到的不是一回事」。
+  // 第一版就是漏了这一行：2.05MB 变 2.72MB，而且源码原样躺在用户的插件目录里。
+  minify: true,
   outfile: "main.js",
   external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", "node:*"],
   // pdf.js 的 worker 要内联进来（`virtual:pdf-worker-src`），否则打包直接失败。

@@ -21,7 +21,22 @@ import { createPdfRenderer } from "./core/pdfdoc.js";
 // 因为代码块住在笔记里，笔记被编辑器打开不了块就跑不了（详见 entry-pdf-runtime.js）。
 // 插件里代码住在 main.js，没有那条线——1.8MB 就是 1.8MB，Obsidian 不会拿它去打编辑器。
 import { pdfjs, workerSrc } from "./entry-pdf-runtime.js";
-import { CARDS_FOLDER } from "./config.js";
+/**
+ * 插件形态的卡片目录默认值。
+ *
+ * ⚠️ **故意不是 `config.js` 里那个 `CARDS_FOLDER`。**
+ *
+ * 那一个是**我自己 vault 的目录结构**（`3.资产舱/知识卡片`）。dataviewjs 形态下
+ * 它是对的——代码块就住在那张笔记里，写死是契约的一部分（#2：加晶体 = 建子文件夹）。
+ *
+ * 但插件是**给别人用的**：默认值写 `3.资产舱/知识卡片`，每个新用户装完第一步都是
+ * 「这路径哪来的」——而那个路径对世界上任何别人都不存在。默认值该是**中性的、
+ * 别人一看就知道该改成什么**的东西。
+ *
+ * 用 `cards` 而不是空串：空串的话新用户打开是一个**空环**，而且看不出该怎么办。
+ * `cards` 至少是一句像样的提示——建一个叫这个名字的文件夹，就能开始了。
+ */
+const DEFAULT_CARDS_FOLDER = "cards";
 
 /** 视图类型。**改它等于让用户已有的标签页失效**，发布后别动。 */
 const VIEW_TYPE = "crystal-vault-view";
@@ -34,7 +49,7 @@ const RIBBON_ICON = "gem";
  * 插件形态下它必须可配——别人的 vault 不会正好也叫 `3.资产舱/知识卡片`。
  * 默认值仍取它，是为了你自己从 dataviewjs 切过来时**什么都不用填**。
  */
-const DEFAULT_SETTINGS = { cardsFolder: CARDS_FOLDER };
+const DEFAULT_SETTINGS = { cardsFolder: DEFAULT_CARDS_FOLDER };
 
 class CrystalVaultView extends ItemView {
   constructor(leaf, plugin) {
@@ -143,19 +158,51 @@ class CrystalVaultSettingTab extends PluginSettingTab {
           "改了之后原来那份布局还在（存储键带着目录路径），换回来就回来了。"
       )
       .addText((t) => {
-        t.setPlaceholder(CARDS_FOLDER).setValue(this.plugin.settings.cardsFolder);
+        t.setPlaceholder(DEFAULT_CARDS_FOLDER).setValue(this.plugin.settings.cardsFolder);
         // ⚠️ **提交时机是「失焦 / 回车」，不是 onChange。**
         //
         // 提交要重挂视图（换目录等于换了一整份数据），而 `onChange` 是**每敲一个
         // 字符**触发一次——用 onChange 的话，用户打「Python」这几个字母，
         // 视图会被拆了重挂六遍：卡顿、闪烁，中途还会因为路径不存在而空一下。
         // （第一版就是这么写的，这是修。）
-        const commit = () => this.plugin.setCardsFolder(t.inputEl.value);
+        const commit = () =>
+          Promise.resolve(this.plugin.setCardsFolder(t.inputEl.value)).then(() => this.paintProbe && this.paintProbe());
         t.inputEl.addEventListener("blur", commit);
         t.inputEl.addEventListener("keydown", (e) => {
           if (e.key === "Enter") commit();
         });
       });
+
+    // 当下就能看出这个路径对不对。
+    //
+    // 不加这一条的话，用户改完**不知道生效没有**——而症状是「库里空的，什么都没有」，
+    // 看着像插件坏了。这里直接告诉他：这个文件夹在不在、里面有几颗晶体。
+    const probe = containerEl.createEl("p", { cls: "setting-item-description" });
+    this.paintProbe = () => {
+      const path = String(this.plugin.settings.cardsFolder || "").replace(/\/+$/, "");
+      if (!path) {
+        probe.setText("还没设卡片目录。");
+        return;
+      }
+      const folder =
+        this.app.vault.getFolderByPath && this.app.vault.getFolderByPath(path);
+      if (!folder) {
+        probe.setText(
+          "vault 里没有「" + path + "」这个文件夹。先建一个（在文件管理器里右键新建文件夹），" +
+            "或者把上面改成你卡片真正所在的地方。"
+        );
+        return;
+      }
+      const kids = folder.children || [];
+      // 宿主用 `children` 区分文件夹与文件（与适配层同一条判据）
+      const subs = kids.filter((c) => c.children !== undefined).length;
+      const files = kids.length - subs;
+      probe.setText(
+        "找到了：里面 " + subs + " 个子文件夹（每个是一颗晶体）、" + files + " 个直属文件。" +
+          (subs || files ? "" : "　现在是空的——建一个子文件夹，那就是你的第一颗晶体。")
+      );
+    };
+    this.paintProbe();
 
     containerEl.createEl("p", {
       cls: "setting-item-description",
@@ -198,7 +245,7 @@ export default class CrystalVaultPlugin extends Plugin {
   async loadSettings() {
     const raw = (await this.loadData()) || {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
-    if (!this.settings.cardsFolder) this.settings.cardsFolder = CARDS_FOLDER;
+    if (!this.settings.cardsFolder) this.settings.cardsFolder = DEFAULT_CARDS_FOLDER;
     // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
     // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），
     // 而且状态写得极频繁，没理由让每次滚动都去动设置页看的那几个值。

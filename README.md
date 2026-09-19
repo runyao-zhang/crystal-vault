@@ -44,7 +44,7 @@ Download `main.js`, `manifest.json` and `styles.css` from the [latest release](h
 
 ## Getting started
 
-1. Open the plugin settings and point **Card folder** at the folder you keep your notes in. The default is `3.资产舱/知识卡片` — change it unless that is genuinely where your cards live.
+1. Open the plugin settings and point **Card folder** at the folder you keep your notes in. It defaults to `cards` — if you do not have one yet, create a folder with that name in your vault. The settings pane tells you right away whether that path exists and how many crystals are in it.
 2. Click the gem icon in the ribbon (or run the command **Crystal Vault: Open**).
 3. Make a subfolder inside your card folder. That is a crystal.
 4. Write a card. See the format below.
