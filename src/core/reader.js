@@ -397,13 +397,6 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-reader-scratchgo" id="kb-reader-scratch-go">写</button>' +
     '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratch-cancel">取消</button>' +
     '</div>' +
-    '<div class="kb-v13-reader-scratchbar" id="kb-reader-scratchbar">' +
-    '<span class="kb-v13-reader-scratchlab" id="kb-reader-scratchlab">草稿纸</span>' +
-    // ⚠️ **不能复用 `kb-v13-reader-nativeback`**：那个类的显隐挂在 `native-on` 上
-    // （它默认 `display:none`，只有「在编辑器里写」那一档才亮出来），
-    // 于是草稿纸开着时这颗「收起」还是看不见——**按钮在、点不到**。
-    '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratchback">收起</button>' +
-    '</div>' +
     // 「将建在」那一行（3.0 刀 9 第二版）。从前它是一句死文案「将建在：文献/xxx/」，
     // 卡只能长在文献自己那个文件夹里。用户要的是**自己挑一个文件夹**，
     // 而且挑的那个界面要复用首页「文件夹」面板那棵树。
@@ -503,7 +496,6 @@ export function createReader(ctx, opts = {}) {
   const folderHd = $("kb-reader-folderhd");
   const scratchForm = $("kb-reader-scratchform");
   const scratchName = $("kb-reader-scratch-name");
-  const scratchLab = $("kb-reader-scratchlab");
 
   // ---- 尺寸 ----
   function pageWidth() {
@@ -2723,23 +2715,43 @@ export function createReader(ctx, opts = {}) {
     return res || { ok: false, reason: "error" };
   }
 
-  /** 把某张草稿纸用**宿主原生编辑器**打开（收起上一张先）。 */
-  async function openScratchAt(path, label) {
-    if (scratch) closeScratch();
-    if (nativeCompose) closeNativeCompose(true);
-    let handle = null;
-    try {
-      handle = await adapter.mountEditor(nativeHost, { path, line: 0, text: "" });
-    } catch (e) {
-      handle = null;
+  /**
+   * 打开一张草稿纸。
+   *
+   * ⚠️ **它是一张真卡，所以打开它的方式和卡片一模一样：摆到桌面上当一扇窗**
+   * （用户 09-20 点名：「应该像卡片一样做成一个悬浮窗」）。
+   *
+   * 第一版是把它挂进「边看边记」那一栏的宿主编辑器里——那是**错的**：
+   * 那一栏的定位是「新建一张卡」的表单，不是看卡的地方。而桌面上的卡片窗
+   * 现在本来就用原生编辑器（刀 12 第一半），所以走那条路反而更顺、
+   * 也更像「这就是一张卡」。
+   */
+  function openScratchAt(path, label) {
+    let card = ctx.model.byPath.get(path);
+    if (!card) {
+      // 刚建出来的那张还没登记进模型——**必须先登记**，否则桌面上那扇窗
+      // 找不到它（`mountDeskWin` 靠 `findCardByPath`）。这一套与
+      // `openNativeCompose` 建完卡之后那段同源。
+      card = ctx.model.addCard({
+        path,
+        folder: parentOf(path),
+        name: baseName(path).replace(/\.md$/i, ""),
+        concept: "",
+        source: "",
+        tags: [],
+        content: "",
+      });
+      if (ctx.renderCrystals) ctx.renderCrystals();
+      if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+      if (ctx.refreshOrphans) ctx.refreshOrphans();
+      if (ctx.refreshFolders) ctx.refreshFolders();
     }
-    if (!handle) {
-      sayNewCrystal("这个宿主没给出编辑器，草稿纸开不了。", false);
-      return false;
-    }
-    scratch = { handle, path };
-    sideEl.classList.add("kb-v13-reader-scratch-on");
-    scratchLab.textContent = "草稿纸：" + (label || baseName(path).replace(/\.md$/i, ""));
+    if (!card) return false;
+    // 桌面那种「一页一扇窗」的层。**不调 onCardPick**：它嘴里说的是「留链」那套，
+    // 对草稿纸是错话。
+    if (!desk.on) setDeskMode(true);
+    addDeskWin({ kind: "card", path: card.path });
+    say("草稿纸「" + (label || card.title) + "」摆到桌面上了——它是一张**真卡**。", true);
     return true;
   }
 
@@ -3503,7 +3515,6 @@ export function createReader(ctx, opts = {}) {
       e.stopImmediatePropagation();
     }
   });
-  $("kb-reader-scratchback").addEventListener("click", () => closeScratch());
   $("kb-reader-nativereturn").addEventListener("click", () => returnFromNativeCompose());
   $("kb-reader-nativeback").addEventListener("click", () => {
     closeNativeCompose(true); // 留着来源：边看边记是一串同一份文献里的小卡
