@@ -390,8 +390,15 @@ export function createReader(ctx, opts = {}) {
     '<div class="kb-v13-reader-nativehost" id="kb-reader-nativehost"></div>' +
     // 草稿纸那条（3.0 刀 12 第二半）。与上面那条**共用 nativehost**——
     // 两者互斥（开着这个就开不了那个），共用一块地方最简单。
+    // 起名那一步（用户 09-20）：草稿纸**不是**固定叫 `_`，是让用户起名的一张卡，
+    // 落在「草稿纸」那颗晶体里。所以先摊开一个输入框，回车才开写。
+    '<div class="kb-v13-reader-scratchform" id="kb-reader-scratchform">' +
+    '<input type="text" id="kb-reader-scratch-name" placeholder="草稿纸名（= 一张卡）" autocomplete="off">' +
+    '<button type="button" class="kb-v13-reader-scratchgo" id="kb-reader-scratch-go">写</button>' +
+    '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratch-cancel">取消</button>' +
+    '</div>' +
     '<div class="kb-v13-reader-scratchbar" id="kb-reader-scratchbar">' +
-    '<span class="kb-v13-reader-scratchlab">草稿纸</span>' +
+    '<span class="kb-v13-reader-scratchlab" id="kb-reader-scratchlab">草稿纸</span>' +
     // ⚠️ **不能复用 `kb-v13-reader-nativeback`**：那个类的显隐挂在 `native-on` 上
     // （它默认 `display:none`，只有「在编辑器里写」那一档才亮出来），
     // 于是草稿纸开着时这颗「收起」还是看不见——**按钮在、点不到**。
@@ -424,6 +431,9 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-newcrystal-open" id="kb-reader-newcrystal-open">＋ 新建晶体</button>' +
     '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystaldel"' +
     ' title="删掉一颗晶体（连同里面的卡片）。走回收站——按你在「文件与链接 → 删除的文件」里选的那一档，能捡回来。">删除晶体</button>' +
+    // 3.0 刀 12 第三版（用户 09-20）：「删除晶体」旁边加「删除卡片」。
+    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-carddel"' +
+    ' title="删掉一张卡片（不碰它所在的那颗晶体）。同样走回收站。">删除卡片</button>' +
     '</div>' +
     '<div class="kb-v13-newcrystal-form" id="kb-reader-newcrystal-form">' +
     '<input type="text" id="kb-reader-newcrystal-name" placeholder="晶体名（= 一个文件夹）" autocomplete="off">' +
@@ -491,6 +501,9 @@ export function createReader(ctx, opts = {}) {
   const storyBtn = $("kb-reader-storyline");
   const storyWinBtn = $("kb-reader-storywin");
   const folderHd = $("kb-reader-folderhd");
+  const scratchForm = $("kb-reader-scratchform");
+  const scratchName = $("kb-reader-scratch-name");
+  const scratchLab = $("kb-reader-scratchlab");
 
   // ---- 尺寸 ----
   function pageWidth() {
@@ -2507,7 +2520,8 @@ export function createReader(ctx, opts = {}) {
 
   function renderFolderPick() {
     const body = folderPick.body;
-    const raw = foldersOnly(cardTree());
+    // 「删除哪张卡」那一档要看见卡片——别的档用 foldersOnly 把它们剥掉了
+    const raw = pickIsCard(folderPick.purpose) ? cardTree() : foldersOnly(cardTree());
     const q = folderPick.query.trim().toLowerCase();
     const { groups } = filterTree(raw, q);
     body.textContent = "";
@@ -2566,9 +2580,14 @@ export function createReader(ctx, opts = {}) {
     crystal: { hd: "结构窗看哪颗晶体", find: "搜晶体" },
     // 3.0 刀 12：删哪颗晶体
     delete: { hd: "删除哪颗晶体", find: "搜晶体" },
+    // 3.0 刀 12 第三版：删一张卡（用户 09-20）。**这一档要看得见卡片**，
+    // 别的档用 `foldersOnly` 把它们剥掉了。
+    deletecard: { hd: "删除哪张卡", find: "搜卡片" },
   };
   /** 这几档挑的是**晶体**（收 key），只有 target 挑文件夹（收宿主路径）。 */
   const pickIsCrystal = (p) => p === "story" || p === "crystal" || p === "delete";
+  /** 这一档挑的是**卡片**（收 path），树里要保留卡片那一级。 */
+  const pickIsCard = (p) => p === "deletecard";
 
   /** 打开这棵树。`purpose` 见 folderPick 那只常量上面那段。 */
   function openFolderPick(purpose) {
@@ -2677,61 +2696,97 @@ export function createReader(ctx, opts = {}) {
    * ⚠️ **关掉不删文件**。它是常驻的便签——用户按「收起」的意思是「先不看了」，
    * 不是「把刚才写的扔掉」。删的那条路在「返回」那边，而且只删**刚建出来的卡**。
    */
+  /** 一张草稿纸的路径。名字由用户给（用户 09-20）。 */
+  function scratchPathOf(name) {
+    return String(scratchSpec.folder).replace(/\/+$/, "") + "/" + safeFileName(name) + ".md";
+  }
+
   /**
-   * 确保草稿纸那个文件在。**已经在了不算错**——它就是同一张便签。
+   * 建出（或者确认已经有）一张草稿纸。**已存在不算错**——它就是同一张便签。
    *
-   * ⚠️ 「返回」那条路**必须先叫它**：那个流程是直接往草稿纸里写的，
-   * 而写盘对**不存在的路径**回的是 `missing`（真机也一样，`writeCard` 的语义是
-   * 「写一张已经存在的卡」）。少了这一步，用户第一次用「返回」——
-   * 也就是还没开过草稿纸的时候——正文会卡在半路上，而界面上只说「没能写进草稿纸」。
-   * 这是 scratch 那条用例抓出来的。
+   * ⚠️ 两条路都要先叫它：用户点「草稿纸」是新建，而「返回」是**可能已有、也可能没有**
+   * （同名的那张之前建过）。而 `writeCard` 对不存在的路径回 `missing`——
+   * 少了这一步，用户第一次用「返回」时正文会卡在半路。
    */
-  async function ensureScratchFile() {
+  async function ensureScratchNamed(name) {
     if (!scratchSpec) return { ok: false, reason: "unsupported" };
+    const clean = safeFileName(toStr(name));
+    if (!clean) return { ok: false, reason: "empty" };
     let res = null;
     try {
-      res = await adapter.createCard(scratchSpec.name || "_", "", scratchSpec.folder);
+      res = await adapter.createCard(clean, "", scratchSpec.folder);
     } catch (e) {
       res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
     }
-    if (res && res.ok) return res;
-    if (res && res.reason === "exists") return { ok: true, path: scratchPath };
+    if (res && res.ok) return { ok: true, path: toStr(res.path) || scratchPathOf(clean) };
+    if (res && res.reason === "exists") return { ok: true, path: scratchPathOf(clean) };
     return res || { ok: false, reason: "error" };
   }
 
-  async function openScratch() {
-    if (!scratchSpec) return;
-    if (nativeCompose) {
-      say("先把上面那张卡写完（或者点「返回」）。", false);
-      return;
-    }
-    if (scratch) {
-      closeScratch();
-      return;
-    }
-    const made = await ensureScratchFile();
-    if (!made.ok) {
-      say("草稿纸没建起来：" + toStr(made.message || made.reason || ""), false);
-      return;
-    }
+  /** 把某张草稿纸用**宿主原生编辑器**打开（收起上一张先）。 */
+  async function openScratchAt(path, label) {
+    if (scratch) closeScratch();
+    if (nativeCompose) closeNativeCompose(true);
     let handle = null;
     try {
-      handle = await adapter.mountEditor(nativeHost, { path: scratchPath, line: 0, text: "" });
+      handle = await adapter.mountEditor(nativeHost, { path, line: 0, text: "" });
     } catch (e) {
       handle = null;
     }
     if (!handle) {
-      say("这个宿主没给出编辑器，草稿纸开不了。", false);
+      sayNewCrystal("这个宿主没给出编辑器，草稿纸开不了。", false);
+      return false;
+    }
+    scratch = { handle, path };
+    sideEl.classList.add("kb-v13-reader-scratch-on");
+    scratchLab.textContent = "草稿纸：" + (label || baseName(path).replace(/\.md$/i, ""));
+    return true;
+  }
+
+  /**
+   * 点顶栏「草稿纸」：**先摊开起名那一步**（用户 09-20）。
+   *
+   * 起的那张卡落在「草稿纸」**那颗晶体**里——所以它是一张真卡，会出现在库里、
+   * 参与关系图。命名完回车就打开它。
+   */
+  function openScratchForm() {
+    if (!scratchSpec) return;
+    if (nativeCompose) {
+      sayNewCrystal("先把上面那张卡写完（或者点「返回」）。", false);
       return;
     }
-    scratch = { handle, path: scratchPath };
-    sideEl.classList.add("kb-v13-reader-scratch-on");
-    say("草稿纸开着——它由 Obsidian 自己存盘，**不是卡片**，不进关系图。", true);
-    try {
-      handle.focus();
-    } catch (e) {
-      /* 聚焦失败无所谓 */
+    if (scratch) {
+      closeScratch(); // 已经开着 = 再点一下收起
+      return;
     }
+    hideScratchForm();
+    scratchForm.classList.add("open");
+    scratchName.value = "";
+    sayNewCrystal("", true);
+    scratchName.focus();
+  }
+
+  function hideScratchForm() {
+    scratchForm.classList.remove("open");
+    scratchName.value = "";
+  }
+
+  /** 起名那一步回车 / 点「写」。 */
+  async function startScratch() {
+    const name = safeFileName(scratchName.value);
+    if (!name) {
+      sayNewCrystal("先给这张草稿纸起个名字。", false);
+      scratchName.focus();
+      return;
+    }
+    const made = await ensureScratchNamed(name);
+    if (!made.ok) {
+      sayNewCrystal("草稿纸没建起来：" + toStr(made.message || made.reason || ""), false);
+      return;
+    }
+    hideScratchForm();
+    const ok = await openScratchAt(made.path, name);
+    if (ok) sayNewCrystal("「" + name + "」开着——它是**一张真卡**，Obsidian 自己存盘。", true);
   }
 
   /** 收起草稿纸。**不删文件**（见 openScratch 那段）。 */
@@ -2824,16 +2879,27 @@ export function createReader(ctx, opts = {}) {
       prev = "";
     }
     const content = prev.trim() ? prev.replace(/\s+$/, "") + "\n\n" + text : text;
-    // ⚠️ **写之前先确保那个文件在**——`writeCard` 对不存在的路径回 `missing`
-    // （它是「写一张已经存在的卡」）。用户还没开过草稿纸时，这是必经的一步。
-    const ensured = await ensureScratchFile();
+    // 草稿纸的名字 = **此时的卡片名 + 「草稿纸」**（用户 09-20）。
+    // 同名的那张已经有了就**不新建，直接写进去**——再点一次「返回」时不该长出一堆。
+    const scratchTitle = title + "草稿纸";
+    const ensured = await ensureScratchNamed(scratchTitle);
     if (!ensured.ok) {
       say("「" + title + "」撤掉了，但草稿纸没建起来，正文没能转过去。", false);
       return;
     }
+    const sPath = ensured.path;
+    // 那张草稿纸里已经有东西就接着写（读旧内容走 readBinary，见上面那段）
+    let prev2 = "";
+    try {
+      const bytes2 = await adapter.readBinary(sPath);
+      if (bytes2) prev2 = new TextDecoder().decode(bytes2);
+    } catch (e) {
+      prev2 = "";
+    }
+    const content2 = prev2.trim() ? prev2.replace(/\s+$/, "") + "\n\n" + text : text;
     let w = null;
     try {
-      w = await adapter.writeCard(scratchPath, content, {});
+      w = await adapter.writeCard(sPath, content2, {});
     } catch (e) {
       w = { ok: false };
     }
@@ -2841,8 +2907,14 @@ export function createReader(ctx, opts = {}) {
       say("「" + title + "」撤掉了，但正文没能写进草稿纸。", false);
       return;
     }
-    await openScratch();
-    say("「" + title + "」撤掉了，正文转到草稿纸里了。", true);
+    // 无论新建还是写进已有那张，**都直接把它打开**（用户 09-20）
+    const opened = await openScratchAt(sPath, scratchTitle);
+    say(
+      opened
+        ? "「" + title + "」撤掉了，正文转到草稿纸「" + scratchTitle + "」里了。"
+        : "「" + title + "」撤掉了，正文写进草稿纸了（但它没打开）。",
+      true
+    );
   }
 
   function closeNativeCompose(keepSource) {
@@ -2959,6 +3031,21 @@ export function createReader(ctx, opts = {}) {
    * 这一栏底下那行提示。`action` 给一颗按钮（与卡片盒那条同一个形状）——
    * 「确认删除」就靠它：删除是**唯一会动用户笔记**的动作，不能只问一句「确定吗」。
    */
+  /**
+   * 点别处就把那行提示收掉（用户 09-20：「一直在那里，点其他地方也不关闭」）。
+   *
+   * 挂在阅读器根上、**捕获阶段**：点哪儿都先经过它。提示本身那一带要排除——
+   * 那上面挂着「撤销」「确认删除」这些按钮，点它们不算「点别处」。
+   *
+   * ⚠️ 顺带把 `pendingDelete` 也撤了：一行「删掉「X」？」挂在那儿而用户已经去点
+   * 别的东西了，那件事就不该还等着他点头——Esc 也不该再认它。
+   */
+  function dismissTransient() {
+    if (pendingDelete) pendingDelete = null;
+    if (newCrystalMsg.textContent) sayNewCrystal("", true);
+    if (msgEl.textContent) say("", true);
+  }
+
   function sayNewCrystal(text, ok, actions) {
     newCrystalMsg.textContent = "";
     newCrystalMsg.classList.toggle("kb-v13-newcrystal-bad", !ok);
@@ -2993,6 +3080,71 @@ export function createReader(ctx, opts = {}) {
     }
     openFolderPick("delete");
     sayNewCrystal("挑一颗要删的晶体。", true);
+  }
+
+  /**
+   * 「删除卡片」（用户 09-20）：和删除晶体同一套，只是挑的是**一张卡**。
+   *
+   * 与删除晶体的差别只有两处：挑的那棵树**要看得见卡片**（`pickIsCard`），
+   * 以及删的是文件、模型走 `removeCard`（摘一张）而不是 `removeFolder`（摘一棵子树）。
+   */
+  function deleteCardFlow() {
+    hidePicker();
+    pendingDelete = null;
+    if (!(ctx.model.allCards || []).length) {
+      sayNewCrystal("这张库里还没有卡片。", false);
+      return;
+    }
+    openFolderPick("deletecard");
+    sayNewCrystal("挑一张要删的卡。", true);
+  }
+
+  function confirmDeleteCard(path) {
+    const p = toStr(path);
+    const card = ctx.model.byPath.get(p);
+    hideFolderPick();
+    hidePicker();
+    if (!card) return;
+    sayNewCrystal(
+      "删掉卡片「" + card.title + "」？它会进回收站，能捡回来。" +
+        "（它所在的那颗晶体不动。）",
+      true,
+      [
+        { label: "取消", onClick: () => cancelDeleteCrystal() },
+        { label: "确认删除", danger: true, onClick: () => doTrashCard(p) },
+      ]
+    );
+    pendingDelete = p;
+  }
+
+  /** 真删一张卡。**走回收站**，同删除晶体。 */
+  async function doTrashCard(path) {
+    pendingDelete = null;
+    const card = ctx.model.byPath.get(path);
+    if (!card) return;
+    const title = card.title;
+    let res = null;
+    try {
+      res = await adapter.trashFile(path);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (!res || !res.ok) {
+      sayNewCrystal(
+        res && res.reason === "missing" ? "这张卡已经不在了。" : "删不掉：" + ((res && res.message) || "未知错误"),
+        false
+      );
+      return;
+    }
+    // ⚠️ `removeCard`（摘一张）**不是** `removeFolder`（摘一棵子树）——这两个在这份
+    // 代码里长得像，用错就是把整颗晶体连带删掉。
+    if (ctx.model.removeCard) ctx.model.removeCard(path);
+    if (ctx.renderCrystals) ctx.renderCrystals();
+    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+    if (ctx.refreshOrphans) ctx.refreshOrphans();
+    if (ctx.refreshFolders) ctx.refreshFolders();
+    if (ctx.flushViewState) ctx.flushViewState();
+    sayNewCrystal("已删除卡片「" + title + "」——进了回收站，能捡回来。", true);
   }
 
   /** 这一颗晶体（含子树）里有多少张卡——删除要让人**看见代价**。 */
@@ -3339,7 +3491,18 @@ export function createReader(ctx, opts = {}) {
   targetBtn.addEventListener("click", () => toggleFolderPick());
   $("kb-reader-nativeopen").addEventListener("click", () => openNativeCompose());
   // 草稿纸那两颗（宿主没给位置时那颗按钮压根不在，所以绑之前先问一句）
-  if (scratchSpec) $("kb-reader-scratch").addEventListener("click", () => openScratch());
+  if (scratchSpec) $("kb-reader-scratch").addEventListener("click", () => openScratchForm());
+  $("kb-reader-scratch-go").addEventListener("click", () => startScratch());
+  $("kb-reader-scratch-cancel").addEventListener("click", () => hideScratchForm());
+  // 起名那一步回车就开写；输入框里的按键不许漏给阅读器（Esc 会关整块阅读器）
+  scratchName.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") startScratch();
+    else if (e.key === "Escape") {
+      hideScratchForm();
+      e.stopImmediatePropagation();
+    }
+  });
   $("kb-reader-scratchback").addEventListener("click", () => closeScratch());
   $("kb-reader-nativereturn").addEventListener("click", () => returnFromNativeCompose());
   $("kb-reader-nativeback").addEventListener("click", () => {
@@ -3348,6 +3511,7 @@ export function createReader(ctx, opts = {}) {
   });
   $("kb-reader-newcrystal-open").addEventListener("click", () => openNewCrystal());
   $("kb-reader-crystaldel").addEventListener("click", () => deleteCrystalFlow());
+  $("kb-reader-carddel").addEventListener("click", () => deleteCardFlow());
   $("kb-reader-newcrystal-cancel").addEventListener("click", () => closeNewCrystal());
   $("kb-reader-newcrystal-go").addEventListener("click", () => createCrystal());
   // 输入框里的按键不许漏给阅读器（方向键会去翻屏、Esc 会关掉整块阅读器）。
@@ -3379,6 +3543,11 @@ export function createReader(ctx, opts = {}) {
       else chooseFolder(node.folder);
       return;
     }
+    // 卡片那一行（只有「删除哪张卡」这一档树里才有它）
+    if (hit.kind === "card") {
+      if (folderPick.purpose === "deletecard") confirmDeleteCard(hit.path);
+      return;
+    }
     if (hit.kind !== "toggle") return;
     if (folderPick.open.has(hit.key)) folderPick.open.delete(hit.key);
     else folderPick.open.add(hit.key);
@@ -3396,6 +3565,16 @@ export function createReader(ctx, opts = {}) {
     storyTarget();
   });
   storyWinBtn.addEventListener("click", () => openStoryWindow());
+  // 点别处收提示（捕获阶段，排在所有点击之前）
+  el.addEventListener(
+    "pointerdown",
+    (e) => {
+      const t = e.target;
+      if (t && t.closest && t.closest(".kb-v13-newcrystal-msg")) return; // 点提示自己不算
+      dismissTransient();
+    },
+    true
+  );
   doc.addEventListener("keydown", onKeydown);
 
   // ---- 对外 ----

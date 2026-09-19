@@ -136,7 +136,15 @@ class CrystalVaultView extends ItemView {
         pdfRenderer: this.pdfRenderer,
         // 阅读器顶栏那颗「草稿纸」落在哪儿。不传就没有那颗按钮
         // （宿主没这个能力时**整颗不出现**，不是摆一颗点了没反应的）。
-        scratch: { folder: this.plugin.settings.scratchFolder, name: "_" },
+        // ⚠️ **落在卡片目录里面**（用户 09-20 点名）：那样「草稿纸」就是环上的
+        // 一颗晶体，草稿纸是它里面的真卡片——会出现在库里、参与关系图。
+        // （第一版放在 vault 根目录，特意躲开晶体身份；用户要的是反过来。）
+        scratch: {
+          folder:
+            String(this.plugin.settings.cardsFolder || "").replace(/\/+$/, "") +
+            "/" +
+            String(this.plugin.settings.scratchFolder || "").replace(/^\/+|\/+$/g, ""),
+        },
         // 样式走仓库根目录的 styles.css（Obsidian 自己加载），运行时一份都不注。
         injectStyles: false,
       });
@@ -221,8 +229,8 @@ class CrystalVaultSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("草稿纸文件夹")
       .setDesc(
-        "阅读器顶栏那颗「草稿纸」把便签建在哪儿。**它不是卡片**，不参与晶体库的关系图——" +
-          "所以默认放在 vault 根目录，不放进卡片目录（放进去它就会变成一颗晶体）。"
+        "阅读器顶栏那颗「草稿纸」把便签建在**卡片目录里的哪个子文件夹**。" +
+          "那个子文件夹就是环上的一颗晶体，你起的每张草稿纸是它里面的一张真卡片。"
       )
       .addText((t) => {
         t.setPlaceholder(DEFAULT_SCRATCH_FOLDER).setValue(this.plugin.settings.scratchFolder);

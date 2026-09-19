@@ -1756,6 +1756,20 @@ const READER = [
   // 草稿纸那条（3.0 刀 12 第二半）。收起时整条不占位置（同「在编辑器里写」那条）。
   ".kb-v13-reader-scratchbar{display:none;gap:6px;align-items:center;margin-top:6px;}",
   ".kb-v13-reader-scratch-on .kb-v13-reader-scratchbar{display:flex;}",
+  // 起名那一步（用户 09-20）：草稿纸不是固定叫 `_`，是让用户起名的一张卡。
+  ".kb-v13-reader-scratchform{display:none;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;}",
+  ".kb-v13-reader-scratchform.open{display:flex;}",
+  ".kb-v13-reader-scratchform input{",
+  "  flex:1 1 120px;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border-radius:6px;",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.28));",
+  "  background-color:rgba(12,20,34,.98)!important;color:rgba(225,240,255,.95)!important;color-scheme:dark;",
+  "}",
+  ".kb-v13-reader-scratchgo{",
+  "  cursor:pointer;font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.28));",
+  "  background:none;color:var(--text-muted, rgba(170,205,235,.9));",
+  "}",
+  ".kb-v13-reader-scratchgo:hover{color:var(--text-normal, rgba(215,232,250,.95));}",
   ".kb-v13-reader-scratchlab{font-size:11px;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.7));}",
   // 破坏性那颗（「确认删除」）：暖色描边，和旁边那颗「取消」分得开。
   // 这一栏里唯一会动用户笔记的按钮，长一样不合适。
@@ -1784,6 +1798,10 @@ const READER = [
   ".kb-v13-reader-native-on .kb-v13-reader-nativeopen{display:none;}",
   ".kb-v13-reader-native-on .kb-v13-reader-nativeback{display:inline-block;}",
   ".kb-v13-reader-native-on .kb-v13-reader-nativehost{display:flex;flex-direction:column;}",
+  // ⚠️ 草稿纸也用这一格当宿主（两者互斥，共用一块地方），所以那一档也要把它露出来。
+  // 少了这一条的表现是「编辑器建出来了、挂在 DOM 上，但 `display:none`」——
+  // 用户点什么都没反应，而控制台里一句红字都没有。
+  ".kb-v13-reader-scratch-on .kb-v13-reader-nativehost{display:flex;flex-direction:column;}",
   ".kb-v13-reader-target-lab{flex:0 0 auto;}",
   ".kb-v13-reader-target-pick{",
   "  flex:1 1 auto;min-width:0;cursor:pointer;text-align:left;padding:4px 8px;border-radius:6px;",
@@ -1827,7 +1845,9 @@ const READER = [
   // 3.0 刀 12：新建在左、删除在右，同一行。
   // **表单打开时整行收起**（不是只藏新建那颗）——不然「删除晶体」会孤零零留在
   // 一个正在填表单的框上面，看着像它属于那个表单。
-  ".kb-v13-newcrystal-row{display:flex;gap:6px;align-items:stretch;}",
+  // 三颗按钮（新建 / 删除晶体 / 删除卡片）在一条 320px 宽的栏里，
+  // 放不下就让它**换行**——挤成三根筷子比换行难认得多。
+  ".kb-v13-newcrystal-row{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;}",
   ".kb-v13-newcrystal.open .kb-v13-newcrystal-row{display:none;}",
   ".kb-v13-newcrystal-row .kb-v13-newcrystal-open{flex:1 1 auto;min-width:0;}",
   // 删除那颗用暖色描边，和旁边那颗长得不一样——它是**这一栏里唯一会动你笔记的按钮**。
