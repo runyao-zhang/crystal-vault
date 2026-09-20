@@ -2704,9 +2704,16 @@ export function createReader(ctx, opts = {}) {
     if (!scratchSpec) return { ok: false, reason: "unsupported" };
     const clean = safeFileName(toStr(name));
     if (!clean) return { ok: false, reason: "empty" };
+    // ⚠️ **按卡片的形状建出来**（带 frontmatter），不是建一个空文件。
+    //
+    // 建空文件的话，桌面窗的 ✎ 会撞上 It 自己那道空基线保护：
+    // 「这份内容读不出来，改它会把原文件覆盖成空的」——而那道保护**是对的**
+    // （读失败时适配层也给空串，分不清），所以只能从这一头解决：
+    // **让新建出来的草稿纸一开始就不是空的**。它本来就是一张卡，带 frontmatter
+    // 才是它的样子（`composeCard` 与「边看边记」建卡走的是同一个函数）。
     let res = null;
     try {
-      res = await adapter.createCard(clean, "", scratchSpec.folder);
+      res = await adapter.createCard(clean, composeCard({ 概念: "", 来源: "", tags: [], body: "" }), scratchSpec.folder);
     } catch (e) {
       res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
     }
@@ -3067,9 +3074,29 @@ export function createReader(ctx, opts = {}) {
    */
   function dismissTransient() {
     if (pendingDelete) pendingDelete = null;
-    if (newCrystalMsg.textContent) sayNewCrystal("", true);
-    if (msgEl.textContent) say("", true);
+    const seen = newCrystalMsg.textContent;
+    const seenMsg = msgEl.textContent;
+    if (!seen && !seenMsg) return;
+    // ⚠️ **收的动作要延到这一下交互走完再发生。**
+    //
+    // 立刻收的话，那行提示的高度当场变成 0，侧栏里它上下的东西整体挪位——
+    // 而 **pointerdown 与 click 之间元素已经换了**，那一下点击就落到别的东西上。
+    // 实测：文件夹树里点三角展开不了（`open` 组数 0）。**真人快速点击一样会中**：
+    // 手还没抬起来，东西已经挪走了。
+    //
+    // ⚠️ 延后之后还要拿**当时那句话**当凭据：这中间要是又冒出一句新话
+    // （点一颗晶体 → 「删掉「X」？」），那是**这一下点击的产物**，不该被上一下的
+    // 善后顺手清掉。
+    if (dismissTimer) clearTimeout(dismissTimer);
+    dismissTimer = setTimeout(() => {
+      dismissTimer = 0;
+      if (newCrystalMsg.textContent === seen) sayNewCrystal("", true);
+      if (msgEl.textContent === seenMsg) say("", true);
+    }, 0);
   }
+
+  /** 上面那笔延后善后的定时器（见 dismissTransient）。 */
+  let dismissTimer = 0;
 
   function sayNewCrystal(text, ok, actions) {
     newCrystalMsg.textContent = "";
