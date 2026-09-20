@@ -2726,12 +2726,25 @@ export function createReader(ctx, opts = {}) {
    * 现在本来就用原生编辑器（刀 12 第一半），所以走那条路反而更顺、
    * 也更像「这就是一张卡」。
    */
-  function openScratchAt(path, label) {
+  async function openScratchAt(path, label) {
     let card = ctx.model.byPath.get(path);
     if (!card) {
       // 刚建出来的那张还没登记进模型——**必须先登记**，否则桌面上那扇窗
       // 找不到它（`mountDeskWin` 靠 `findCardByPath`）。这一套与
       // `openNativeCompose` 建完卡之后那段同源。
+      //
+      // ⚠️ **内容要从盘上读回来，不能拿空串登记**（用户 09-20：
+      // 「点击编辑，这份内容读不出来」）。桌面窗的 ✎ 拿 `card.content` 当基线，
+      // 空基线会撞上它自己那道保护——「改它会把原文件覆盖成空的」——**那道保护
+      // 没有错，是我喂了它一个假基线**。顺带：卡面渲染读的也是同一个字段，
+      // 所以窗里那份内容本来也是空白的。
+      let content = "";
+      try {
+        const bytes = await adapter.readBinary(path);
+        if (bytes) content = new TextDecoder().decode(bytes);
+      } catch (e) {
+        content = "";
+      }
       card = ctx.model.addCard({
         path,
         folder: parentOf(path),
@@ -2739,7 +2752,7 @@ export function createReader(ctx, opts = {}) {
         concept: "",
         source: "",
         tags: [],
-        content: "",
+        content,
       });
       if (ctx.renderCrystals) ctx.renderCrystals();
       if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
