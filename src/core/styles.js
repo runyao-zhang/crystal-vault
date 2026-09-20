@@ -1230,6 +1230,11 @@ const CANVAS = [
   // 旧存档里那些 `.kb-v13-slink-chain` 的节点还能被认出来，不是还有人在用。
   ".kb-v13-slink-chain{stroke:rgba(120,190,255,.20);stroke-width:1.2;stroke-linecap:round;}",
   // 双链：亮、粗、虚线，还带一层微光——用户自己写的关系才是主角。
+  //
+  // ⚠️ 3.0 刀 14：形状改成和金线一样的**折线**之后（用户 09-20：「和金色线一样
+  // 设计」），区分这两样**只剩颜色和虚实**——蓝线青色虚线、金线暖色实线。
+  // 动这里的描边或 dasharray 之前先看一眼 `.kb-v13-slink-manual`：
+  // 两边要一直分得开，而形状已经帮不上忙了。
   ".kb-v13-slink-direct{stroke:rgba(120,240,255,.72);stroke-width:1.8;stroke-dasharray:6,5;",
   "  stroke-linecap:round;filter:drop-shadow(0 0 4px rgba(80,200,255,.45));}",
   // 双链两头的箭头（3.0 刀 9-D）。**它是"谁链谁"唯一的载体**——两根线合成一根

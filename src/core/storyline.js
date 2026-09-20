@@ -306,8 +306,31 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
     if (hidden.has(e.from) || hidden.has(e.to)) return;
     // 这一对被亲手连过就按记下的边接，没连过就走老规矩（看谁在左谁在右）
     const hint = hints.get(e.from + " " + e.to) || null;
-    const { e1, e2 } = trimmedEnds(a, b, hint);
-    const path = bezier(e1.p, e2.p, e1.dir, e2.dir, cls);
+    const { aSide, bSide } = linkSidesFor(a, b, hint);
+
+    // 3.0 刀 14（用户 09-20）：「结构窗里面的连接蓝色线，从贝塞尔曲线改成和金色线
+    // 一样直线加圆弧拐角」。
+    //
+    // 原先这里画的是**贝塞尔弧**（两条控制臂横着往外推）。在库里读不清：弧线从
+    // 卡片中段穿过去，两根一交就看不出谁接谁。金色线那套**横平竖直 + 圆角**本来
+    // 就是为这件事写的（见 routePoints 顶上那段），所以蓝线直接改走同一条路。
+    //
+    // 形状既然一样了，区分就只剩**颜色和虚实**：蓝线是青色虚线、金线是暖色实线
+    // （见 styles.js 的 .kb-v13-slink-direct / .kb-v13-slink-manual，两边都别动）。
+    //
+    // ⚠️ 于是 `bezier()` 连同它那个「两头各带一个方向」的签名一起删了。
+    // 要把弧线加回来，得连同这条主接法和 storyline.spec 里那条形状断言一起改。
+    const pts = routePoints(portPos(a, aSide), aSide, portPos(b, bSide), bSide, []);
+    const path = svgEl("path");
+    path.setAttribute("d", roundedPath(pts));
+    path.setAttribute("fill", "none");
+    path.setAttribute("class", cls);
+    // 端点另存一份 data-*：`<path>` 没有 x1/y1 可读，而端点是命中判定要用的东西。
+    // 与 drawManualLines 同一口径（都过 base() 取一位小数）。
+    path.setAttribute("data-x1", base(pts[0].x));
+    path.setAttribute("data-y1", base(pts[0].y));
+    path.setAttribute("data-x2", base(pts[pts.length - 1].x));
+    path.setAttribute("data-y2", base(pts[pts.length - 1].y));
     // 箭头落在**卡片边上**，不落在正中央。连线画在节点下面（z-index 0 对 1），
     // 落在中央的箭头会被卡片整个盖住——等于没画，而"谁链谁"就全靠它说。
     if (e.fwd) path.setAttribute("marker-end", "url(#" + ARROW_ID + ")");
@@ -362,27 +385,10 @@ function ensureArrowDefs(svg) {
 }
 
 /**
- * 从某个连接点出发的端点：连接点再顺着**朝外的法线**推出去 EDGE_PAD。
+ * 这一对卡片的两头**各接在哪一边**。
  *
- * 与这一刀之前那两句 `rightward ? a.x + NODE_W + EDGE_PAD : a.x - EDGE_PAD`
- * **逐像素等价**（right / left 两条：`portPos` 给的就是左右边中点，高度都是
- * `a.y + NODE_H / 2`，与老代码的 `ac.y` 一模一样）。所以**没有接法提示的那些线
- * 一个像素都不会挪**——这一条是可以手算验证的，改完拿 storylink.spec 对一遍。
- */
-function endAt(node, side) {
-  // 方向上认不出来就退成 right，与 portPos 的 else 分支同一个兜底
-  const dir = SIDE_DIR[side] || SIDE_DIR.right;
-  const p = portPos(node, side);
-  return { p: { x: p.x + dir.x * EDGE_PAD, y: p.y + dir.y * EDGE_PAD }, dir };
-}
-
-/**
- * 两头的端点：从 a 的中心走向 b 的中心，但两端各收到**卡片边框外面一点**。
- *
- * 不往回收的话箭头会落在卡片正中央，而连线画在节点底下，箭头被盖得干干净净。
- *
- * `hint`（3.0 刀 13）是这一对卡片**被亲手连过**时记下的「哪一头接在哪一边」。
- * 有它就按它走；没有就走老规矩：看谁在左谁在右，各接在中线那一侧的边上。
+ * `hint`（3.0 刀 13）是这一对**被亲手连过**时记下的接法。有它就按它走；
+ * 没有就走老规矩：看谁在左谁在右，各接在中线那一侧的边上。
  *
  * ⚠️ 没有提示时**不要顺手改成"按上下左右自动挑最近的一边"**。用户 09-20 要的
  * 是「通过节点的连接来控制」，控制的入口是**他自己拖的那个连接点**；自动那一档
@@ -390,15 +396,13 @@ function endAt(node, side) {
  * 这一屏的形状是从他们的笔记关系里读出来的，不是我们的画布。觉得接歪了，
  * 从该走的那边拖一次就改过来了，而且是记住的。
  */
-function trimmedEnds(a, b, hint) {
-  if (hint) return { e1: endAt(a, hint.fromSide), e2: endAt(b, hint.toSide) };
+function linkSidesFor(a, b, hint) {
+  if (hint) return { aSide: hint.fromSide, bSide: hint.toSide };
   const ac = { x: a.x + NODE_W / 2, y: a.y + NODE_H / 2 };
   const bc = { x: b.x + NODE_W / 2, y: b.y + NODE_H / 2 };
-  const rightward = bc.x >= ac.x;
-  return {
-    e1: endAt(a, rightward ? "right" : "left"),
-    e2: endAt(b, rightward ? "left" : "right"),
-  };
+  return bc.x >= ac.x
+    ? { aSide: "right", bSide: "left" }
+    : { aSide: "left", bSide: "right" };
 }
 
 /**
@@ -428,50 +432,6 @@ function mergePairs(links) {
     if (!cur.reason && l.reason) cur.reason = l.reason;
   }
   return [...out.values()];
-}
-
-/**
- * 画一条**贝塞尔弧线**。
- *
- * 控制点从两端**顺着各自的方向外推**：起点往它出线的方向推、终点顺着它入线的
- * 方向退。于是左右并排时是一条平滑的 S 形，上下错开时弯得明显——就是关系图谱
- * 那种。两点正好同一高度时它自然退化成直线，那是对的：没有弯的理由就别硬弯。
- *
- * 3.0 刀 13 之前这里**只有一个方向**：两条控制臂都按"横着出去"推，因为线的两头
- * 当时只可能接在左右边上。现在一头可能从上边或下边出去，所以**每一头各带一个
- * 方向**——两个方向都是横的时，与老写法逐字相同。
- *
- * 用 `<path>` + `C`（三次贝塞尔）而不是 `<line>`：`<line>` 只能画直线。
- * 端点另存一份 data-* —— `<path>` 没有 x1/y1 可读，而端点是将来做命中判定
- * （点线选中、沿线找关系）要用的东西，现在就留出来。
- */
-function bezier(p1, p2, dir1, dir2, cls) {
-  // 控制臂的长度。
-  //
-  // 老写法只看 x 差——横排时它就是"两张卡隔多远"，一个字不改（这是绝大多数）。
-  // 但有一头是**上下**出线时 x 差不再代表距离：竖着并排的两张卡 x 差约等于 0，
-  // 臂长直接落到下限 46，曲线贴着卡片拐一个生硬的弯，而两点之间明明隔着两百像素。
-  // 所以有一头竖直时改看 y 差。
-  const vertical = dir1.y !== 0 || dir2.y !== 0;
-  const span = vertical ? Math.abs(p2.y - p1.y) : Math.abs(p2.x - p1.x);
-  const dx = Math.max(46, span * 0.45);
-  const c1 = { x: p1.x + dir1.x * dx, y: p1.y + dir1.y * dx };
-  // 控制点顺着**行进方向**往回退，不是无脑往左退。方向朝右时两者等价（老写法），
-  // 但方向朝左时 `p2.x - dx` 会让曲线从**背面**绕进终点——箭头也就跟着指反，
-  // 而那正是「谁链谁」唯一要说清的事。
-  const c2 = { x: p2.x - dir2.x * dx, y: p2.y - dir2.y * dx };
-  const path = svgEl("path");
-  path.setAttribute(
-    "d",
-    "M " + p1.x + " " + p1.y + " C " + c1.x + " " + c1.y + ", " + c2.x + " " + c2.y + ", " + p2.x + " " + p2.y
-  );
-  path.setAttribute("fill", "none");
-  path.setAttribute("class", cls);
-  path.setAttribute("data-x1", p1.x);
-  path.setAttribute("data-y1", p1.y);
-  path.setAttribute("data-x2", p2.x);
-  path.setAttribute("data-y2", p2.y);
-  return path;
 }
 
 /** 拖动过程中重画线（只碰 SVG，不碰节点） */
@@ -1146,38 +1106,26 @@ export function bindLinkMode(ctx) {
     const cls =
       "kb-v13-slink kb-v13-slink-rubber" + (write ? "" : " kb-v13-slink-rubber-manual");
 
-    let next;
-    if (target && write) {
-      // **写模式下落地的是蓝色贝塞尔**——那条 [[链]] 一写进正文，库就按双链把它
-      // 画成弧线。所以预览就得是那条弧线本身：这里走 routePoints 的话，松手
-      // 那一刻屏幕上"折线变弧线"，看着像连错了东西。
-      //
-      // 起点用 endAt 算而**不是直接拿 drag.start**：drag.start 是连接点本身，
-      // 而画出来的端点在 EDGE_PAD 外面，两者差一小截。
-      const e1 = endAt(pos.get(drag.fromPath) || { x: 0, y: 0 }, fromSide);
-      const e2 = endAt(target, toSide);
-      next = bezier(e1.p, e2.p, e1.dir, e2.dir, cls);
+    // 3.0 刀 14：蓝线也改成折线了（见 paintStoryLines 里 drawLine 那段），
+    // 所以**两档共用这一支**——预览的形状和落地的形状从这一刀起是同一个。
+    // 剩下的差别只有颜色：写模式青（蓝双链）、看模式金（手工线）。
+    let pts;
+    if (target) {
+      pts = routePoints(drag.start, fromSide, portPos(target, toSide), toSide, []);
     } else {
-      let pts;
-      if (target) {
-        pts = routePoints(drag.start, fromSide, portPos(target, toSide), toSide, []);
-      } else {
-        // 空白处：**一根引线加一个直角，直接停在指针上**。
-        // 这里绝不能调 routePoints——那条路遇到"目标在身后"会绕一个大 U，
-        // 而拖拽过程中指针绕着走一圈是常事，屏幕上会甩出一条巨大的回形针。
-        //
-        // 写模式落在空白也走这一支：落在空白**什么都不会发生**，所以形状本身
-        // 不是承诺，只有颜色是。
-        const dir = SIDE_DIR[fromSide] || { x: 1, y: 0 };
-        const s0 = step(drag.start, dir, STUB);
-        const elbow = axisOf(fromSide) === "h" ? { x: w.x, y: s0.y } : { x: s0.x, y: w.y };
-        pts = dedupe(orthogonalize([drag.start, s0, elbow, w], axisOf(fromSide)));
-      }
-      next = svgEl("path");
-      next.setAttribute("d", roundedPath(pts));
-      next.setAttribute("fill", "none");
-      next.setAttribute("class", cls);
+      // 空白处：**一根引线加一个直角，直接停在指针上**。
+      // 这里绝不能调 routePoints——那条路遇到"目标在身后"会绕一个大 U，
+      // 而拖拽过程中指针绕着走一圈是常事，屏幕上会甩出一条巨大的回形针。
+      // 落在空白**什么都不会发生**，所以形状本身不是承诺。
+      const dir = SIDE_DIR[fromSide] || { x: 1, y: 0 };
+      const s0 = step(drag.start, dir, STUB);
+      const elbow = axisOf(fromSide) === "h" ? { x: w.x, y: s0.y } : { x: s0.x, y: w.y };
+      pts = dedupe(orthogonalize([drag.start, s0, elbow, w], axisOf(fromSide)));
     }
+    const next = svgEl("path");
+    next.setAttribute("d", roundedPath(pts));
+    next.setAttribute("fill", "none");
+    next.setAttribute("class", cls);
     svg.replaceChild(next, ctx._rubber);
     ctx._rubber = next;
   });
