@@ -1267,6 +1267,20 @@ const CANVAS = [
   "  background:rgba(10,18,34,.6);border-style:dashed;border-color:rgba(140,175,215,.4);",
   "}",
   ".kb-v13-snode-ghost .kb-v13-snode-title{color:rgba(180,205,235,.72);font-weight:500;}",
+  // 3.0 刀 13：这张卡的入链出链被右键藏起来了。
+  // **这不是装饰**——不标出来的话，用户看到的是一张一根线都没有、可他明明写了
+  // 双链的卡，那读起来是「我的双链丢了」，不是「我把它藏了」。
+  // 用虚线边框（与幽灵节点同一套语汇：「这张卡现在不参与连线」）+ 角标点明状态。
+  ".kb-v13-snode.kb-v13-snode-hidden{",
+  "  border-style:dashed;border-color:rgba(150,175,210,.32);",
+  "}",
+  // 标题给角标让出位置——让它压在字上会糊成一团
+  ".kb-v13-snode-hidden .kb-v13-snode-title{padding-right:36px;}",
+  // pointer-events:none：角标不该自己接住那一下右键（虽然落在它上面也还在节点里）
+  ".kb-v13-snode.kb-v13-snode-hidden::after{",
+  "  content:'线已藏';position:absolute;right:8px;top:7px;pointer-events:none;",
+  "  font-size:10px;letter-spacing:.5px;color:rgba(150,180,215,.62);",
+  "}",
   // 故事线节点的拖动态（与其它拖动共用 .kb-v13-dragging 的语义）
 
   // 四边中点的**连接点**。平时 display:none，只有连接模式（.kb-v13-linking）才显形。
@@ -1327,6 +1341,11 @@ const CANVAS = [
   // 松手时命中的就是它而不是那张卡。
   ".kb-v13-slink-rubber{stroke:rgba(120,240,255,.9);stroke-width:2;stroke-dasharray:5,4;",
   "  pointer-events:none;}",
+  // 3.0 刀 13：「看」那一档松手画出来的是一条**金线**，预览就得是金的。
+  // 青色预览配金色结果，松手那一刻线会换一个颜色——那不是"不好看"，
+  // 那是「我这一下到底是连了还是写了」在屏幕上被说错了。
+  // （pointer-events 与 dasharray 照旧共用，只换描边色。）
+  ".kb-v13-slink-rubber.kb-v13-slink-rubber-manual{stroke:rgba(255,200,110,.85);}",
   ".kb-v13-snode.kb-v13-dragging{",
   "  z-index:120!important;transition:none;cursor:grabbing;",
   "  border-color:rgba(140,200,255,.75);box-shadow:0 8px 24px rgba(0,0,0,.5);",

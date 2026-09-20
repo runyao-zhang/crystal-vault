@@ -50,6 +50,8 @@ import {
   setMarqueeArm,
   marqueeSel,
   deletePickedFor,
+  hiddenCardSet,
+  showAllHidden,
 } from "./storyline.js";
 
 /** 结构窗那一小块自绘界面的样式。
@@ -222,8 +224,21 @@ export function createEmbedStory(ctx, opts = {}) {
     if (opts.onPickCrystal) opts.onPickCrystal();
   });
 
+  // 3.0 刀 13：右键藏起来的卡，出口在这儿。
+  // **只在真有东西可显的时候出现**（与「删除实线」同一条规矩）——摆一颗点了
+  // 没反应的按钮比不摆更糟。不带计数：库那颗「删除实线（n）」的数说的是
+  // **破坏性动作的规模**，这一颗不是。
+  const showAllBtn = EL("button", "kb-v13-embedact kb-v13-embedshow");
+  showAllBtn.type = "button";
+  showAllBtn.textContent = "显示全部";
+  showAllBtn.title = "把右键藏起来的那些卡片的入链出链全部显示回来。";
+  showAllBtn.style.display = "none";
+  // 不用再手动重画：showAllHidden 内部走 ctx.refreshStoryline，
+  // 而这扇窗把它覆盖成了整屏 render（见 makeFacade 那段警告）。
+  showAllBtn.addEventListener("click", () => showAllHidden(fake));
+
   const hint = EL("span", "kb-v13-embedhint");
-  bar.append(crystalBtn, modeBtn, marqueeBtn, delBtn, hint);
+  bar.append(crystalBtn, modeBtn, marqueeBtn, delBtn, showAllBtn, hint);
   stage.appendChild(world);
   root.append(stage, bar);
 
@@ -308,6 +323,8 @@ export function createEmbedStory(ctx, opts = {}) {
     // （与库顶栏那颗同一条规矩）。
     delBtn.style.display = editing && n > 0 ? "" : "none";
     delBtn.textContent = "删除实线（" + n + "）";
+    // 3.0 刀 13：同上——有东西可显才出场
+    showAllBtn.style.display = hiddenCardSet(fake).size ? "" : "none";
   }
 
   // ============================================================
@@ -371,7 +388,9 @@ export function createEmbedStory(ctx, opts = {}) {
     const link = "[[" + target.title + "]]";
     const base = card.content == null ? "" : card.content;
     if (base.indexOf(link) >= 0) {
-      say("这两张卡已经连着了，没有重复写。", true);
+      // 3.0 刀 13：这一句原来只说"没有重复写"，可接法提示**照样会按你拖的改**，
+      // 屏幕上那根线会挪。用户读到的是「说没写，可线动了」——那是在说谎。
+      say("这两张卡已经连着了。接的位置按你拖的改过来了。", true);
       return "dup";
     }
     const { body } = splitCard(base);

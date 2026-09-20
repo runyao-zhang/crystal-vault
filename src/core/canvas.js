@@ -72,6 +72,13 @@ export function beginDraft(ctx) {
     // 关库提交时又把存档盖成空的——**用户画的线静默消失**。
     // 草稿是"布局的第五样"，它漏一样，那样就是只读的。
     cardLinks: JSON.parse(JSON.stringify(v.cardLinks || {})),
+    // 3.0 刀 13：蓝线的接法提示和右键藏起来的卡。**理由同上一条，而且更隐蔽**——
+    // 进故事线（含阅读器里那扇结构窗）就是进相机档，那一刻 beginDraft 会拿一份
+    // 只有五个键的草稿；用户在结构窗里拖出来的接法写进草稿，关库时 commitDraft
+    // 把草稿铺回 state.view——上一份存下来的接法**当场被抹平**，藏起来的卡同理。
+    // 两处都不报错，只是东西没了。
+    linkSides: JSON.parse(JSON.stringify(v.linkSides || {})),
+    hiddenLinks: (v.hiddenLinks || []).slice(),
   };
 }
 
@@ -88,6 +95,9 @@ export function isDraftDirty(ctx) {
     // 「未保存」小点也必须算上手工连线，否则画了一根线屏幕却不说"未保存"——
     // 那个标记的全部意义就是"我刚摆的东西算不算数"，少说一样就等于说假话。
     l: o.cardLinks || {},
+    // 3.0 刀 13 同理：蓝线的接法和藏起来的卡也是"我刚摆的东西"。
+    s: o.linkSides || {},
+    h: o.hiddenLinks || [],
   });
   return JSON.stringify(pick(a)) !== JSON.stringify(pick(b));
 }

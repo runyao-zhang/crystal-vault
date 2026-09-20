@@ -86,6 +86,8 @@ import {
   leaveStoryline,
   setLinking,
   invalidateStoryline,
+  hiddenCardSet,
+  showAllHidden,
 } from "./storyline.js";
 // 3.0 刀 6 文献阅读器。它是一个**顶层浮层**（不是 state.stage 的第五个值）——
 // 它读的东西（PDF / 图片 / markdown）与晶体层级毫无关系，塞进 stage 那四档
@@ -415,6 +417,14 @@ function refreshStageUi(ctx) {
     ctx.hideLinksBtn.classList.toggle("kb-v13-hidelinks-on", !!ctx.state.hideLinks);
   }
 
+  // 「显示全部」（3.0 刀 13）比上面那颗多一个条件：**还得真藏着东西**。
+  // 上面那颗是"有得藏就摆着"（线可能随时被写出来）；这一颗藏没藏是确定的，
+  // 所以没藏的时候摆出来就是一颗点了没反应的按钮。
+  if (ctx.showAllBtn) {
+    const hiddenN = hiddenCardSet(ctx).size;
+    ctx.showAllBtn.style.display = stage === "storyline" && hiddenN > 0 ? "" : "none";
+  }
+
   // 3.0 刀 9-C「文献」那颗。挂起中（人刚从它切去看故事线）换个说法再说一遍——
   // 只说「文献」的话，用户没法知道点下去是「新开一份」还是「回到刚才那份」，
   // 而这两件事差别很大：开着的文献、桌面摆法、页码和缩放在不在。
@@ -556,6 +566,14 @@ export async function mount({
     // 手工连的金线永远留着：那是用户自己画的，不属于"可以藏起来的信息"。
     '<button type="button" class="kb-v13-hidelinks-btn" id="kb-fs-hidelinks" style="display:none"' +
     ' title="藏掉库自己连的线（文件名链和双链），只看你自己连的金线。再点一下显示回来。">隐藏连线</button>' +
+    // 3.0 刀 13：右键藏起来的卡片，出口在这儿。
+    //
+    // **库这一屏也必须有这一颗**：藏是结构窗里做的，可 hiddenLinks 落在视图状态里，
+    // 回到库的故事线照样是藏着的。只给结构窗一颗按钮，用户在这里就是
+    // "东西不见了、找不到出口"——那正是这个仓一直在防的状态。
+    // 与上面那颗同一条规矩：只在真有东西可显的时候才出场。
+    '<button type="button" class="kb-v13-hidelinks-btn" id="kb-fs-showall" style="display:none"' +
+    ' title="把右键藏起来的那些卡片的入链出链全部显示回来。">显示全部</button>' +
     // 连线编辑模式那两颗。**「选框」是这套交互唯一的正经入口**——
     // 上一版把它做成"按住 S 再拖"，在真机上是死的：库嵌在笔记里，点它不会
     // 把焦点从编辑器拿走，按 S 的 keydown 落点是编辑器的 contenteditable，
@@ -759,6 +777,12 @@ export async function mount({
     e.stopPropagation();
     ctx.toggleHideLinks();
   });
+  // 3.0 刀 13。不用再手动重画——showAllHidden 内部走 ctx.refreshStoryline
+  // （= renderCrystals）整屏重画，卡片上那个「线已藏」角标才会跟着掉。
+  fs.querySelector("#kb-fs-showall").addEventListener("click", (e) => {
+    e.stopPropagation();
+    showAllHidden(ctx);
+  });
   fs.querySelector("#kb-fs-marquee").addEventListener("click", (e) => {
     e.stopPropagation();
     setMarqueeArm(ctx, !isMarqueeArmed(ctx));
@@ -889,6 +913,7 @@ export async function mount({
     resetBtn: fs.querySelector("#kb-fs-reset"),
     addModBtn: fs.querySelector("#kb-fs-addmod"),
     hideLinksBtn: fs.querySelector("#kb-fs-hidelinks"),
+    showAllBtn: fs.querySelector("#kb-fs-showall"),
     marqueeBtn: fs.querySelector("#kb-fs-marquee"),
     delLinesBtn: fs.querySelector("#kb-fs-dellines"),
     // 3.0 刀 9-C：顶栏那颗「文献」。它平时不参与 stage 显隐（任何档都点得到），
@@ -1554,6 +1579,15 @@ export async function mount({
     // （第一版直接读 viewState()，于是拖动写在草稿上的改动一条都读不到。）
     cardLinks: () => {
       const all = layoutOf(ctx).cardLinks || {};
+      return Object.values(all).flat().map((l) => ({ ...l }));
+    },
+    // 3.0 刀 13：被右键藏掉入链出链的卡。**只读**——藏和显回都走真实右键
+    // （与 lineEdit 同一条道理：那个入口本身就是被测的那一步）。
+    // 与 cardLinks 同一条口径：**草稿优先**，断言的是"屏幕上现在是什么样"。
+    hiddenCards: () => [...hiddenCardSet(ctx)],
+    // 蓝线的接法提示。同样草稿优先。
+    linkSides: () => {
+      const all = layoutOf(ctx).linkSides || {};
       return Object.values(all).flat().map((l) => ({ ...l }));
     },
     membership: () => ({ ...membershipOf(ctx) }),

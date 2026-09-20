@@ -39,6 +39,22 @@ export function defaultViewState() {
     // 3.0 刀 5：故事线里**手工连的线**。形状 {晶体key: [{from, to, fromSide, toSide}]}。
     // 键是晶体（故事线是按晶体看的），值里两端都是**卡片路径**。
     cardLinks: {},
+    // 3.0 刀 13：蓝线（双链）**接在卡片的哪一边**。同样按晶体分，
+    // 形状 {晶体key: [{from, to, fromSide, toSide}]}。
+    //
+    // 单开一张表、不塞进 cardLinks：那张表里每一条都是**用户亲手画的金线**
+    // （有向、带 bends、能框选能删），而这一张记的是**他自己写的 [[双链]]
+    // 在屏幕上的接法**——线是笔记里的，库只是记下"他当时从哪个连接点拖出来"。
+    // 混在一起的话，drawManualLines / hitManual / 拐点下标回写三处都要先分辨
+    // "这是哪种线"。
+    //
+    // ⚠️ from/to 存**字典序小的在前**（与 storyline.js 的 mergePairs 同一套），
+    // 所以查找时两个方向都要试——别只按存进去的顺序查。
+    linkSides: {},
+    // 3.0 刀 13：被右键藏掉入链出链的那几张卡（**卡片路径**，平的）。
+    // 平的就够：路径在全库唯一，而且一张卡只属于一颗晶体，
+    // 在哪扇窗里藏的，回到库的故事线就还藏着——不需要再拿晶体名当键。
+    hiddenLinks: [],
     openCrystal: null,
     selectedCrystal: null,
     selectedCard: null,
@@ -182,6 +198,71 @@ function sanitizeCardLinks(raw) {
   return out;
 }
 
+/**
+ * 蓝线的接法提示（3.0 刀 13）。**绝不抛**，逐条退化——但比 sanitizeCardLinks 严：
+ *
+ * 一端的方向认不出来就**整条丢掉**，而不是像金线那样补一个缺省方向。
+ * 两者坏掉的代价不一样：金线缺了方向还得画，随便挑一个总比不画强；
+ * 而这一张是**提示**——丢了就退成「没有提示」，渲染那边会按两张卡的左右关系
+ * 自动挑一条，那本来就是这个功能没做之前的样子。给一条提示补一个瞎猜的方向，
+ * 反而会把线接到用户从来没说过的地方去，而他没有任何办法看出那是猜的。
+ *
+ * 数量封顶是**渲染护栏**：sideHintMap 每一帧都要按这份数据建一次 Map，
+ * 一个坏文件塞进十万条，每一帧就建十万项。超出的丢掉后面的——那是用户最近
+ * 拖的，但总比界面卡死强（与 bends 封顶 8 同一个理由）。
+ */
+const MAX_LINK_SIDES = 2000;
+function sanitizeLinkSides(raw) {
+  if (!isObj(raw)) return {};
+  const out = {};
+  for (const [key, list] of Object.entries(raw)) {
+    if (!key || !Array.isArray(list)) continue;
+    const keep = [];
+    const seen = new Set();
+    for (const l of list) {
+      if (keep.length >= MAX_LINK_SIDES) break;
+      if (!isObj(l)) continue;
+      const from = toStr(l.from);
+      const to = toStr(l.to);
+      if (!from || !to || from === to) continue;
+      const fs = toStr(l.fromSide);
+      const ts = toStr(l.toSide);
+      if (SIDES.indexOf(fs) < 0 || SIDES.indexOf(ts) < 0) continue; // 缺一头就整条丢
+      // 同一对只留最先那条。**签名不带方向**：from/to 已经是字典序规范过的，
+      // 带上方向反而会把"同一对的两份矛盾提示"当成两条不同的线放进来。
+      if (seen.has(from + " " + to)) continue;
+      seen.add(from + " " + to);
+      keep.push({ from, to, fromSide: fs, toSide: ts });
+    }
+    if (keep.length) out[key] = keep;
+  }
+  return out;
+}
+
+/**
+ * 被藏起来的卡（3.0 刀 13）。**绝不抛**：非字符串、空串、重复一律丢。
+ *
+ * 不校验「这张卡还在不在」——那要问 model，而这里是个纯函数。
+ * 卡片被删之后留下一条悬空路径的代价是零：渲染时按路径查位置，查不到
+ * 本来也不会画（与 cardLinks 那条「连到不存在的卡上不管」同一口径）。
+ */
+const MAX_HIDDEN_LINKS = 2000;
+function sanitizeHiddenLinks(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const p of raw) {
+    if (out.length >= MAX_HIDDEN_LINKS) break;
+    // **只认字符串**，不用 toStr 转。别处转是因为那些格子装的是 id / 名字，
+    // 数字转成字符串无害；这一格装的是**卡片路径**，把 42 转成 "42" 会造出
+    // 一条永远匹配不上任何卡片的悬空项——看着像条数据，实际是垃圾。
+    if (typeof p !== "string" || !p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
 function sanitizeCrystalPos(raw) {
   if (!isObj(raw)) return {};
   const out = {};
@@ -217,6 +298,8 @@ export function sanitizeViewState(raw) {
     membership: sanitizeMembership(raw.membership, modules),
     crystalPos: sanitizeCrystalPos(raw.crystalPos),
     cardLinks: sanitizeCardLinks(raw.cardLinks),
+    linkSides: sanitizeLinkSides(raw.linkSides),
+    hiddenLinks: sanitizeHiddenLinks(raw.hiddenLinks),
     openCrystal: nullableStr(raw.openCrystal),
     selectedCrystal: nullableStr(raw.selectedCrystal),
     selectedCard: nullableStr(raw.selectedCard),

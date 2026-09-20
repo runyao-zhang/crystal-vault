@@ -206,6 +206,12 @@ export function renderStorylineStage(ctx, path) {
   const pos = new Map();
   for (const c of cards) pos.set(c.path, nodePosOf(ctx, c, layout));
 
+  // 3.0 刀 13：被右键藏掉入链出链的那几张卡。**这里也要算一份**——
+  // 线上那个跳过发生在 paintStoryLines 里，而节点上那个「线已藏」角标是在
+  // 下面这个循环里加的，两处各要一次。（漏掉这一个的后果是整屏渲染直接
+  // ReferenceError，连库都进不去——测试逮住了，别把它挪进 paintStoryLines。）
+  const hidden = hiddenCardSet(ctx);
+
   const svg = ensureLinkLayer(ctx);
   paintStoryLines(ctx, svg, cards, path, layout);
 
@@ -214,6 +220,11 @@ export function renderStorylineStage(ctx, path) {
     const el = EL("div", "kb-v13-snode");
     el.dataset.path = c.path;
     el.dataset.title = c.title;
+    // 3.0 刀 13：这张卡的入链出链被右键藏起来了。
+    // **这不是装饰**——不标出来的话，用户看到的是一张一根线都没有、可他明明
+    // 写了双链的卡，那读起来是「我的双链丢了」，不是「我把它藏了」。
+    // 顺带也告诉他"再右键一次能显回来"这件事有地方可试。
+    if (hidden.has(c.path)) el.classList.add("kb-v13-snode-hidden");
     el.style.left = p.x + "px";
     el.style.top = p.y + "px";
     el.style.width = NODE_W + "px";
@@ -279,13 +290,24 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
   svg.setAttribute("width", w);
   svg.setAttribute("height", h);
 
+  // 3.0 刀 13：蓝线接在卡片的哪一边。**每帧建一次**，见 sideHintMap 顶上那段。
+  const hints = sideHintMap(ctx);
+
+  // 3.0 刀 13：被右键藏掉入链出链的那几张卡。**每帧建一次**（几十项，够便宜）。
+  const hidden = hiddenCardSet(ctx);
+
   // 连线画在节点**下面**：先建线，后建节点（DOM 顺序 + z-index 两条一起）。
   const drawLine = (e, cls) => {
     const a = pos.get(e.from);
     const b = pos.get(e.to);
     if (!a || !b) return;
-    const { p1, p2, rightward } = trimmedEnds(a, b);
-    const path = bezier(p1, p2, { x: rightward ? 1 : -1, y: 0 }, cls);
+    // 这一头或那一头被藏了 → 这一根不画。**藏 = 不画，绝不动数据**：
+    // hiddenCardSet 一清，线原样回来。
+    if (hidden.has(e.from) || hidden.has(e.to)) return;
+    // 这一对被亲手连过就按记下的边接，没连过就走老规矩（看谁在左谁在右）
+    const hint = hints.get(e.from + " " + e.to) || null;
+    const { e1, e2 } = trimmedEnds(a, b, hint);
+    const path = bezier(e1.p, e2.p, e1.dir, e2.dir, cls);
     // 箭头落在**卡片边上**，不落在正中央。连线画在节点下面（z-index 0 对 1），
     // 落在中央的箭头会被卡片整个盖住——等于没画，而"谁链谁"就全靠它说。
     if (e.fwd) path.setAttribute("marker-end", "url(#" + ARROW_ID + ")");
@@ -306,7 +328,7 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
   }
   // 用户手工连的：**从连接点出发、接到连接点**，不居中——那是他自己画的，
   // 接在哪儿就该显示在哪儿。
-  drawManualLines(ctx, svg, pos);
+  drawManualLines(ctx, svg, pos, hidden);
 }
 
 /** 故事线那一层 SVG 里箭头 marker 的 id。**每张 SVG 都要自己带一份 defs**：
@@ -340,18 +362,42 @@ function ensureArrowDefs(svg) {
 }
 
 /**
+ * 从某个连接点出发的端点：连接点再顺着**朝外的法线**推出去 EDGE_PAD。
+ *
+ * 与这一刀之前那两句 `rightward ? a.x + NODE_W + EDGE_PAD : a.x - EDGE_PAD`
+ * **逐像素等价**（right / left 两条：`portPos` 给的就是左右边中点，高度都是
+ * `a.y + NODE_H / 2`，与老代码的 `ac.y` 一模一样）。所以**没有接法提示的那些线
+ * 一个像素都不会挪**——这一条是可以手算验证的，改完拿 storylink.spec 对一遍。
+ */
+function endAt(node, side) {
+  // 方向上认不出来就退成 right，与 portPos 的 else 分支同一个兜底
+  const dir = SIDE_DIR[side] || SIDE_DIR.right;
+  const p = portPos(node, side);
+  return { p: { x: p.x + dir.x * EDGE_PAD, y: p.y + dir.y * EDGE_PAD }, dir };
+}
+
+/**
  * 两头的端点：从 a 的中心走向 b 的中心，但两端各收到**卡片边框外面一点**。
  *
  * 不往回收的话箭头会落在卡片正中央，而连线画在节点底下，箭头被盖得干干净净。
+ *
+ * `hint`（3.0 刀 13）是这一对卡片**被亲手连过**时记下的「哪一头接在哪一边」。
+ * 有它就按它走；没有就走老规矩：看谁在左谁在右，各接在中线那一侧的边上。
+ *
+ * ⚠️ 没有提示时**不要顺手改成"按上下左右自动挑最近的一边"**。用户 09-20 要的
+ * 是「通过节点的连接来控制」，控制的入口是**他自己拖的那个连接点**；自动那一档
+ * 只要"说得过去"就够了，而把它一起换掉等于替所有老用户免费换一张图——
+ * 这一屏的形状是从他们的笔记关系里读出来的，不是我们的画布。觉得接歪了，
+ * 从该走的那边拖一次就改过来了，而且是记住的。
  */
-function trimmedEnds(a, b) {
+function trimmedEnds(a, b, hint) {
+  if (hint) return { e1: endAt(a, hint.fromSide), e2: endAt(b, hint.toSide) };
   const ac = { x: a.x + NODE_W / 2, y: a.y + NODE_H / 2 };
   const bc = { x: b.x + NODE_W / 2, y: b.y + NODE_H / 2 };
   const rightward = bc.x >= ac.x;
   return {
-    rightward,
-    p1: { x: rightward ? a.x + NODE_W + EDGE_PAD : a.x - EDGE_PAD, y: ac.y },
-    p2: { x: rightward ? b.x - EDGE_PAD : b.x + NODE_W + EDGE_PAD, y: bc.y },
+    e1: endAt(a, rightward ? "right" : "left"),
+    e2: endAt(b, rightward ? "left" : "right"),
   };
 }
 
@@ -387,21 +433,33 @@ function mergePairs(links) {
 /**
  * 画一条**贝塞尔弧线**。
  *
- * 控制点从两端**顺着各自的方向外推**：起点往右推、终点往左推。于是左右并排时
- * 是一条平滑的 S 形，上下错开时弯得明显——就是关系图谱那种。
- * 两点正好同一高度时它自然退化成直线，那是对的：没有弯的理由就别硬弯。
+ * 控制点从两端**顺着各自的方向外推**：起点往它出线的方向推、终点顺着它入线的
+ * 方向退。于是左右并排时是一条平滑的 S 形，上下错开时弯得明显——就是关系图谱
+ * 那种。两点正好同一高度时它自然退化成直线，那是对的：没有弯的理由就别硬弯。
+ *
+ * 3.0 刀 13 之前这里**只有一个方向**：两条控制臂都按"横着出去"推，因为线的两头
+ * 当时只可能接在左右边上。现在一头可能从上边或下边出去，所以**每一头各带一个
+ * 方向**——两个方向都是横的时，与老写法逐字相同。
  *
  * 用 `<path>` + `C`（三次贝塞尔）而不是 `<line>`：`<line>` 只能画直线。
  * 端点另存一份 data-* —— `<path>` 没有 x1/y1 可读，而端点是将来做命中判定
  * （点线选中、沿线找关系）要用的东西，现在就留出来。
  */
-function bezier(p1, p2, dir, cls) {
-  const dx = Math.max(46, Math.abs(p2.x - p1.x) * 0.45);
-  const c1 = { x: p1.x + dir.x * dx, y: p1.y + dir.y * dx };
+function bezier(p1, p2, dir1, dir2, cls) {
+  // 控制臂的长度。
+  //
+  // 老写法只看 x 差——横排时它就是"两张卡隔多远"，一个字不改（这是绝大多数）。
+  // 但有一头是**上下**出线时 x 差不再代表距离：竖着并排的两张卡 x 差约等于 0，
+  // 臂长直接落到下限 46，曲线贴着卡片拐一个生硬的弯，而两点之间明明隔着两百像素。
+  // 所以有一头竖直时改看 y 差。
+  const vertical = dir1.y !== 0 || dir2.y !== 0;
+  const span = vertical ? Math.abs(p2.y - p1.y) : Math.abs(p2.x - p1.x);
+  const dx = Math.max(46, span * 0.45);
+  const c1 = { x: p1.x + dir1.x * dx, y: p1.y + dir1.y * dx };
   // 控制点顺着**行进方向**往回退，不是无脑往左退。方向朝右时两者等价（老写法），
   // 但方向朝左时 `p2.x - dx` 会让曲线从**背面**绕进终点——箭头也就跟着指反，
   // 而那正是「谁链谁」唯一要说清的事。
-  const c2 = { x: p2.x - dir.x * dx, y: p2.y - dir.y * dx };
+  const c2 = { x: p2.x - dir2.x * dx, y: p2.y - dir2.y * dx };
   const path = svgEl("path");
   path.setAttribute(
     "d",
@@ -544,6 +602,126 @@ function writeManualLinks(ctx, list) {
   if (ctx.persistViewState) ctx.persistViewState();
 }
 
+/** 字典序规范序：小的在前。判据必须与 mergePairs 的 `l.from > l.to` 是同一句。 */
+function canonical(x, y) {
+  return x <= y ? [x, y, false] : [y, x, true];
+}
+
+/**
+ * 记下「这一对卡片接在哪儿」（3.0 刀 13）。**只记，不画。**
+ *
+ * 画是 paintStoryLines 的事，写盘是 ctx.persistViewState 那根线的事——这一层
+ * 两样都不认识。形状与 writeManualLinks 逐句对应（同一套 layoutOf + 按键去空 +
+ * persist），这样"记东西"在这两个地方长得一样，读的人不用记两套。
+ *
+ * 存的是**规范序**（与 mergePairs 同一套），查找时两个方向都试（见 sideHintMap）。
+ */
+function writeLinkSide(ctx, from, to, fromSide, toSide) {
+  if (!from || !to || from === to) return;
+  const [a, b, flip] = canonical(from, to);
+  const v = layoutOf(ctx);
+  if (!v.linkSides || typeof v.linkSides !== "object") v.linkSides = {};
+  const key = (ctx.state.crystalPath || []).join(" ");
+  const list = (Array.isArray(v.linkSides[key]) ? v.linkSides[key] : [])
+    // 同一对只留最新的一次：用户重新拖一遍说的是"改成这样"，不是"再加一条"
+    .filter((l) => !(l && l.from === a && l.to === b));
+  list.push(
+    flip
+      ? { from: a, to: b, fromSide: toSide, toSide: fromSide }
+      : { from: a, to: b, fromSide, toSide }
+  );
+  v.linkSides[key] = list;
+  if (ctx.persistViewState) ctx.persistViewState();
+}
+
+/**
+ * 此刻藏起来的那几张卡（3.0 刀 13）。**每一帧建一次 Set**（几十项，够便宜）。
+ *
+ * 与 sideHintMap 同一条纪律：**不做成 ctx 上的缓存**——结构窗的影子对象有一张
+ * "必须归零的单槽位"名单，多一个槽位就多一处漏归零。
+ */
+export function hiddenCardSet(ctx) {
+  const v = layoutOf(ctx);
+  const list = Array.isArray(v.hiddenLinks) ? v.hiddenLinks : [];
+  return new Set(list.filter((p) => typeof p === "string" && p));
+}
+
+/** 这一张卡的入链出链是不是被藏了 */
+export function isCardHidden(ctx, path) {
+  return !!path && hiddenCardSet(ctx).has(path);
+}
+
+function writeHiddenSet(ctx, set) {
+  const v = layoutOf(ctx);
+  v.hiddenLinks = [...set];
+  if (ctx.persistViewState) ctx.persistViewState();
+}
+
+/**
+ * 藏 / 显回一张卡（3.0 刀 13。用户 09-20 定的：**同一张卡再右键一次就是显回来**）。
+ *
+ * 存的是**卡片路径**不是标题：关系图那张表是按 title 建的，跨文件夹同名会让边
+ * 指错人（见 edgesUnder 顶上那段）。藏东西这件事不能认错人。
+ *
+ * 重画走 `ctx.refreshStoryline`（整屏）而**不是** `redrawStoryLines`——卡片上那个
+ * 「线已藏」标记也要跟着变，而后者按设计只碰 SVG、**绝不重建节点**
+ * （见 renderStorylineStage 顶上那段：被拖的那个元素一换掉，指针捕获就没了）。
+ */
+export function toggleHiddenCard(ctx, path) {
+  if (!path) return false;
+  const set = hiddenCardSet(ctx);
+  if (set.has(path)) set.delete(path);
+  else set.add(path);
+  writeHiddenSet(ctx, set);
+  if (ctx.refreshStoryline) ctx.refreshStoryline();
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  return set.has(path);
+}
+
+/**
+ * 顶栏那颗「显示全部」：**一次全显回来**（3.0 刀 13）。
+ *
+ * 没有藏着的东西时什么都不做——不落盘、不重画、也不弹一句话。那颗按钮本来
+ * 就只在真有东西可显的时候才出场。
+ *
+ * @returns {number} 显回来了几张
+ */
+export function showAllHidden(ctx) {
+  const n = hiddenCardSet(ctx).size;
+  if (!n) return 0;
+  writeHiddenSet(ctx, new Set());
+  if (ctx.refreshStoryline) ctx.refreshStoryline();
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  return n;
+}
+
+/**
+ * 这一屏所有的蓝线接法提示，做成一张 Map（3.0 刀 13）。**每一帧建一次。**
+ *
+ * 两个方向**各插一份**：存进去的是规范序（与 mergePairs 同一套），而渲染时拿到的
+ * from/to 是**另一处实现**的约定——两处靠"我们记得同步改"来对齐，正是这个仓最爱
+ * 出事的地方。各插一份的代价是一次比较，换来的是"文件被手改过顺序也不会静默丢掉
+ * 一条提示"。
+ *
+ * ⚠️ **不做成 ctx 上的缓存**：结构窗的影子对象有一张"必须归零的单槽位"名单
+ * （见 embedstory.js 的 makeFacade），多一个槽位就多一处漏归零——症状是结构窗
+ * 用着**库那一屏**的提示。几十项的 Map 每帧建一次，不值得为它冒那个险。
+ */
+function sideHintMap(ctx) {
+  const out = new Map();
+  const v = layoutOf(ctx);
+  const all = v.linkSides && typeof v.linkSides === "object" ? v.linkSides : {};
+  const key = (ctx.state.crystalPath || []).join(" ");
+  const list = all[key];
+  if (!Array.isArray(list)) return out;
+  for (const l of list) {
+    if (!l || !l.from || !l.to) continue;
+    out.set(l.from + " " + l.to, { fromSide: l.fromSide, toSide: l.toSide });
+    out.set(l.to + " " + l.from, { fromSide: l.toSide, toSide: l.fromSide });
+  }
+  return out;
+}
+
 /** 位置表：这一层每张卡此刻在哪（世界坐标） */
 function posMapOf(ctx, path, layout) {
   const m = new Map();
@@ -551,7 +729,7 @@ function posMapOf(ctx, path, layout) {
   return m;
 }
 
-function drawManualLines(ctx, svg, pos) {
+function drawManualLines(ctx, svg, pos, hidden) {
   // 每画一根就把它**走过的折线**留一份。命中判定（点线选中、双击加拐点）
   // 全靠这个：SVG 里的线是 pointer-events:none 的，事件永远轮不到它们，
   // 只能拿指针位置去和这份几何算距离。
@@ -566,6 +744,13 @@ function drawManualLines(ctx, svg, pos) {
     // 连到一张已经不在这屏上的卡：**安静地少画这一根**，不报错、也不清数据。
     // 卡片可能只是暂时不在这儿（被挪去了别的文件夹），清掉就找不回来了。
     if (!a || !b) continue;
+    // 3.0 刀 13：这张卡被右键藏了 → 它的金线一起藏。
+    //
+    // ⚠️ **必须在这里就退出**，不能只是"不 appendChild"。`_manualHit` 是右键 /
+    // 框选 / 双击加拐点的**唯一**命中来源；一根看不见的线留在里面，症状是
+    // 「右键空白处却进了连线编辑模式」「框选删掉了一根我看不见的线」——
+    // 两样都不报错，而且都是"删了/改了用户没打算动的东西"那一类。
+    if (hidden && (hidden.has(l.from) || hidden.has(l.to))) continue;
     const pts = routePoints(portPos(a, l.fromSide), l.fromSide, portPos(b, l.toSide), l.toSide, l.bends);
     const on = isPicked(ctx, l);
     const path = svgEl("path");
@@ -875,6 +1060,22 @@ export function bindLinkMode(ctx) {
     if (ctx.state.stage !== "storyline") return;
     e.preventDefault();
     e.stopPropagation();
+    // 3.0 刀 13（用户 09-20）：「鼠标对着卡片右键，隐藏这张卡片所有的入链和出链」。
+    //
+    // **必须排在 hitManual 前面**：卡片节点 z-index 1、线在 0，事件本来就落在卡上；
+    // 而 hitManual 是按**世界坐标算距离**的，压在这张卡底下的一段金线照样会被
+    // "命中"——排在后头的话，右键一张卡有时进连线编辑模式、有时藏，全看线正好
+    // 从哪儿过。
+    //
+    // 入口由**写模式**开：平时右键卡片仍然是"进连接模式"（那条是用户 09-19 定的，
+    // 一个字不动）。「已经藏了」也算一条进路——不这么写的话，切回「看」那一档
+    // 之后右键卡片会被弹进连接模式，藏起来的东西就只剩顶栏那颗按钮能救了。
+    const node = e.target && e.target.closest && e.target.closest(".kb-v13-snode");
+    const cardPath = node && node.dataset.path;
+    if (cardPath && (ctx.state.linkWrite || isCardHidden(ctx, cardPath))) {
+      toggleHiddenCard(ctx, cardPath);
+      return;
+    }
     const w = ctx._panzoom ? ctx._panzoom.clientToWorld(e.clientX, e.clientY) : null;
     const hit = w ? hitManual(ctx, w) : null;
     if (hit) {
@@ -908,7 +1109,12 @@ export function bindLinkMode(ctx) {
     };
     const svg = ensureLinkLayer(ctx);
     const line = svgEl("line");
-    line.setAttribute("class", "kb-v13-slink kb-v13-slink-rubber");
+    // 颜色说的是"这一下松开会怎样"（3.0 刀 13）：写模式落蓝双链、看模式落金线。
+    line.setAttribute(
+      "class",
+      "kb-v13-slink kb-v13-slink-rubber" +
+        (ctx.state.linkWrite ? "" : " kb-v13-slink-rubber-manual")
+    );
     svg.appendChild(line);
     ctx._rubber = line;
     ctx._rubberSide = port.dataset.side;
@@ -920,6 +1126,8 @@ export function bindLinkMode(ctx) {
     if (!pz || !ctx._rubber) return;
     const w = pz.clientToWorld(e.clientX, e.clientY);
     const fromSide = ctx._rubberSide || "right";
+    // 3.0 刀 13：这一档决定**松手会得到什么**，而预览必须说同一件事。
+    const write = !!ctx.state.linkWrite;
 
     // **橡皮筋画出松手后的那个形状**，不是一条临时曲线。
     //
@@ -930,25 +1138,46 @@ export function bindLinkMode(ctx) {
     const node = under && under.closest && under.closest(".kb-v13-snode");
     const toPath = node && node.dataset.path;
     const pos = posMapOf(ctx, ctx.state.crystalPath, layoutFor(ctx, ctx.state.crystalPath));
-    let pts;
     const target = toPath && toPath !== drag.fromPath ? pos.get(toPath) : null;
-    if (target) {
-      const toSide = nearestSide(target, w);
-      pts = routePoints(drag.start, fromSide, portPos(target, toSide), toSide, []);
-    } else {
-      // 空白处：**一根引线加一个直角，直接停在指针上**。
-      // 这里绝不能调 routePoints——那条路遇到"目标在身后"会绕一个大 U，
-      // 而拖拽过程中指针绕着走一圈是常事，屏幕上会甩出一条巨大的回形针。
-      const dir = SIDE_DIR[fromSide] || { x: 1, y: 0 };
-      const s0 = step(drag.start, dir, STUB);
-      const elbow = axisOf(fromSide) === "h" ? { x: w.x, y: s0.y } : { x: s0.x, y: w.y };
-      pts = dedupe(orthogonalize([drag.start, s0, elbow, w], axisOf(fromSide)));
-    }
+    const toSide = target ? nearestSide(target, w) : null;
     const svg = ensureLinkLayer(ctx);
-    const next = svgEl("path");
-    next.setAttribute("d", roundedPath(pts));
-    next.setAttribute("fill", "none");
-    next.setAttribute("class", "kb-v13-slink kb-v13-slink-rubber");
+    // 颜色说的是"这一下松开会怎样"：写模式落的是蓝双链，看模式落的是金线。
+    // 两档共用同一个基类（青 = 蓝双链的颜色），只有看模式多加一个后缀类换成金色。
+    const cls =
+      "kb-v13-slink kb-v13-slink-rubber" + (write ? "" : " kb-v13-slink-rubber-manual");
+
+    let next;
+    if (target && write) {
+      // **写模式下落地的是蓝色贝塞尔**——那条 [[链]] 一写进正文，库就按双链把它
+      // 画成弧线。所以预览就得是那条弧线本身：这里走 routePoints 的话，松手
+      // 那一刻屏幕上"折线变弧线"，看着像连错了东西。
+      //
+      // 起点用 endAt 算而**不是直接拿 drag.start**：drag.start 是连接点本身，
+      // 而画出来的端点在 EDGE_PAD 外面，两者差一小截。
+      const e1 = endAt(pos.get(drag.fromPath) || { x: 0, y: 0 }, fromSide);
+      const e2 = endAt(target, toSide);
+      next = bezier(e1.p, e2.p, e1.dir, e2.dir, cls);
+    } else {
+      let pts;
+      if (target) {
+        pts = routePoints(drag.start, fromSide, portPos(target, toSide), toSide, []);
+      } else {
+        // 空白处：**一根引线加一个直角，直接停在指针上**。
+        // 这里绝不能调 routePoints——那条路遇到"目标在身后"会绕一个大 U，
+        // 而拖拽过程中指针绕着走一圈是常事，屏幕上会甩出一条巨大的回形针。
+        //
+        // 写模式落在空白也走这一支：落在空白**什么都不会发生**，所以形状本身
+        // 不是承诺，只有颜色是。
+        const dir = SIDE_DIR[fromSide] || { x: 1, y: 0 };
+        const s0 = step(drag.start, dir, STUB);
+        const elbow = axisOf(fromSide) === "h" ? { x: w.x, y: s0.y } : { x: s0.x, y: w.y };
+        pts = dedupe(orthogonalize([drag.start, s0, elbow, w], axisOf(fromSide)));
+      }
+      next = svgEl("path");
+      next.setAttribute("d", roundedPath(pts));
+      next.setAttribute("fill", "none");
+      next.setAttribute("class", cls);
+    }
     svg.replaceChild(next, ctx._rubber);
     ctx._rubber = next;
   });
@@ -966,6 +1195,17 @@ export function bindLinkMode(ctx) {
     const target = e.target && e.target.closest && e.target.closest(".kb-v13-snode");
     const toPath = target && target.dataset.path;
     if (!toPath || toPath === d.fromPath) return; // 落在空白或自己身上 = 不连
+    // 落点在卡片的哪一边。**两条路都要**（写模式记接法提示、看模式记金线），
+    // 所以提到写模式那个分支**前面**算一次——原来它长在下面那条路上，
+    // 于是写模式永远算不到边（3.0 刀 13）。
+    const layout = layoutFor(ctx, ctx.state.crystalPath);
+    const pos = posMapOf(ctx, ctx.state.crystalPath, layout);
+    const b = pos.get(toPath);
+    if (!b) return;
+    // 落在卡片的哪一边就记哪一边——线接在该接的地方，不是一刀切连到中心
+    const w = ctx._panzoom ? ctx._panzoom.clientToWorld(e.clientX, e.clientY) : { x: b.x, y: b.y };
+    const toSide = nearestSide(b, w);
+
     // 3.0 刀 9-D：**写入型**连线（用户 09-19 要的「通过连线来写入谁链接谁」）。
     //
     // 同一根拖拽动作，两种落法，由结构窗那颗模式按钮切：
@@ -976,16 +1216,17 @@ export function bindLinkMode(ctx) {
     // 而且写正文要走 `patchBody` + 基线比对 + 一次撤销那一整套（见 reader.js
     // 的 writeBacklink），那些都不该长在画线的地方。
     if (ctx.state.linkWrite) {
+      // 3.0 刀 13（用户 09-20）：「连蓝色双链……通过节点的连接来控制」。
+      //
+      // 记在 writeStoryLink **之前**：它是异步的，等它回来再记的话用户中途关窗
+      // 就丢了；而且它成功之后自己重画一遍，提示得先在场上才画得对。
+      //
+      // 写失败（冲突 / 文件不在了）**也照记**——记的是"他拖的这一下"，
+      // 不是"这次写盘成没成"。一条没有对应双链的提示什么都不影响：没人查它。
+      writeLinkSide(ctx, d.fromPath, toPath, d.side, toSide);
       if (ctx.writeStoryLink) ctx.writeStoryLink(d.fromPath, toPath);
       return;
     }
-    const layout = layoutFor(ctx, ctx.state.crystalPath);
-    const pos = posMapOf(ctx, ctx.state.crystalPath, layout);
-    const b = pos.get(toPath);
-    if (!b) return;
-    // 落在卡片的哪一边就记哪一边——线接在该接的地方，不是一刀切连到中心
-    const w = ctx._panzoom ? ctx._panzoom.clientToWorld(e.clientX, e.clientY) : { x: b.x, y: b.y };
-    const toSide = nearestSide(b, w);
     const list = manualLinks(ctx).filter((l) => !(l.from === d.fromPath && l.to === toPath));
     list.push({ from: d.fromPath, to: toPath, fromSide: d.side, toSide });
     writeManualLinks(ctx, list);
