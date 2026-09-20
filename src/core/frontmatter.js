@@ -78,6 +78,112 @@ export function patchBody(raw, newBody) {
   return fmBlock + pre + restoreEol(toStr(newBody), body);
 }
 
+/**
+ * 把正文里的几段 `[[…]]` 挖掉（3.0 刀 16）。
+ *
+ * 这是整个库里**唯一会吃掉用户手写文字**的函数，所以它单独一个纯函数、配 node 级
+ * 单测，不靠端到端兜。
+ *
+ * ⚠️ **调用方把结果拼成 `fmBlock + text`，不要走 patchBody。** patchBody 会把
+ * **原样**的正文前缀接回去，而链接被挖掉之后，写模式 ADD 加的那两行分隔换行就
+ * 落进了"前缀"区间——接回去等于凭空多留一行，文件跟写之前对不上。
+ * `splitCard` 保证 `fmBlock + body === raw`，所以"换掉正文那一段"精确地就是
+ * `fmBlock + 新正文`，行尾也自然原样保留。
+ *
+ * ⚠️ `spans` 的偏移必须是在**同一个串**上算出来的（`parseLinks(body)` 的输出）。
+ * 在一个串上算、在另一个串上切，症状是"删掉了旁边的几个字"——不报错，而且
+ * 直接写进笔记。
+ *
+ * @param {string} body  正文，**含开头空行前缀**（就是 splitCard 给的那个 body）
+ * @param {{start:number,end:number}[]} spans
+ * @returns {{text: string, removed: number, ateLines: boolean}}
+ *   `ateLines` = 有切口是**连整行带走的**，调用方据此决定要不要说明
+ *   "链后面跟着的那半句也一起没了"。
+ */
+export function cutLinkSpans(body, spans) {
+  const src = toStr(body);
+  const list = (Array.isArray(spans) ? spans : [])
+    .filter(
+      (s) =>
+        s &&
+        Number.isFinite(s.start) &&
+        Number.isFinite(s.end) &&
+        s.start >= 0 &&
+        s.end > s.start &&
+        s.end <= src.length
+    )
+    .map((s) => ({ start: s.start, end: s.end }))
+    .sort((a, b) => a.start - b.start);
+  if (!list.length) return { text: src, removed: 0, ateLines: false };
+
+  const cuts = [];
+  let ateLines = false;
+
+  for (const s of list) {
+    // 这一行：行首 = 本段之前最后一个 \n 之后；行尾 = 本段之后第一个 \n（不含）
+    const ls = src.lastIndexOf("\n", s.start - 1) + 1;
+    let le = src.indexOf("\n", s.end);
+    if (le < 0) le = src.length;
+    const before = src.slice(ls, s.start);
+    const after = src.slice(s.end, le);
+
+    // R1 —— **整行**：这一行除了链接什么都没有（前面允许留空白或列表符号，
+    // 不然 `- [[B]]` 会留下一个光秃秃的 `-`）。
+    if (/^[ \t]*(?:[-*+>]|\d+\.)?[ \t]*$/.test(before) && after.trim() === "") {
+      ateLines = true;
+      cuts.push({ start: twoNewlinesBefore(src, s.start, ls), end: le < src.length ? le + 1 : le });
+      continue;
+    }
+
+    // R2 —— **夹在句子里**：只挖链接本身，顺手吃掉紧邻的一个空格。
+    // **绝不动 `\n`**：那一行的换行是用户排的版，不是我们加的。
+    let a = s.start;
+    let b = s.end;
+    if (src[a - 1] === " " || src[a - 1] === "\t") a--;
+    else if (src[b] === " " || src[b] === "\t") b++;
+    cuts.push({ start: a, end: b });
+  }
+
+  // R0 —— 先合并相交/相邻的区间，再**从后往前**切。顺序反过来的话，切掉前面
+  // 那一段之后，后面那些偏移就全错位了。
+  cuts.sort((x, y) => x.start - y.start);
+  const merged = [];
+  for (const c of cuts) {
+    const last = merged[merged.length - 1];
+    if (last && c.start <= last.end) last.end = Math.max(last.end, c.end);
+    else merged.push({ start: c.start, end: c.end });
+  }
+  let text = src;
+  for (let i = merged.length - 1; i >= 0; i--) {
+    text = text.slice(0, merged[i].start) + text.slice(merged[i].end);
+  }
+  return { text, removed: list.length, ateLines };
+}
+
+/**
+ * 链接前面正压着的两个换行 —— 写模式 ADD 的分隔（`"\n\n" + link + "\n"`）。
+ *
+ * 返回那两个换行的起点；不是正好两个就退回 `ls`（这一行的行首），只切这一行。
+ *
+ * **为什么必须数得这么死**：ADD 的 `"\n\n"` 里有一个换行可能是**替正文补的**
+ * ——正文本来没有结尾换行时（`"正文"`），加完是 `"正文\n\n[[B]]\n"`，要还原成
+ * `"正文"` 就得从第一个换行起切。而正文本来就有结尾换行时（`"正文\n"`），
+ * 加完是 `"正文\n\n\n[[B]]\n"`，得从第三个换行起切——那里正好也是"链接前两个换行"。
+ * 两条路都落在这一个判据上，多吞一个少吞一个都会在文件里留下一行差。
+ *
+ * CRLF 的卡上，`restoreEol` 会把 ADD 那两个 LF 变成 `\r\n`，所以按"换行单元"
+ * （`\n` 或 `\r\n`）数，不按字符数。
+ */
+function twoNewlinesBefore(src, at, fallback) {
+  let i = at;
+  for (let n = 0; n < 2; n++) {
+    if (i > 0 && src[i - 1] === "\n") i--;
+    else return fallback;
+    if (i > 0 && src[i - 1] === "\r") i--;
+  }
+  return i;
+}
+
 /** 行尾归一成 LF。textarea 的取值/赋值都只认 LF，比较与显示前都得先过这一步。 */
 export function normalizeEol(text) {
   return toStr(text).replace(/\r\n|\r/g, "\n");

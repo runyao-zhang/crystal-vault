@@ -51,7 +51,14 @@ export function maskCode(raw) {
 
 /**
  * 从正文里解析出站双链。代码块 / 行内代码里的 `[[...]]` 不算。
- * @returns {{target: string, end: number}[]} end = `]]` 之后的偏移，用于取「关联理由」
+ *
+ * @returns {{target: string, start: number, end: number}[]}
+ *   `start` = 那个 `[` 的偏移，`end` = `]]` 之后的偏移（取「关联理由」用）。
+ *
+ *   ⚠️ `start` 必须是**整个匹配**的起点，不是 target 的起点——这样
+ *   `raw.slice(start, end)` 就是整段字面量（**含 `|别名`、含 `#小标题`**）。
+ *   3.0 刀 16 的「删蓝线」正是靠这两个偏移把那段字从正文里挖掉；
+ *   只给 target 算起点的话，带别名的链接会只挖半截，留下 `|别名]]` 这种残骸。
  */
 export function parseLinks(raw) {
   const out = [];
@@ -62,7 +69,7 @@ export function parseLinks(raw) {
   while ((m = WIKILINK_RE.exec(masked))) {
     if (m[1] === "!") continue;
     // 掩码只涂代码，链接文本本身没被动过，偏移在掩码串与原串上一致
-    out.push({ target: m[2].trim(), end: m.index + m[0].length });
+    out.push({ target: m[2].trim(), start: m.index, end: m.index + m[0].length });
   }
   return out;
 }

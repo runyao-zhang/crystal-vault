@@ -969,6 +969,10 @@ export async function mount({
       marqueeSel: [],
       marqueeRect: null,
       marqueeArm: false,
+      // 3.0 刀 16：这一次框选删的是**哪一种**线。库里**永远**是 "manual"——
+      // 蓝线那一档（"blue"）只在结构窗的写模式下由右键打开，而库这一屏没有写模式。
+      // 放这里是为了让「读不到就退成 manual」这条兜底有个明确的落点。
+      marqueeKind: "manual",
       // 3.0 刀 2 显示模式（"ring" / "canvas" / "grid" / "storyline"）。
       // ⚠️ 与 `ctx.stage`（舞台那个 DOM 节点）同名但完全无关，读的时候看上下文。
       // 它是**推导出来的缓存**：真正的源头是 openCrystal + prefs 里那两档，

@@ -296,6 +296,18 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
   // 3.0 刀 13：被右键藏掉入链出链的那几张卡。**每帧建一次**（几十项，够便宜）。
   const hidden = hiddenCardSet(ctx);
 
+  // 3.0 刀 16：蓝线的命中几何，与 drawManualLines 的 `_manualHit` 完全对称——
+  // 框选要拿它算重叠。SVG 里的线是 `pointer-events:none` 的，事件永远轮不到它们，
+  // 只能靠这份几何。
+  //
+  // ⚠️ **在函数开头无条件重建，不能在 drawLine 里建**：`hideLinks` 打开时下面那个
+  //    循环根本不跑，不无条件清的话上一帧的数组会留下来，框选就会删到屏幕上
+  //    根本没有的线。
+  // ⚠️ 与 `_manualHit` **各归各的**：这里先跑 drawLine，`drawManualLines` 随后把
+  //    `_manualHit` 整个换掉。两个数组绝不合并。
+  const blueGeom = [];
+  ctx._blueHit = blueGeom;
+
   // 连线画在节点**下面**：先建线，后建节点（DOM 顺序 + z-index 两条一起）。
   const drawLine = (e, cls) => {
     const a = pos.get(e.from);
@@ -324,7 +336,11 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
     const path = svgEl("path");
     path.setAttribute("d", roundedPath(pts));
     path.setAttribute("fill", "none");
-    path.setAttribute("class", cls);
+    // 3.0 刀 16：被框中的蓝线加一个类。**直接复用金线那个 `.kb-v13-slink-picked`**，
+    // styles.js 不用改：它排在 `.kb-v13-slink-direct` 之后、同优先级，于是选中即
+    // 变红加粗，还留着 dasharray。红 = 「按下去它会没」，与金线同一套语汇；
+    // 两种线互斥（kind 只有一个值），永不同时选中。
+    path.setAttribute("class", cls + (isPickedBlue(ctx, e) ? " kb-v13-slink-picked" : ""));
     // 端点另存一份 data-*：`<path>` 没有 x1/y1 可读，而端点是命中判定要用的东西。
     // 与 drawManualLines 同一口径（都过 base() 取一位小数）。
     path.setAttribute("data-x1", base(pts[0].x));
@@ -336,6 +352,9 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
     if (e.fwd) path.setAttribute("marker-end", "url(#" + ARROW_ID + ")");
     if (e.back) path.setAttribute("marker-start", "url(#" + ARROW_ID + ")");
     svg.appendChild(path);
+    // 留一份几何给框选用。**被藏掉的卡在上面就 return 了**，所以看不见的线不会
+    // 进这份表——那种线留在里面，框选就会删掉一根屏幕上根本没有的线。
+    blueGeom.push({ from: e.from, to: e.to, fwd: !!e.fwd, back: !!e.back, pts });
   };
   // 「隐藏双链」藏的是库自己算出来的那些线。**手工连的金线永远留着**：
   // 那是用户自己画的，不属于"可以藏起来的信息"。
@@ -982,8 +1001,7 @@ export function isLinking(ctx) {
  * 一个已经看不见的东西。
  */
 export function leaveStoryline(ctx) {
-  ctx.state.marqueeSel = [];
-  ctx.state.marqueeRect = null;
+  clearPicked(ctx);
   setLineEdit(ctx, false);
   setLinking(ctx, false);
 }
@@ -1042,10 +1060,28 @@ export function bindLinkMode(ctx) {
       // 落在金线上 = 进**连线编辑模式**（按住 S 框选、按 D 删）。
       // 同时退出连接模式：两个模式各说各的，同时开着的话屏幕上既有连接点
       // 又能框选，谁也说不清这一下点下去算什么。
+      //
+      // ⚠️ `setMarqueeKind` 必须排在 `setLineEdit` **前面**：后者在已经是 true 时
+      //    提前返回、根本不刷界面，顶栏那颗按钮的标签会停在上一档那三个字上。
+      setMarqueeKind(ctx, "manual");
       setLinking(ctx, false);
       setLineEdit(ctx, true);
       return;
     }
+    // 3.0 刀 16（用户 09-20）：「写模式下，右键之后，这个结构窗顶栏出现按钮：选框」。
+    //
+    // ⚠️ **连接模式不能退**：写模式存在的理由就是从连接点拖出 `[[目标卡]]`；
+    //    退了的话「右键一次」= 这扇窗再也写不进新线，而屏幕上只是少了一圈小圆点，
+    //    **不报错**。两档共存是安全的——框选那条路要 `isMarqueeArmed` 才抢指针
+    //    （捕获 + stopImmediatePropagation），没点「选框」之前，连接点上的按下
+    //    照旧归 bindLinkMode。
+    if (ctx.state.linkWrite) {
+      setMarqueeKind(ctx, "blue");
+      setLinking(ctx, true);
+      setLineEdit(ctx, true);
+      return;
+    }
+    setMarqueeKind(ctx, "manual");
     setLineEdit(ctx, false);
     setLinking(ctx, true);
   });
@@ -1306,8 +1342,7 @@ export function setLineEdit(ctx, on) {
   if (ctx.state.lineEdit === next) return false;
   ctx.state.lineEdit = next;
   if (!next) {
-    ctx.state.marqueeSel = [];
-    ctx.state.marqueeRect = null;
+    clearPicked(ctx);
     // 选框开关跟着模式一起关：它只在编辑模式里有意义，
     // 留着的话下次右键进模式时鼠标会**一进来就是框**，而用户没点过那颗按钮。
     ctx.state.marqueeArm = false;
@@ -1328,13 +1363,22 @@ export function refreshLineHint(ctx) {
     el.style.display = "none";
     return;
   }
-  const n = marqueeSel(ctx).length;
+  const blue = marqueeKind(ctx) === "blue";
+  const n = (blue ? blueSel(ctx) : marqueeSel(ctx)).length;
   // 文案按"此刻该做什么"分三档。顶栏那颗「选框」是这套交互唯一的入口，
   // 说明条的第一句就得把它指出来——否则用户只会盯着线发呆。
+  //
+  // 3.0 刀 16：蓝线那一档多一句「会从笔记里删掉」。**这几个字不能省**——那是
+  // 全窗唯一改用户手写内容的路，而确认弹窗是用户 09-20 明确不要的，
+  // 说明条就是仅有的告知。
   el.textContent = n
-    ? "已选中 " + n + " 根金色线 · 点「删除实线」或按 D · Esc 退出"
+    ? blue
+      ? "已选中 " + n + " 根蓝色线 · 点「删除蓝线」或按 D（会从笔记里删掉）· Esc 退出"
+      : "已选中 " + n + " 根金色线 · 点「删除实线」或按 D · Esc 退出"
     : isMarqueeArmed(ctx)
-      ? "拖动鼠标，框住要删的金色线 · Esc 退出"
+      ? blue
+        ? "拖动鼠标，框住要删的蓝色线（删的是笔记里的 [[链接]]）· Esc 退出"
+        : "拖动鼠标，框住要删的金色线 · Esc 退出"
       : "点顶栏「选框」，然后拖出方框 · Esc 退出";
   el.classList.toggle("kb-v13-linehint-hit", n > 0);
   el.style.display = "block";
@@ -1343,6 +1387,55 @@ export function refreshLineHint(ctx) {
 /** 框选中的那些线（存 from/to 这一对，和 cardLinks 里的条目一一对应） */
 export function marqueeSel(ctx) {
   return Array.isArray(ctx.state.marqueeSel) ? ctx.state.marqueeSel : [];
+}
+
+/** 框选中的蓝线（同样存 from/to；来源是 `_blueHit`，不是 cardLinks） */
+export function blueSel(ctx) {
+  return Array.isArray(ctx.state.blueSel) ? ctx.state.blueSel : [];
+}
+
+/**
+ * 这一次框选删的是**哪一种**线（3.0 刀 16）。
+ *
+ * 库那一屏永远读回 `"manual"`（它的 state 里根本没写过别的值），所以那条老路
+ * 一个字节都没变。
+ */
+export function marqueeKind(ctx) {
+  return ctx.state.marqueeKind === "blue" ? "blue" : "manual";
+}
+
+/**
+ * 记住「这一次要删哪一种」。**只有写模式下右键那两处调它。**
+ *
+ * ⚠️ 换了口味就**把上一次的选中清空**：留着的话「删除蓝线（2）」里的 2 指向的是
+ * 两根金线，按下去删的是笔记正文。同值则提前返回——库那一屏「右键金线」那条
+ * 老路会走到这里并立刻返回，什么都不动。
+ *
+ * ⚠️ 调用方要把它排在 `setLineEdit` **前面**：`setLineEdit(ctx, true)` 在已经是
+ * true 时提前返回、根本不刷界面，标签会停在上一档那三个字。
+ */
+export function setMarqueeKind(ctx, kind) {
+  const next = kind === "blue" ? "blue" : "manual";
+  if (marqueeKind(ctx) === next) return false;
+  ctx.state.marqueeKind = next;
+  clearPicked(ctx);
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  refreshLineHint(ctx);
+  redrawStoryLines(ctx);
+  return true;
+}
+
+/**
+ * 把两边的选中连同框选矩形一起清掉。
+ *
+ * 四处退出路径共用（`setLineEdit(false)` / `setMarqueeArm(false)` / `leaveStoryline`
+ * / `bindLineEdit` 的按下），集中一处是为了不漏清一边——漏了 blueSel 的话，
+ * 下次进编辑模式时按钮上那个数字是上一轮留下的。
+ */
+export function clearPicked(ctx) {
+  ctx.state.marqueeSel = [];
+  ctx.state.blueSel = [];
+  ctx.state.marqueeRect = null;
 }
 
 /**
@@ -1373,10 +1466,7 @@ export function setMarqueeArm(ctx, on) {
     if (!isLineEdit(ctx)) setLineEdit(ctx, true);
   }
   ctx.state.marqueeArm = next;
-  if (!next) {
-    ctx.state.marqueeSel = [];
-    ctx.state.marqueeRect = null;
-  }
+  if (!next) clearPicked(ctx);
   if (ctx.fs) ctx.fs.classList.toggle("kb-v13-marquee-arm", next);
   if (ctx.refreshStageUi) ctx.refreshStageUi();
   refreshLineHint(ctx);
@@ -1384,7 +1474,7 @@ export function setMarqueeArm(ctx, on) {
   return true;
 }
 
-/** 把选中的那些线删掉。顶栏那颗「删除实线」和 D 键都走这里 */
+/** 把选中的那些线删掉。顶栏那颗「删除实线 / 删除蓝线」和 D 键都走这里 */
 export function deletePickedFor(ctx) {
   const n = deletePicked(ctx);
   if (ctx.refreshStageUi) ctx.refreshStageUi();
@@ -1393,6 +1483,17 @@ export function deletePickedFor(ctx) {
 
 function isPicked(ctx, l) {
   return marqueeSel(ctx).some((s) => s.from === l.from && s.to === l.to);
+}
+
+/**
+ * 蓝线那一份。形状与 isPicked 一样，只是换一张表。
+ *
+ * ⚠️ **两张表绝不能合并成一张带 kind 的表**——金线和蓝线经常就是**同一对卡片**
+ *    （A→B 那根手工线，和 A 正文里那条 `[[B]]`），按 `from|to` 认条目就会撞键。
+ *    撞了的症状是：框选删掉一根金线，顺手把用户笔记正文里的 `[[…]]` 也挖了。
+ */
+function isPickedBlue(ctx, e) {
+  return blueSel(ctx).some((s) => s.from === e.from && s.to === e.to);
 }
 
 /**
@@ -1446,9 +1547,26 @@ function segHitsRect(a, b, r) {
   return x1 >= r.x && x0 <= r.x + r.w && y1 >= r.y && y0 <= r.y + r.h;
 }
 
-/** 这个矩形扫到的所有金线（返回 from/to 的列表） */
-function pickInRect(ctx, rect) {
+/**
+ * 这个矩形扫到的所有线（返回 from/to 的列表）。
+ *
+ * `kind` 选看哪一份几何，**默认 `"manual"`**——库那一屏只会走这个默认值，
+ * 所以那条老路一个字没变。
+ */
+function pickInRect(ctx, rect, kind) {
   const out = [];
+  if (kind === "blue") {
+    for (const g of ctx._blueHit || []) {
+      const pts = g.pts || [];
+      for (let i = 1; i < pts.length; i++) {
+        if (segHitsRect(pts[i - 1], pts[i], rect)) {
+          out.push({ from: g.from, to: g.to });
+          break;
+        }
+      }
+    }
+    return out;
+  }
   for (const g of ctx._manualHit || []) {
     const pts = g.pts || [];
     for (let i = 1; i < pts.length; i++) {
@@ -1463,12 +1581,37 @@ function pickInRect(ctx, rect) {
 
 /** 把选中的那些线删掉 */
 function deletePicked(ctx) {
+  if (marqueeKind(ctx) === "blue") return deletePickedBlue(ctx);
   const sel = marqueeSel(ctx);
   if (!sel.length) return 0;
   const gone = new Set(sel.map((s) => s.from + "|" + s.to));
   ctx.state.marqueeSel = [];
   editManual(ctx, (list) => list.filter((l) => !gone.has(l.from + "|" + l.to)));
   return sel.length;
+}
+
+/**
+ * 蓝线的「删」= **动笔记**（金线只是视图状态）。这是这一屏唯一不可逆的动作。
+ *
+ * 整条交给宿主侧那一份 `removeStoryLinks`：这一层不认识适配层，也不该认识
+ * （同 bindLinkMode 落线时那句注释）。
+ *
+ * ⚠️ 没有 `removeStoryLinks` 时**什么都不做**：库那一屏根本框不到蓝线
+ *    （那边的 kind 永远是 "manual"），真走到这里说明有人把 kind 写错了——
+ *    这时静默返回 0，远好过"按 viewstate 去删一根并不存在的金线"。
+ *
+ * 返回值可能是 Promise（宿主那份是异步的）。两个调用点都**不看返回值**，
+ * 别改依赖它的代码。
+ */
+function deletePickedBlue(ctx) {
+  const sel = blueSel(ctx);
+  if (!sel.length) return 0;
+  ctx.state.blueSel = [];
+  // 按钮当场收起来，别等异步回来——那期间点第二下会拿着空的选中再跑一趟
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  refreshLineHint(ctx);
+  if (!ctx.removeStoryLinks) return 0;
+  return ctx.removeStoryLinks(sel.map((s) => ({ from: s.from, to: s.to })));
 }
 
 /** 读—改—写。**一律拷一份改**：manualLinks 给的是草稿里那个数组本身 */
@@ -1667,8 +1810,7 @@ export function bindLineEdit(ctx) {
       const w = ctx._panzoom.clientToWorld(e.clientX, e.clientY);
       ateClick = false; // 旗子不许漏到下一次操作上
       marquee = { id: e.pointerId, x: e.clientX, y: e.clientY, wx: w.x, wy: w.y, rect: null };
-      ctx.state.marqueeSel = [];
-      ctx.state.marqueeRect = null;
+      clearPicked(ctx); // 两边的选中一起清，免得上一轮那一份的数字留在按钮上
       redrawStoryLines(ctx);
     },
     true
@@ -1687,7 +1829,12 @@ export function bindLineEdit(ctx) {
     };
     marquee.rect = rect;
     ctx.state.marqueeRect = rect; // 画图那一步读它
-    ctx.state.marqueeSel = pickInRect(ctx, rect);
+    // 3.0 刀 16：按这一轮的 kind 去扫**对应的那份**几何。库那一屏的 kind 永远是
+    // "manual"，走的还是 `_manualHit`——那条老路一个字没变。
+    const kind = marqueeKind(ctx);
+    const hits = pickInRect(ctx, rect, kind);
+    if (kind === "blue") ctx.state.blueSel = hits;
+    else ctx.state.marqueeSel = hits;
     redrawStoryLines(ctx);
   });
 
