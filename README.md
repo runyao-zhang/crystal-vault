@@ -30,6 +30,12 @@ It is not a better graph. It is a different starting point.
 
 Drag a line between two cards in that window and it writes a real `[[link]]` into the note — with a field for *why* you linked them, and one undo.
 
+**One page, one window — arranged by you.** The reader's **desk** spreads a document into windows you can drag and resize, laid out however you like, and they are still there next time you open the reader. The **dock** button in the top bar is the rack for them: drag a window onto the strip on the left and it is stowed, leaving an entry you can click to bring it back — stowed windows survive closing the reader. The same button tucks the right-hand column away so you can read wider.
+
+**Hang a web page beside your reading.** The `+` at the top of the dock opens an **external tab**, so a course site or a docs page can sit next to the page you are reading, draggable and stowable like any other window.
+
+> ⚠️ Whether a site *can* be embedded is decided by that site, not by this plugin — sites may refuse to be framed (Google does, across the board). That is a browser rule and there is no way around it. So the window always carries an **Open in browser** button: embeddable sites work as windows, and non-embeddable ones still have a way out. You never get a dead white box.
+
 **Recall before you peek.** In recall mode every card's content is hidden until you click. Say it to yourself first, then check. Switch to review mode when you just want to read through.
 
 ## Install
