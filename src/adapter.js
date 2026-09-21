@@ -42,6 +42,12 @@
  *   （由 core/model.js 的 bodyStartLine 算出：落正文首行，不停在 frontmatter 里）；
  *   缺省 / 0 = 笔记顶部。宿主分不出叶子、拿不到文件时照旧退回整页跳转——
  *   宁可老行为，也不能点了没反应。
+ * @property {(url: string) => boolean} openExternal
+ *   把一条 http/https 网址交给**系统浏览器**，返回「交出去了没有」。
+ *   给阅读器的外部标签页兜底用：那扇窗是 iframe，而站点可以用响应头拒绝被嵌
+ *   （`X-Frame-Options` / CSP `frame-ancestors`），嵌不进来时只能开浏览器。
+ *   宿主该怎么开是宿主的事（Electron 的 shell / window-open handler）；
+ *   核心只传一条网址，**不碰宿主 API**。打不开回 false，绝不抛。
  * @property {() => (object|null)} loadViewState
  *   读回上次存的视图状态。没存过、读不出、解析失败一律返回 null，**绝不抛异常**。
  *   返回的是原样读回的对象，合法性由核心判定（见 core/viewstate.js）——
@@ -261,6 +267,16 @@ export const ADAPTER_METHODS = [
   // 3.0 刀 12：「删除晶体」与阅读器的「返回」。
   // ⚠️ 名字是 trash**File** 不是 trashFolder——它同时管文件和文件夹（见下面那段）。
   "trashFile",
+  // 3.0 刀 19：把一条网址交给**系统浏览器**。
+  //
+  // 为什么这也要进契约：阅读器的「外部标签页」是 iframe，而很多站点在响应头里
+  // 禁止被别家页面嵌（`X-Frame-Options` / CSP `frame-ancestors`），Google 系
+  // 首当其冲。嵌不进来时唯一的出路是交给浏览器——而「怎么交给浏览器」是宿主
+  // 知识（Electron 的 shell / window-open handler），核心不该赌。
+  //
+  // **绝不抛**：打不开就回 false，由核心说一句人话。返回什么都不代表「打开了」，
+  // 只代表「这条请求交给宿主了」——真正的打开是宿主的异步动作，核心看不见。
+  "openExternal",
 ];
 
 /**

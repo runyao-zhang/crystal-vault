@@ -355,7 +355,22 @@ export function createReader(ctx, opts = {}) {
     // 插在最前面也**保住了下面那条老约束**（桌面排在「边看边记」前面）——
     // 那一栏仍然是最后一个，仍然在屏幕右边。
     '<div class="kb-v13-reader-dock off" id="kb-reader-dock">' +
+    // 最上面那颗 `+`：开一个**外部标签页**（3.0 刀 19）。
+    '<button type="button" class="kb-v13-dock-add" id="kb-reader-dockadd" aria-expanded="false"' +
+    ' title="新建外部标签页：填一条网址，在这一页里打开它（网课、文档站、自己的博客）。' +
+    '有些站点不允许被别的页面嵌，那时候给你一颗「用系统浏览器打开」。">＋</button>' +
     '<div class="kb-v13-dock-list" id="kb-reader-docklist"></div>' +
+    // 填网址的那一小块。**贴在栏右边，不是塞进栏里**——栏只有 56px 宽，
+    // 塞进去连一条网址都看不全，而这是个要打字的框。
+    '<div class="kb-v13-dock-new off" id="kb-reader-docknew">' +
+    '<input type="text" class="kb-v13-dock-url" id="kb-reader-dockurl"' +
+    ' placeholder="https://…" autocomplete="off" spellcheck="false">' +
+    '<div class="kb-v13-dock-newbtns">' +
+    '<button type="button" class="kb-v13-dock-ok" id="kb-reader-dockok">打开</button>' +
+    '<button type="button" class="kb-v13-dock-cancel" id="kb-reader-dockcancel">取消</button>' +
+    "</div>" +
+    '<div class="kb-v13-dock-msg" id="kb-reader-dockmsg"></div>' +
+    "</div>" +
     "</div>" +
     '<div class="kb-v13-reader-sheets" id="kb-reader-sheets">' +
     '<div class="kb-v13-reader-grid" id="kb-reader-grid"></div>' +
@@ -517,6 +532,12 @@ export function createReader(ctx, opts = {}) {
   const dockListEl = $("kb-reader-docklist");
   const dockBtn = $("kb-reader-dockbtn");
   const sideBtn = $("kb-reader-sidebtn");
+  const dockAddBtn = $("kb-reader-dockadd");
+  const dockNewEl = $("kb-reader-docknew");
+  const dockUrlEl = $("kb-reader-dockurl");
+  const dockOkBtn = $("kb-reader-dockok");
+  const dockCancelBtn = $("kb-reader-dockcancel");
+  const dockMsgEl = $("kb-reader-dockmsg");
   const sheetsEl = $("kb-reader-sheets");
   const floatsEl = $("kb-reader-floats");
   const holdEl = $("kb-reader-hold");
@@ -1147,16 +1168,25 @@ export function createReader(ctx, opts = {}) {
   const isFixedKind = (kind) => kind === "pdf" || kind === "image";
 
   /**
-   * 内容盒分**三种**，不是样式偏好，是三套排版：
+   * 内容盒分**四种**，不是样式偏好，是四套排版：
    *   `-fixed`  PDF / 图片：一页就是一屏，裁切 + 缩放（见 pagezoom.js）。
    *   `-flow`   卡片 / markdown：块级流 + 纵向滚动条。
    *   `-embed`  结构窗（3.0 刀 9-D）：里面是一块**自绘的可平移世界**，
    *             要撑满、要 `overflow:hidden`、**不能有内边距**——相机算的是
    *             盒子的真实尺寸，多一圈 padding，世界原点就偏一圈，整片画面
    *             会跟着歪，而且歪得很小、看着像"没对齐"而不是像 bug。
+   *   `-web`    外部标签页（3.0 刀 19）：里面是一整个 `<iframe>`，
+   *             **不能有内边距也不能能滚**——滚动条归网页自己，外面再套一层
+   *             会在窗里出现两条滚动条，而且外面那条滚不动（内容不在流里）。
    */
   const deskBoxClass = (kind) =>
-    isFixedKind(kind) ? "kb-v13-desk-fixed" : kind === "storyline" ? "kb-v13-desk-embed" : "kb-v13-desk-flow";
+    isFixedKind(kind)
+      ? "kb-v13-desk-fixed"
+      : kind === "storyline"
+        ? "kb-v13-desk-embed"
+        : kind === "web"
+          ? "kb-v13-desk-web"
+          : "kb-v13-desk-flow";
 
   /**
    * 内容盒里那一层被 transform 的 stage。PDF 与图片才有。
@@ -1243,9 +1273,22 @@ export function createReader(ctx, opts = {}) {
   function deskWinTitle(w) {
     // 结构窗没有文件路径，`shortFolder("")` 是空串——不特判的话它顶上会写着
     // 「文献」，和旁边那几扇真的文献窗长得一模一样，谁也分不清点的是哪一扇。
-    return w.kind === "storyline"
-      ? "结构：" + (shortFolder(w.crystal) || w.crystal || "?")
-      : shortFolder(w.path) || baseName(w.path) || "文献";
+    if (w.kind === "storyline") return "结构：" + (shortFolder(w.crystal) || w.crystal || "?");
+    // 外部标签页的 `path` 是**一条网址**，不是 vault 路径。不特判的话
+    // `shortFolder` 会拿它当路径去切，切出来一段 `https:` 之类的怪东西。
+    // 显示站点名（`www.google.com`），整条网址进 `title` 提示。
+    if (w.kind === "web") return hostOf(w.path) || "网页";
+    return shortFolder(w.path) || baseName(w.path) || "文献";
+  }
+
+  /**
+   * 一条网址的站点名。取不出来就**原样退回**——不截成空串：
+   * 空串会让标题栏和收纳栏那一格变成一片空白，那比显示一条丑网址更难懂。
+   */
+  function hostOf(url) {
+    const s = toStr(url);
+    const m = /^https?:\/\/([^/?#]+)/i.exec(s);
+    return m ? m[1] : s;
   }
 
   function buildDeskWin(w) {
@@ -1282,6 +1325,16 @@ export function createReader(ctx, opts = {}) {
       toDock.title = "收进左边的收纳栏：窗从桌面上拿走，栏里留一条，点一下就回来";
       toDock.addEventListener("click", () => stowDeskWin(w.id));
       bar.insertBefore(toDock, close);
+    }
+    // 外部标签页多一颗 ↗。它是这扇窗**唯一可靠的出路**：站点可以用响应头拒绝
+    // 被嵌（Google 系全都拒），那时候窗里是一片空白、或者站点自己写的一句报错
+    // ——而用户此刻要的是「看到那个页面」，不是「研究为什么白屏」（3.0 刀 19）。
+    if (w.kind === "web") {
+      const openOut = EL("button", "kb-v13-desk-open", "↗");
+      openOut.type = "button";
+      openOut.title = "用系统浏览器打开这条网址";
+      openOut.addEventListener("click", () => openInBrowser(w.path));
+      bar.insertBefore(openOut, close);
     }
     // 卡片窗与 markdown 文献窗各多一颗 ✎：**就地改正文**（3.0 刀 9 第二版）。
     // 用户的原话是「卡片悬浮窗里面的内容需要编辑并且更改」，后来又要了
@@ -1371,6 +1424,25 @@ export function createReader(ctx, opts = {}) {
         // 点过哪扇页窗，「现在在读第几页」就跟到哪扇。卡片窗不参与。
         if (w.kind === "pdf") desk.pageId = w.id;
         node.style.zIndex = String(++deskZ);
+        // ⚠️ 外部标签页里那个 `<iframe>` 会**吃掉指针事件**：指针一进它的区域，
+        // 父文档就再也收不到 `pointermove` / `pointerup`（iframe 里的事件不冒泡出来）。
+        // 而 `bindDeskDrag` 的 move / up 全绑在父文档上，指针捕获又要**过了 4px
+        // 阈值**才建立——从标题栏下沿往下拖的那几个像素正好落在 iframe 上。
+        // 后果不只是「拖不动」：`pointerup` 收不到，`bindDeskDrag` 里那个 `drag`
+        // 变量就永远清不掉，那一扇窗**从此再也拖不动**（`if (drag) return`）。
+        //
+        // 所以按下的那一刻就把 iframe 的指针事件关掉（`.kb-v13-desk-dragging`
+        // 那条 CSS），松手再打开。挂在 `node` 的捕获阶段上，是因为标题栏是它的后代。
+        if (w.kind === "web") {
+          node.classList.add("kb-v13-desk-dragging");
+          const off = () => {
+            node.classList.remove("kb-v13-desk-dragging");
+            doc.removeEventListener("pointerup", off);
+            doc.removeEventListener("pointercancel", off);
+          };
+          doc.addEventListener("pointerup", off);
+          doc.addEventListener("pointercancel", off);
+        }
       },
       true
     );
@@ -2014,8 +2086,12 @@ export function createReader(ctx, opts = {}) {
     // 一并择出去，它每次都会显示「找不到这份文献：」（而它的 path 本来就是空的，
     // 那句话后面连个文件名都没有）。
     const isStory = w.kind === "storyline";
-    const d = isCard || isStory ? null : st.docs.find((x) => x.path === w.path);
-    if (!isCard && !isStory && !d) {
+    // 外部标签页**也不在 `st.docs` 里**（同一件事的第三个形态）：它的 `path`
+    // 是一条网址，拿它去文献清单里找当然找不到。不择出去的话，这扇窗每次都会
+    // 显示「找不到这份文献：https://…」。
+    const isWeb = w.kind === "web";
+    const d = isCard || isStory || isWeb ? null : st.docs.find((x) => x.path === w.path);
+    if (!isCard && !isStory && !isWeb && !d) {
       box.textContent = "找不到这份文献：" + w.path;
       return;
     }
@@ -2032,7 +2108,10 @@ export function createReader(ctx, opts = {}) {
     // 而结构窗里是一块自绘的可平移世界——多一圈 padding，相机算出来的世界原点
     // 就偏一圈，整片画面跟着歪（`-embed` 那条注释里写了同一件事）。
     // 这里和 `deskBoxClass` 是**两处**决定类名的地方，改一处别忘了这一处。
-    if (!isFixedKind(w.kind) && w.kind !== "storyline") box.classList.add("kb-v13-desk-flow");
+    // 这里和 `deskBoxClass` 是**两处**决定类名的地方，改一处别忘了这一处。
+    // 外部标签页也不吃 `-flow`：它里面的 iframe 自带滚动条，外面再套一层
+    // 会在窗里出现两条、而外面那条还滚不动（内容不在文档流里）。
+    if (!isFixedKind(w.kind) && w.kind !== "storyline" && !isWeb) box.classList.add("kb-v13-desk-flow");
     // 正在画的是**只读视图**，编辑态到此为止。只把 `on` 放下、不整个丢掉：
     // 保存之后那条「已保存 [撤销]」还要靠 `prev` / `base` 才撤得回去。
     // （改行号区间、翻页也会走到这儿——那时候编辑框本来就该让位。）
@@ -2067,6 +2146,11 @@ export function createReader(ctx, opts = {}) {
       if (isStory) {
         renderDeskMeta(w, meta);
         mountEmbedStory(w, box);
+        return;
+      }
+      if (isWeb) {
+        renderDeskMeta(w, meta);
+        mountDeskFrame(w, box);
         return;
       }
       const src = await ensureSource(d);
@@ -2281,6 +2365,9 @@ export function createReader(ctx, opts = {}) {
     dockBtn.classList.toggle("kb-v13-reader-nav-on", st.dockOn);
     dockEl.classList.toggle("off", !st.dockOn);
     dockHot(false);
+    // 栏收起来了，那块填网址的小面板不该留在屏幕上（它贴在栏右边，
+    // 栏一没它就成了桌面上一个没来由的浮块）。
+    if (!st.dockOn) showDockNew(false);
     refreshDock();
   }
 
@@ -2365,6 +2452,143 @@ export function createReader(ctx, opts = {}) {
     showDeskWin(id); // 已经开着的话它自己会早退，不会建出第二扇
     refreshDeskUi();
     persistDesk();
+  }
+
+  // ---- 外部标签页（3.0 刀 19）----
+  //
+  // 收纳栏最上面那颗 `+` 开出来的：一条网址、一扇窗。
+  //
+  // ⚠️ **能不能显示由站点说了算，不是我们。** 站点可以用响应头拒绝被嵌进别人的
+  // 页面（`X-Frame-Options` / CSP 的 `frame-ancestors`），Google 系首当其冲，
+  // 大部分带登录的站也拒。这件事没有绕过的办法——绕要靠代理，那是另一件事，
+  // 而且会把用户的登录态交给一个中间人。
+  //
+  // 所以这扇窗的设计目标不是「永远能显示」，是「**永远有用**」：
+  //   - 标题栏上常驻一颗 ↗，任何时候都能交给系统浏览器；
+  //   - 一直画不出来就自己说一句，并在框里再给一颗同样的按钮。
+  // 嵌得进去的站（网课、文档站、自己的博客）照常当一扇窗用，还能收进收纳栏。
+
+  /** 「一直没画出来」那条提示等多久。够宽带下的慢站喘口气，又不至于让人干等。 */
+  const WEB_HINT_MS = 6000;
+
+  /** 认得出的一条网址。`\s` 也挡掉：粘贴进来的东西常带换行和空格。 */
+  const URL_RE = /^https?:\/\/[^\s]+$/i;
+
+  /**
+   * 用户敲的东西 → 一条能用的网址。**认不出就回空串**，由调用方说话。
+   *
+   * 没写协议就补 `https://`，而不是报错：敲 `www.bilibili.com` 是常事，
+   * 为少打一个前缀让他重来一遍没道理。但**只认 http / https**——`file:`、
+   * `javascript:`、`data:` 这类交给宿主去开是危险的，不该有第二种解释。
+   */
+  function normalizeUrl(raw) {
+    let s = toStr(raw).trim();
+    if (!s) return "";
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = "https://" + s;
+    return URL_RE.test(s) ? s : "";
+  }
+
+  /** 交给系统浏览器。走适配层——「怎么交给浏览器」是宿主知识（见 adapter.js）。 */
+  function openInBrowser(url) {
+    let ok = false;
+    try {
+      ok = !!adapter.openExternal(url);
+    } catch (e) {
+      ok = false;
+    }
+    // 失败要说出来，而且**把网址带上**：这条路本来就只剩它了，静默失败等于把
+    // 用户关在这扇白屏的窗里，连手动复制一条网址都做不到。
+    if (!ok) say("这个宿主开不了浏览器。网址是：" + url, false);
+    return ok;
+  }
+
+  function addWebWin(raw) {
+    const u = normalizeUrl(raw);
+    if (!u) {
+      say("这不像一条网址。写成 https://example.com 这样。", false);
+      return null;
+    }
+    // 同一个网址不再开第二扇（同 `openStoryWindow` 的去重口径）。已经有一扇的话
+    // 把它**拿出来**——它多半正收在栏里，不拿出来用户会觉得「点了没反应」。
+    const hit = desk.wins.find((w) => w.kind === "web" && w.path === u);
+    if (hit) {
+      showDeskWin(hit.id);
+      return hit;
+    }
+    // 比文献窗大一点：网页是按窗口宽度排版的，460 宽会把大多数站挤成手机版。
+    return addDeskWin({ kind: "web", path: u, want: { w: 760, h: 580 } });
+  }
+
+  function showDockNew(on) {
+    const next = !!on;
+    dockNewEl.classList.toggle("off", !next);
+    dockAddBtn.setAttribute("aria-expanded", next ? "true" : "false");
+    dockMsgEl.textContent = "";
+    if (next) {
+      dockUrlEl.value = "";
+      try {
+        dockUrlEl.focus();
+      } catch (e) {
+        /* 拿不到焦点不影响用 */
+      }
+    }
+  }
+
+  function commitDockUrl() {
+    const u = normalizeUrl(dockUrlEl.value);
+    if (!u) {
+      // **说在这块面板里**，不是 `say()`：那句在阅读器顶栏，而用户的视线正在
+      // 这块弹出来的小面板上；而且顶栏那句会被下一次操作冲掉。
+      dockMsgEl.textContent = "这不像一条网址。写成 https://example.com 这样。";
+      return;
+    }
+    showDockNew(false);
+    addWebWin(u);
+  }
+
+  /**
+   * 把一条网址画进窗里。
+   *
+   * ⚠️ **已经指着同一条网址的 iframe 不重建**。`mountDeskWin` 会因为翻页、保存、
+   * 改行号被反复调用，而 iframe 一重建就是整页重新加载——用户刚滚到的位置、
+   * 刚填了一半的表单、正在播的视频，全都冲掉。而且那是**看不出是 bug** 的那种坏：
+   * 屏幕上还是同一个页面，只是回到了顶部。
+   */
+  function mountDeskFrame(w, box) {
+    const want = toStr(w.path);
+    const old = box.querySelector("iframe.kb-v13-desk-frame");
+    if (old && old.getAttribute("data-url") === want) return;
+    box.textContent = "";
+    const frame = doc.createElement("iframe");
+    frame.className = "kb-v13-desk-frame";
+    frame.setAttribute("data-url", want);
+    // **不给 `sandbox`**：给了之后绝大多数站点的登录态和存储都打不开，等于把这扇
+    // 窗变成废物。这里装的是**用户自己填的网址**，不是第三方往他页面里注入的东西
+    // ——威胁模型和「渲染一张卡片里的 markdown」同一档，不是「渲染陌生人的 HTML」。
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
+    const hint = EL("div", "kb-v13-desk-webhint");
+    const tip = EL("div", "kb-v13-desk-webtip");
+    tip.textContent = "正在打开……";
+    const go = EL("button", "kb-v13-desk-webbtn", "用系统浏览器打开");
+    go.type = "button";
+    go.addEventListener("click", () => openInBrowser(want));
+    hint.append(tip, go);
+    let done = false;
+    frame.addEventListener("load", () => {
+      done = true;
+      hint.remove();
+    });
+    frame.src = want;
+    box.append(frame, hint);
+    // ⚠️ `load` **不是**「画出来了」的证据：被 `X-Frame-Options` 拒掉时，
+    // Chromium 照样会给那张错误页发一次 load。所以这条提示是**按时间**兜底的
+    // ——超时还没 load，说明多半是压根没连上。至于被拒绝的那一种，站点自己会在
+    // 框里写一句报错，用户看得见；而标题栏那颗 ↗ 从头到尾都在，不靠这条提示。
+    win.setTimeout(() => {
+      if (done || !hint.isConnected) return;
+      tip.textContent = "这一页一直没画出来。可能是网不通，也可能是这个站不让别的页面嵌它。";
+    }, WEB_HINT_MS);
   }
 
   /** 「＋ 页」：把当前这份文献的下一段摆上桌。 */
@@ -3884,6 +4108,17 @@ export function createReader(ctx, opts = {}) {
   // 3.0 刀 18。两颗一起看：一颗收窗、一颗收栏，都是「把地方腾出来读」。
   dockBtn.addEventListener("click", () => setDockMode(!st.dockOn));
   sideBtn.addEventListener("click", () => setSideTucked(!st.sideTucked));
+  // 3.0 刀 19：收纳栏那颗 `+`，和它那块填网址的小面板。
+  dockAddBtn.addEventListener("click", () => showDockNew(dockNewEl.classList.contains("off")));
+  dockOkBtn.addEventListener("click", () => commitDockUrl());
+  dockCancelBtn.addEventListener("click", () => showDockNew(false));
+  dockUrlEl.addEventListener("keydown", (e) => {
+    // 输入框里的按键归输入框。不拦住的话，阅读器那几个翻页键（← / → / PageDown）
+    // 会在用户打网址时顺手把文献翻一屏。
+    e.stopPropagation();
+    if (e.key === "Enter") commitDockUrl();
+    else if (e.key === "Escape") showDockNew(false);
+  });
   // 「边看边记」是**挤**过去的，不是瞬间换版式：宽度过渡中间量到的那个宽度是个
   // 不存在的几何，拿它去算网格、去夹桌面窗，算出来的都是废的。所以过渡期间什么都
   // 不算，等它走完再补一次——`resizeNow()` 就是那个唯一的出口（桌面开着时重新夹

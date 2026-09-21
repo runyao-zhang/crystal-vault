@@ -46,6 +46,9 @@ export function createFakeAdapter({
   docs = [],
   binaries = {},
   onOpenNote,
+  // 3.0 刀 19：外部标签页的浏览器兜底。注入它就等于「宿主能开浏览器」，
+  // 顺便把开出去的网址记下来。
+  onOpenExternal,
   onWriteCard,
   onCreateCard,
   onCreateFolder,
@@ -152,6 +155,17 @@ export function createFakeAdapter({
       // 别写成 { split, line } 字面量——调用方没给 line 时那样会凭空多出一个
       // line: undefined 的键，「split 原样交给宿主」那条契约就变味了。
       if (onOpenNote) onOpenNote(path, { ...opts, split: !!opts.split });
+    },
+
+    // 3.0 刀 19：外部标签页的浏览器兜底。探测那条回调是**展开转发**那个路子，
+    // 与 openNote 同一条（不给就什么都不记，回 true = 「交出去了」。
+    // 归 false 会让核心说一句「打不开」，而测试里根本没打算真开浏览器）。
+    openExternal(url) {
+      if (onOpenExternal) {
+        onOpenExternal(url);
+        return true;
+      }
+      return true;
     },
 
     // 读取失败（截断的 JSON / 存储被禁用）一律当「没存过」。

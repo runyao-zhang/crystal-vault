@@ -1966,7 +1966,10 @@ const READER = [
 const READER_DOCK = [
   ".kb-v13-reader-dock{",
   "  flex:0 0 56px;display:flex;flex-direction:column;",
-  "  padding:10px 6px;gap:8px;overflow:hidden;",
+  // ⚠️ `overflow` 必须是 visible、并且自己 `position:relative`：填网址那块小面板
+  // 要**伸到栏外面**去（栏只有 56px，一个网址输入框塞进去连一行都看不全），
+  // 而它是绝对定位挂在栏里的。裁掉的话那块面板就永远打不开——症状是「点了 + 没反应」。
+  "  padding:10px 6px;gap:8px;overflow:visible;position:relative;",
   "  border-right:1px solid var(--background-modifier-border, rgba(0,0,0,.12));",
   // 底色默认白，可由插件设置改（`--kb-dock-bg`，见 entry-plugin.js 里那一行）。
   // 做成变量而不是写死：默认浅色是用户点名的，但阅读器其余部分跟着深色主题走，
@@ -2004,6 +2007,71 @@ const READER_DOCK = [
   "}",
   ".kb-v13-dock-drop:hover{background-color:rgba(200,40,40,.14)!important;color:#b3261e!important;}",
   ".kb-v13-dock-empty{font-size:11px;line-height:1.5;padding:6px;color:var(--text-faint, #8b95a1);}",
+  // ---- 外部标签页（3.0 刀 19）----
+  // 最上面那颗 `+`。
+  ".kb-v13-dock-add{",
+  "  flex:0 0 auto;cursor:pointer;border:0;border-radius:8px;",
+  "  padding:5px 0;font-size:15px;line-height:1;font-family:system-ui,sans-serif;",
+  "  color:var(--text-muted, #4a5560)!important;background-color:rgba(0,0,0,.05)!important;",
+  "}",
+  ".kb-v13-dock-add:hover{background-color:rgba(0,0,0,.11)!important;}",
+  // 填网址那一块：**贴在栏右边**（`left:100%`），不是塞在栏里。
+  ".kb-v13-dock-new{",
+  "  position:absolute;left:100%;top:10px;width:250px;z-index:20;",
+  "  display:flex;flex-direction:column;gap:6px;padding:9px;border-radius:9px;",
+  "  background:var(--background-primary, #fff);",
+  "  border:1px solid rgba(0,0,0,.16);box-shadow:0 8px 22px rgba(0,0,0,.18);",
+  "  font-family:system-ui,sans-serif;",
+  "}",
+  ".kb-v13-dock-new.off{display:none;}",
+  // ⚠️ 输入框的底色字色带 `!important` + 不透明色 + `color-scheme`：
+  // 宿主和各家主题统一给 `input` 套皮肤，而且常排在我们注入的样式之后。
+  // `.kb-v13-edit-input` 那条踩过（深色主题里那几个框变成一大块白底）。
+  ".kb-v13-dock-url{",
+  "  width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;font-size:12px;",
+  "  border:1px solid rgba(0,0,0,.2)!important;",
+  "  background-color:#fff!important;color:#1f2933!important;",
+  "  color-scheme:light;",
+  "}",
+  ".kb-v13-dock-newbtns{display:flex;gap:6px;}",
+  ".kb-v13-dock-ok,.kb-v13-dock-cancel{",
+  "  flex:1;cursor:pointer;border-radius:6px;padding:5px 0;",
+  "  font-size:12px;font-family:system-ui,sans-serif;",
+  "}",
+  ".kb-v13-dock-ok{",
+  "  border:0;background-color:#2f7fd4!important;color:#fff!important;",
+  "}",
+  ".kb-v13-dock-cancel{",
+  "  border:1px solid rgba(0,0,0,.18)!important;background-color:transparent!important;",
+  "  color:#4a5560!important;",
+  "}",
+  ".kb-v13-dock-msg{font-size:11px;line-height:1.4;color:#b3261e;}",
+  ".kb-v13-dock-msg:empty{display:none;}",
+  // 网页窗的内容盒：**不留内边距、不自己滚**——滚动条归网页自己。
+  ".kb-v13-desk-web{position:relative;padding:0;overflow:hidden;display:flex;}",
+  ".kb-v13-desk-frame{flex:1;width:100%;height:100%;border:0;background:#fff;}",
+  // 拖动期间把 iframe 的指针事件关掉（见 reader.js 那段长注释：不开的话
+  // `pointerup` 收不到，`bindDeskDrag` 里那个 `drag` 永远清不掉，那扇窗就再也拖不动了）。
+  ".kb-v13-desk-dragging .kb-v13-desk-frame{pointer-events:none;}",
+  // 「一直没画出来」那条兜底提示。盖在框上，但**不挡住**（下面那颗按钮要能点）。
+  ".kb-v13-desk-webhint{",
+  "  position:absolute;inset:auto 0 0 0;display:flex;align-items:center;gap:8px;",
+  "  padding:7px 9px;font-size:11px;line-height:1.4;font-family:system-ui,sans-serif;",
+  "  background:rgba(255,255,255,.95);color:#4a5560;border-top:1px solid rgba(0,0,0,.12);",
+  "}",
+  ".kb-v13-desk-webtip{flex:1;min-width:0;}",
+  ".kb-v13-desk-webbtn{",
+  "  flex:0 0 auto;cursor:pointer;border:0;border-radius:6px;padding:4px 8px;",
+  "  font-size:11px;font-family:system-ui,sans-serif;",
+  "  background-color:#2f7fd4!important;color:#fff!important;",
+  "}",
+  // 标题栏那颗 ↗。与 `.kb-v13-desk-dock` 同一排、同一种做法。
+  ".kb-v13-desk-open{",
+  "  cursor:pointer;border:0;padding:2px 6px;border-radius:5px;",
+  "  font-size:11px;line-height:1;font-family:system-ui,sans-serif;",
+  "  color:var(--text-muted, rgba(150,185,215,.7))!important;background-color:transparent!important;",
+  "}",
+  ".kb-v13-desk-open:hover{background-color:rgba(255,255,255,.12)!important;color:var(--text-normal, #d7e8fa)!important;}",
   // ---- 「边看边记」收起来（3.0 刀 18）----
   //
   // ⚠️ 收起走 `-tucked` 而**不是复用 `-off`**：那个是 `display:none`，而
@@ -2058,7 +2126,8 @@ const REDUCED_MOTION = [
   "  .kb-v13-mode-btn,.kb-v13-ifloat-mode-btn{transition:none!important;}",
   // 3.0 刀 18：收纳栏那几颗按钮的 hover，以及「边看边记」挤出挤进的那一段宽度。
   // 后者尤其要停——它本来就是为了让人看清"挤"的过程，而这个设置的意思正是别动。
-  "  .kb-v13-dock-name,.kb-v13-dock-drop,.kb-v13-desk-dock,.kb-v13-reader-side{transition:none!important;}",
+  "  .kb-v13-dock-name,.kb-v13-dock-drop,.kb-v13-dock-add,.kb-v13-dock-ok,.kb-v13-dock-cancel,",
+  "  .kb-v13-desk-dock,.kb-v13-desk-open,.kb-v13-desk-webbtn,.kb-v13-reader-side{transition:none!important;}",
   "}",
 ];
 

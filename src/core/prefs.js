@@ -27,7 +27,14 @@ export const MAX_DESK_WINDOWS = 24;
  * ——它和前面几种有个根本差别：**它没有文件**，画的是一颗晶体。
  * 所以下面 `sanitizeDesk` 里那条「路径必填」对它不适用（见那里的注释）。
  */
-const DESK_KINDS = ["pdf", "image", "markdown", "card", "storyline"];
+// 3.0 刀 19 加了 `web`：收纳栏那个 `+` 开出来的**外部标签页**。
+//
+// 它的 `path` 就是那条网址（不是 vault 路径）——所以它**不需要**在
+// `sanitizeDesk` 的「按 kind 决定 path 必填」那一段里特判：网址当然非空，
+// 走的是和文献窗同一条「有 path 就收」的支。要小心的是**下游**：
+// `releaseSource(w.path)` 之类拿它当 vault 路径查表的地方，查不到就该是空操作
+// （那些地方本来就判了 `st.sources.get(path)` 有没有命中）。
+const DESK_KINDS = ["pdf", "image", "markdown", "card", "storyline", "web"];
 const PER_PAGE_MIN = 5;
 const PER_PAGE_MAX = 500;
 

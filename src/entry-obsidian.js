@@ -633,6 +633,48 @@ export function createObsidianAdapter({
       app.workspace.openLinkText(path, "", false);
     },
 
+    // 3.0 刀 19：把网址交给系统浏览器。阅读器的外部标签页嵌不进来时走这条。
+    //
+    // ⚠️ **三条路依次试，而且都要试**：这条路的失败是**静默的**（点了什么都不发生），
+    // 而用户点这颗按钮时已经站在「网页嵌不进来」那一档了——再给他一个没反应，
+    // 这扇窗就彻底是死的。每一条都包在自己的 try 里，一条不通换下一条。
+    //
+    //   1. Electron 的 `shell.openExternal` —— 桌面端最直接的一条。用
+    //      `globalThis.require` 取（**不是裸 `require`**）：同一个文件也被
+    //      dataviewjs 形态打包，那边没有 CommonJS 的 `require`，裸写会让打包器
+    //      在解析阶段就报错——而这一条本来就该是「拿不到就算了」。
+    //   2. `window.open(url, "_blank")` —— 网页标准 API。Obsidian 桌面把外链
+    //      交给系统的 window-open handler，效果通常和上面一样。
+    //      这条**必须带 `_blank`**：不给的话同窗口导航会把整个 Obsidian 换掉。
+    openExternal(url) {
+      const u = String(url || "").trim();
+      // 只放行 http/https。`file:` / `javascript:` 这类交给宿主去开是危险的，
+      // 而这一条网址来自用户在输入框里敲的东西——不该有第二个解释。
+      if (!/^https?:\/\//i.test(u)) return false;
+      try {
+        const req = typeof globalThis !== "undefined" ? globalThis.require : null;
+        if (typeof req === "function") {
+          const shell = req("electron").shell;
+          if (shell && typeof shell.openExternal === "function") {
+            shell.openExternal(u);
+            return true;
+          }
+        }
+      } catch (e) {
+        /* 没有 electron（网页端）或者被隔离了，走下面那条 */
+      }
+      try {
+        const w = typeof window !== "undefined" ? window : null;
+        if (w && typeof w.open === "function") {
+          w.open(u, "_blank", "noopener,noreferrer");
+          return true;
+        }
+      } catch (e) {
+        /* 弹窗被拦，如实回 false */
+      }
+      return false;
+    },
+
     // 写回一张卡。新全文由核心算好（core/frontmatter.js），这里只管三件事：
     // 比对基线 → 写盘 → 回读。适配层不解析、不改写、不序列化 YAML。
     async writeCard(path, content, opts = {}) {
