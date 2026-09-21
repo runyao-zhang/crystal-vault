@@ -79,7 +79,7 @@ export const EMBED_CSS =
   "  border-color:rgba(255,200,110,.7);color:rgba(255,225,175,.98);}" +
   ".kb-v13-embedhint{font-size:11px;color:rgba(160,195,225,.75);max-width:230px;" +
   "  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
-  ".kb-v13-embedundo,.kb-v13-embedgo,.kb-v13-embedact,.kb-v13-embedcrystal{cursor:pointer;" +
+  ".kb-v13-embedundo,.kb-v13-embedact,.kb-v13-embedcrystal{cursor:pointer;" +
   "  font:inherit;font-size:11px;" +
   "  padding:2px 7px;border-radius:5px;border:1px solid rgba(0,200,255,.28);" +
   "  background:none;color:rgba(190,220,245,.85);}" +
@@ -88,15 +88,9 @@ export const EMBED_CSS =
   // 背后挂上"删掉笔记里的 [[链接]]"这种动作之后，「选框正开着」必须在屏幕上
   // 看得见。用与库里 `.kb-v13-marquee-btn` 同一支红：红 = 破坏性动作。
   ".kb-v13-embedact.on{background:rgba(165,70,60,.62);" +
-  "  border-color:rgba(255,150,140,.6);color:rgba(255,225,215,.98);}" +
-  // 理由是往用户**手写的正文**里追加字，所以这个框要看得见、也敢用颜色提醒
-  // 它跟旁边那颗「看 / 写」不是一类东西。⚠️ 底色要 `!important` + 不透明：
-  // Obsidian 和各主题统一给 `input` 套表单皮肤，且常排在注入样式之后。
-  ".kb-v13-embedreason{cursor:text;font:inherit;font-size:11px;padding:2px 7px;" +
-  "  width:180px;border-radius:5px;border:1px solid rgba(255,200,110,.45);" +
-  "  background-color:rgba(14,22,36,.98)!important;color:rgba(240,225,200,.95)!important;" +
-  "  color-scheme:dark;}" +
-  ".kb-v13-embedreason::placeholder{color:rgba(200,180,150,.55);}";
+  "  border-color:rgba(255,150,140,.6);color:rgba(255,225,215,.98);}";
+  // 3.0 刀 16：`.kb-v13-embedgo` / `.kb-v13-embedreason` 两条样式跟着那个
+  // 「为什么连过去？」输入框一起删了（用户 09-21）。
 
 let cssDone = false;
 /**
@@ -389,40 +383,19 @@ export function createEmbedStory(ctx, opts = {}) {
    * `prev` 是**任何写之前**那一份，`base` 是写完之后**回读**的那一份——
    * 撤销时拿它当基线，传旧的必假冲突、不传就是静默盖掉别处的改动。
    */
+  // 3.0 刀 16：**「为什么连过去？」那个输入框删掉了**（用户 09-21）。
+  //
+  // 它原来是写完一条链就弹出来、自动聚焦、等你敲一句理由（或按 Esc 跳过）。
+  // 用户不要了：连着拖几根线的时候，每拖完一根都被一个输入框截住，还得先处理它
+  // 才轮得到下一根。「连的时候写下理由」这条规矩本身没变——**手写在 `]]` 后面
+  // 照样会显示在线上**，只是这扇窗不再代劳、也不再拦那一下。
   let undoState = null;
-  let pendingReason = null;
   const undoBtn = EL("button", "kb-v13-embedundo", "撤销");
   undoBtn.type = "button";
   undoBtn.style.display = "none";
-  const reasonIn = EL("input", "kb-v13-embedreason");
-  reasonIn.type = "text";
-  reasonIn.placeholder = "为什么连过去？（可留空）";
-  reasonIn.style.display = "none";
-  const reasonGo = EL("button", "kb-v13-embedgo", "记下");
-  reasonGo.type = "button";
-  reasonGo.style.display = "none";
-  bar.append(reasonIn, reasonGo, undoBtn);
+  bar.append(undoBtn);
 
   undoBtn.addEventListener("click", () => undoWrite());
-
-  function closeReason() {
-    pendingReason = null;
-    reasonIn.value = "";
-    reasonIn.style.display = "none";
-    reasonGo.style.display = "none";
-  }
-
-  reasonGo.addEventListener("click", () => saveReason());
-  // 输入框里的按键不许漏出去：这扇窗的舞台认 S / D 两个键（框选、删除），
-  // 打理由时按一下 D 会把选中的线删掉。
-  reasonIn.addEventListener("keydown", (e) => {
-    e.stopPropagation();
-    if (e.key === "Enter") saveReason();
-    else if (e.key === "Escape") {
-      closeReason();
-      e.stopImmediatePropagation();
-    }
-  });
 
   /**
    * 写一条链接进正文。
@@ -474,12 +447,6 @@ export function createEmbedStory(ctx, opts = {}) {
     undoBtn.style.display = "";
     say("已写入 " + link, true);
     render(view.path, { keepCamera: true });
-    // 写完**当场让你填理由**（用户 09-19 选的）。这个库的规矩是「连的时候
-    // 写下理由」，理由会显示在连线上——不填也成立（和手写一样），但给一次机会。
-    pendingReason = { path: card.path, link };
-    reasonIn.style.display = "";
-    reasonGo.style.display = "";
-    reasonIn.focus();
     return "ok";
   }
 
@@ -600,54 +567,6 @@ export function createEmbedStory(ctx, opts = {}) {
     return removed;
   }
 
-  /** 把刚写下去的那条链补上一句理由（写在 `]]` 后面同一行）。 */
-  async function saveReason() {
-    const pr = pendingReason;
-    const reason = reasonIn.value.trim();
-    if (!pr || !reason) {
-      closeReason();
-      return;
-    }
-    const card = ctx.model.byPath.get(pr.path);
-    if (!card) {
-      closeReason();
-      return;
-    }
-    const base = card.content == null ? "" : card.content;
-    const { body } = splitCard(base);
-    // 找**最后**一处：刚写下去的那条就在正文末尾，前面万一还有同名的也不该动。
-    const at = body.lastIndexOf(pr.link);
-    if (at < 0) {
-      closeReason();
-      return;
-    }
-    const next = body.slice(0, at + pr.link.length) + " " + reason + body.slice(at + pr.link.length);
-    let res;
-    try {
-      res = await ctx.adapter.writeCard(card.path, patchBody(base, next), { base });
-    } catch (e) {
-      say("理由没写进去：" + ((e && e.message) || e), false);
-      closeReason();
-      return;
-    }
-    if (!res || !res.ok) {
-      say(res && res.reason === "conflict" ? "这张卡刚被别处改了，理由没写进去。" : "理由没写进去。", false);
-      closeReason();
-      return;
-    }
-    applyCardFields(card, {}, res.content);
-    if (ctx.refreshRelations) ctx.refreshRelations();
-    if (ctx.refreshCards) ctx.refreshCards();
-    if (ctx.flushViewState) ctx.flushViewState();
-    // 撤销点回到**写入之前**那一份（连理由一起撤），所以 prev 保持不变，
-    // base 换成最新那份。
-    const ent = undoState && undoState.entries.find((x) => x.path === card.path);
-    if (ent) ent.base = res.content;
-    closeReason();
-    say("理由记下了。", true);
-    render(view.path, { keepCamera: true });
-  }
-
   /**
    * 写盘之后的后悔药。**只给一层、不给重做**——与 editform 同一条规矩。
    *
@@ -663,7 +582,6 @@ export function createEmbedStory(ctx, opts = {}) {
     if (!u) return;
     undoState = null;
     undoBtn.style.display = "none";
-    closeReason();
     const failed = [];
     for (const ent of u.entries) {
       let res;
