@@ -272,6 +272,12 @@ export function createReader(ctx, opts = {}) {
     // 「不用退出文献模式」。对外的 isOpen() 认的是「露没露」（`open && !hidden`），
     // 所以挂起时不拦截 Esc、也不影响关晶体库那一路。
     hidden: false,
+    // 3.0 刀 18：「边看边记」那一栏被用户收起来了没有。**运行时不落盘**——
+    // 阅读器的可见性今天一个都不落盘（`desk.on` 也不落），收不收那一栏是
+    // 「我这一会儿想读宽一点」，不是「我的工作台长什么样」。
+    sideTucked: false,
+    // 3.0 刀 18：左边的收纳栏开着没有。同样不落盘。
+    dockOn: false,
     docs: [],
     filter: "",
     doc: null, // 当前打开的 Doc
@@ -303,6 +309,13 @@ export function createReader(ctx, opts = {}) {
     ' title="桌面模式：一页一扇可拖、可缩的窗，摆法自己定">桌面</button>' +
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-addpage"' +
     ' title="把当前这份文献的下一页摆到桌面上">＋ 页</button>' +
+    // 3.0 刀 18。收纳栏与「边看边记」是一对**收放**：一个收窗、一个收栏。
+    // 两颗都只在阅读器里——桌面窗只在这儿有。
+    '<button type="button" class="kb-v13-reader-nav" id="kb-reader-dockbtn" aria-pressed="false"' +
+    ' title="收纳栏：桌面窗拖到左边那条栏上（或按窗上的「收纳」）就收起来，' +
+    '栏里留一条，点那条再拿出来。收起来的窗关掉阅读器也还在。">收纳栏</button>' +
+    '<button type="button" class="kb-v13-reader-nav" id="kb-reader-sidebtn" aria-pressed="false"' +
+    ' title="边看边记：把右边那一栏收起来，读宽一点。再点一下就推回来。">边看边记</button>' +
     // 3.0 刀 9-B：卡片盒。旧卡片和正在读的这一页在哪儿碰头。
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-cardbox" aria-pressed="false"' +
     ' title="卡片盒：搜库里的卡片，点一张就摆到桌面上，并在那张卡里留一行指回这一页的链接">卡片盒</button>' +
@@ -331,6 +344,19 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-reader-zoom" id="kb-reader-zoomin" title="每页大一点">＋</button>' +
     "</div>" +
     '<div class="kb-v13-reader-main">' +
+    // 收纳栏（3.0 刀 18）。
+    //
+    // ⚠️ **必须是「边看边记」和桌面之外的第三个 flex 兄弟，插在最前面**，
+    // 不能塞进 `#kb-reader-desk` 里面。`deskBounds()`（见下面）量的是
+    // `deskEl.clientWidth`——栏塞在桌面**里面**的话，那个数一点都不会变小，
+    // 于是每一扇窗还是按老宽度夹取，表现是「窗能拖到栏底下、被栏吃掉半扇」。
+    // 做成 flex 兄弟，宽度是浏览器自己扣的，一行算术都不用写。
+    //
+    // 插在最前面也**保住了下面那条老约束**（桌面排在「边看边记」前面）——
+    // 那一栏仍然是最后一个，仍然在屏幕右边。
+    '<div class="kb-v13-reader-dock off" id="kb-reader-dock">' +
+    '<div class="kb-v13-dock-list" id="kb-reader-docklist"></div>' +
+    "</div>" +
     '<div class="kb-v13-reader-sheets" id="kb-reader-sheets">' +
     '<div class="kb-v13-reader-grid" id="kb-reader-grid"></div>' +
     '<div class="kb-v13-reader-note" id="kb-reader-note"></div>' +
@@ -487,6 +513,10 @@ export function createReader(ctx, opts = {}) {
   const deskEl = $("kb-reader-desk");
   const deskBtn = $("kb-reader-deskbtn");
   const addPageBtn = $("kb-reader-addpage");
+  const dockEl = $("kb-reader-dock");
+  const dockListEl = $("kb-reader-docklist");
+  const dockBtn = $("kb-reader-dockbtn");
+  const sideBtn = $("kb-reader-sidebtn");
   const sheetsEl = $("kb-reader-sheets");
   const floatsEl = $("kb-reader-floats");
   const holdEl = $("kb-reader-hold");
@@ -592,7 +622,41 @@ export function createReader(ctx, opts = {}) {
     zoomIn.disabled = st.zoom >= 3;
     zoomOut.disabled = st.zoom <= 0.4;
     paintTargetFolder();
+    paintSide();
+  }
+
+  /**
+   * 「边看边记」那一栏露不露（3.0 刀 18）。
+   *
+   * 三个调用点原来各写各的 `classList`，加了「用户收起来」这一档之后必须收口：
+   * 口径一旦分成三份，就会出现「关掉文件夹树之后右边多出一栏空的」——那种坏法
+   * 看着像布局坏了，查起来要绕远路（`hideFolderPick` 里原来就写着这条）。
+   *
+   * @param {boolean} [force] 这一趟**不管用户收没收**都要亮出来。给「换一份」
+   *   的文件夹树用：它长在这一栏里，而挑晶体的两颗按钮在顶栏永远点得到——
+   *   拦着不亮的话，树会「打开」在一块看不见的地方，表现就是点了没反应。
+   *   **不动 `st.sideTucked`**：树收起来时那一栏该回到用户收成的样子，不是
+   *   被这一趟顺手改了主意。
+   */
+  function paintSide(force) {
     sideEl.classList.toggle("kb-v13-reader-side-off", !st.doc);
+    // 收起走的是**另一个类**，不是 `-off`：那个是 `display:none`（没文献，
+    // 该当场消失），这个是宽度过渡（用户自己收的，该「挤」回去）。
+    sideEl.classList.toggle("kb-v13-reader-side-tucked", !!st.doc && !!st.sideTucked && !force);
+    // 按钮跟着画。放在这里而不是 `setSideTucked` 里，是为了「没文献」那条路也对：
+    // 一份文献都没开时那一栏是藏着的，而按钮亮着会让人以为是自己收的。
+    sideBtn.setAttribute("aria-pressed", st.sideTucked ? "true" : "false");
+    sideBtn.classList.toggle("kb-v13-reader-nav-on", !!st.sideTucked);
+  }
+
+  function setSideTucked(on) {
+    const next = !!on;
+    if (next === st.sideTucked) return;
+    st.sideTucked = next;
+    paintSide();
+    // 宽度是**过渡**过去的，`transitionend` 那一头会补一次重新排布（见下面
+    // 那个监听）。这里不重复调——过渡中间量到的宽度是个不存在的几何，
+    // 拿它算出来的网格和夹取都是废的（`styles.js` 里卫星那条记过同一类坑）。
   }
 
   // ---- 翻页 ----
@@ -967,6 +1031,10 @@ export function createReader(ctx, opts = {}) {
           y: w.y,
           w: w.w,
           h: w.h,
+          // 3.0 刀 18 收纳栏。⚠️ 这里和 `prefs.js` 的 `sanitizeDesk` 是**两份
+          // 白名单**，两边都要有——少写一处的症状是「收起来的窗下次打开全冒回
+          // 桌面上」，而磁盘上那份存档看着完全正常（它是被消毒那一步吃掉的）。
+          docked: !!w.docked,
         })),
         perPage: desk.perPage,
       },
@@ -1165,6 +1233,21 @@ export function createReader(ctx, opts = {}) {
     return w.zoomSt;
   }
 
+  /**
+   * 一扇窗顶上的名字。
+   *
+   * ⚠️ **名字是算出来的，不是存的**——`w` 上没有 `title` 这个字段，`persistDesk`
+   * 也不存它。所以收纳栏那条目要用同一个名字时**必须走这个函数**：抄一份到那边，
+   * 两处迟早会对不上（改了命名规则只改一处，表现是「栏里和窗上写着两个名字」）。
+   */
+  function deskWinTitle(w) {
+    // 结构窗没有文件路径，`shortFolder("")` 是空串——不特判的话它顶上会写着
+    // 「文献」，和旁边那几扇真的文献窗长得一模一样，谁也分不清点的是哪一扇。
+    return w.kind === "storyline"
+      ? "结构：" + (shortFolder(w.crystal) || w.crystal || "?")
+      : shortFolder(w.path) || baseName(w.path) || "文献";
+  }
+
   function buildDeskWin(w) {
     const node = EL("div", "kb-v13-desk-win");
     node.dataset.id = w.id;
@@ -1172,20 +1255,34 @@ export function createReader(ctx, opts = {}) {
 
     const bar = EL("div", "kb-v13-desk-bar");
     const title = EL("span", "kb-v13-desk-title");
-    // 结构窗没有文件路径，`shortFolder("")` 是空串——不特判的话它顶上会写着
-    // 「文献」，和旁边那几扇真的文献窗长得一模一样，谁也分不清点的是哪一扇。
-    title.textContent =
-      w.kind === "storyline"
-        ? "结构：" + (shortFolder(w.crystal) || w.crystal || "?")
-        : shortFolder(w.path) || baseName(w.path) || "文献";
+    title.textContent = deskWinTitle(w);
     title.title = toStr(w.path);
     const meta = EL("span", "kb-v13-desk-meta");
     renderDeskMeta(w, meta);
     const close = EL("button", "kb-v13-desk-close", "✕");
     close.type = "button";
-    close.title = "把这一页收回去";
-    close.addEventListener("click", () => removeDeskWin(w.id));
+    // 3.0 刀 18：这颗 ✕ 有**两副面孔**，看这扇窗在收纳栏里有没有条目。
+    //
+    //   没收进去过 → 老意思，**销毁**（连存档一起划掉）。
+    //   收进去过   → 「放回栏里」。那边留着一条对应的条目，销毁等于连条目一起抽掉，
+    //                而用户点这一下想的是「收起来」不是「删掉」。
+    //
+    // 判据读的是建窗那一刻的 `w.docked`，这在活着的窗上是准的：一扇被收纳过的窗
+    // 想再露面，走的一定是 `showDeskWin` → `buildDeskWin`，那时字段已经是真了。
+    close.title = w.docked ? "收回收纳栏" : "把这一页收回去";
+    close.addEventListener("click", () => (w.docked ? stowDeskWin(w.id) : removeDeskWin(w.id)));
     bar.append(title, meta, close);
+    // 没收进栏里的窗多一颗「收纳」。**手势之外的那条路**：拖到栏上是主要动作，
+    // 但它没有可见的入口——09-20 那次「右键只有金色线」就是纯手势造成的。
+    // 已经是 `<button>`：`desk.js` 的 `e.target.closest("button")` 靠这个把它
+    // 从拖动起点里排掉，做成 `<div>` 的话按下去会变成拖窗。
+    if (!w.docked) {
+      const toDock = EL("button", "kb-v13-desk-dock", "收纳");
+      toDock.type = "button";
+      toDock.title = "收进左边的收纳栏：窗从桌面上拿走，栏里留一条，点一下就回来";
+      toDock.addEventListener("click", () => stowDeskWin(w.id));
+      bar.insertBefore(toDock, close);
+    }
     // 卡片窗与 markdown 文献窗各多一颗 ✎：**就地改正文**（3.0 刀 9 第二版）。
     // 用户的原话是「卡片悬浮窗里面的内容需要编辑并且更改」，后来又要了
     // 「markdown 文献也要能改」——两件事的骨架是一样的（一个 textarea、
@@ -1246,6 +1343,23 @@ export function createReader(ctx, opts = {}) {
       onCommit: () => {
         persistDesk();
         if (w.kind === "pdf") mountDeskWin(w);
+      },
+      // ---- 3.0 刀 18：拖到收纳栏上就收起来 ----
+      //
+      // ⚠️ 判定用的是**指针坐标**，不是窗的盒子。`clampBox` 把窗夹在桌面矩形里
+      // （左边界就是 `DESK_EDGE`），窗**永远够不到栏**——只看盒子的话，这个手势
+      // 在任何位置都不成立。指针没有这个限制：窗顶到左墙之后，指针还能接着往左
+      // 走出桌面、走到栏上。所以「拖进去」读作「窗贴左墙、指针在栏上松手」。
+      onDragMove: (pt) => dockHot(!!st.dockOn && insideDock(pt)),
+      onDrop: (pt, info) => {
+        dockHot(false);
+        // 取消（来电、系统抢走指针）不是一次落点；没真动过也不算。
+        if (info.cancelled || !info.moved || !st.dockOn) return false;
+        if (!insideDock(pt)) return false;
+        stowDeskWin(w.id);
+        // 已经接手：这一扇刚被摘出文档，下面那句 `onCommit` 会去重画一个
+        // 不在屏幕上的东西。`stowDeskWin` 自己落过盘了。
+        return true;
       },
     });
 
@@ -2020,6 +2134,8 @@ export function createReader(ctx, opts = {}) {
       y: box.y,
       w: box.w,
       h: box.h,
+      // 3.0 刀 18 收纳栏：新摆上的窗当然不在栏里。
+      docked: false,
     };
     desk.wins.push(w);
     desk.active = w.id;
@@ -2055,8 +2171,10 @@ export function createReader(ctx, opts = {}) {
   /** 按模型把桌面整个重建一遍（切进来、恢复存档时用）。 */
   function renderDesk() {
     deskEl.textContent = "";
-    for (const w of desk.wins) buildDeskWin(w);
-    for (const w of desk.wins) mountDeskWin(w);
+    // 收在收纳栏里的那些**不摆上桌**（3.0 刀 18）：收纳 = 收起来了，重开阅读器
+    // 它们该还在栏里，而不是自己冒回桌面上。栏那边由 `refreshDock` 画。
+    for (const w of desk.wins) if (!w.docked) buildDeskWin(w);
+    for (const w of desk.wins) if (!w.docked) mountDeskWin(w);
     refreshDeskUi();
   }
 
@@ -2066,6 +2184,9 @@ export function createReader(ctx, opts = {}) {
     deskEl.classList.toggle("on", desk.on);
     sheetsEl.classList.toggle("kb-v13-reader-sheets-off", desk.on);
     addPageBtn.disabled = !desk.on || !st.doc;
+    // 收口在这儿：凡是「窗的名单变了」「某扇窗收进/拿出了」的路径都会走到
+    // `refreshDeskUi`，栏跟着重画一遍就不会有落后于模型的时候。
+    refreshDock();
   }
 
   function setDeskMode(on) {
@@ -2085,11 +2206,165 @@ export function createReader(ctx, opts = {}) {
       }
     } else {
       persistDesk(); // 收起来也算「摆定了」
+      // 栏里装的都是桌面窗，桌面收起来了栏就没有意义——一起收掉，
+      // 否则顶栏那颗「收纳栏」会亮着，而左边的栏是空的（点了没反应那种）。
+      if (st.dockOn) {
+        st.dockOn = false;
+        refreshDockUi();
+      }
       refreshDeskUi();
       // 桌面开着的时候页区是 `display:none`，`relayout()` 量到的宽度是 0，
       // 算出来的网格是废的。切回来必须重排一次，否则回到网格会看见一屏乱码。
       relayout();
     }
+  }
+
+  // ---- 收纳栏（3.0 刀 18）----
+  //
+  // 用户要的是「把桌面窗拖进左边那条栏里收起来，点条目再拿出来」。落成模型只有
+  // **一个字段**：`w.docked` = 「这扇窗在栏里有没有条目」。它长在 `desk.wins`
+  // 那条记录上，跟着 `persistDesk` 一起走——**栏是桌面模型的一个视图，不是第二份
+  // 名单**。所以 `removeDeskWin`（真删）和 `closeDesk`（关阅读器）一个字都不用改，
+  // 它们照旧按 `desk.wins` 办事，栏跟着一起动。
+  //
+  // 「现在看不看得见」**不落盘**，等于「`deskEl` 里有没有它的节点」（`winEl` 非空）。
+  // 于是五个动作是：
+  //
+  //   拖到栏上松手 / 按窗上的「收纳」 → 摘节点，`docked = true`，条目出现
+  //   点条目                          → **切换**：没节点就建、有节点就摘。条目留着
+  //   窗的 ✕，`docked` 真             → 摘节点（= 放回栏里），条目留着
+  //   窗的 ✕，`docked` 假             → `removeDeskWin`，与今天完全一样
+  //   条目的 ✕                        → `docked = false` + 让窗显形，条目消失
+  //
+  // 重开阅读器时 `docked` 的窗**直接回栏里**（`renderDesk` 跳过它们）：收纳 =
+  // 收起来了，这个默认最好解释，也只需要一个标记。
+
+  /** 指针在不在收纳栏那块地方。栏收着时 `display:none`，rect 全是 0，先挡掉。 */
+  function insideDock(pt) {
+    if (!st.dockOn || !pt) return false;
+    const r = dockEl.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    return pt.x >= r.left && pt.x <= r.right && pt.y >= r.top && pt.y <= r.bottom;
+  }
+
+  function dockHot(on) {
+    dockEl.classList.toggle("kb-v13-dock-hot", !!on);
+  }
+
+  function refreshDock() {
+    const list = desk.wins.filter((w) => w.docked);
+    dockListEl.textContent = "";
+    if (!list.length) {
+      // 空栏要有话说。一条点不出反应的提示比空着好——至少告诉用户往里拖。
+      dockListEl.appendChild(EL("div", "kb-v13-dock-empty", "把桌面窗拖到这里收纳"));
+      return;
+    }
+    for (const w of list) {
+      const shown = !!winEl(w.id);
+      const row = EL("div", "kb-v13-dock-entry" + (shown ? " kb-v13-dock-shown" : ""));
+      const name = EL("button", "kb-v13-dock-name");
+      name.type = "button";
+      name.textContent = deskWinTitle(w);
+      name.title = shown ? "点一下收回栏里（窗不会被删掉）" : "点一下摆到桌面上";
+      name.addEventListener("click", () => toggleDockEntry(w.id));
+      const drop = EL("button", "kb-v13-dock-drop", "✕");
+      drop.type = "button";
+      drop.title = "从收纳栏里拿出来，摆回桌面上（不会删掉它）";
+      drop.addEventListener("click", () => unstowDeskWin(w.id));
+      row.append(name, drop);
+      dockListEl.appendChild(row);
+    }
+  }
+
+  function refreshDockUi() {
+    dockBtn.setAttribute("aria-pressed", st.dockOn ? "true" : "false");
+    dockBtn.classList.toggle("kb-v13-reader-nav-on", st.dockOn);
+    dockEl.classList.toggle("off", !st.dockOn);
+    dockHot(false);
+    refreshDock();
+  }
+
+  function setDockMode(on) {
+    const next = !!on;
+    if (next === st.dockOn) return;
+    st.dockOn = next;
+    // ⚠️ **先让栏显形，再让桌面量宽度。** 反过来的话 `setDeskMode` 里那句
+    // `renderDesk` 量到的是「栏还没占位」的宽度，那些窗会摆得偏右、被栏压住一截
+    // ——同 `setDeskMode` 自己那句「先让桌面显形，不然量到的是 0×0」。
+    refreshDockUi();
+    if (next && !desk.on) setDeskMode(true); // 栏里装的都是桌面窗，桌面没开就先开
+    else resizeNow(); // 桌面宽度变了，贴着右墙的窗要重新夹一遍
+  }
+
+  /**
+   * 把一扇窗收进栏里。**不销毁**：窗还在 `desk.wins` 里，条目也在。
+   *
+   * ⚠️ 结构窗那台实例必须**显式销毁**——它内部有几处监听挂在 `document` 上
+   * （连线编辑的 S / D 两个键），光摘 DOM 收不掉。表现是「窗收起来了，按 D 还能
+   * 删掉一个看不见的东西」（`removeDeskWin` 里记过同一条）。再露面时
+   * `mountDeskWin` 会重新建一台。
+   *
+   * ⚠️ 这里**不调 `releaseSource`**。那一句回答的是「这扇窗没了，它占的文献还有
+   * 没有人占」——而收起来的窗**还在 `desk.wins` 里**，这份文献当然还有人占着。
+   * 顺手放掉的话，再拿出来就是一扇白屏的窗：pdf.js 的文档和 worker 都已经关了。
+   */
+  function stowDeskWin(id) {
+    const w = findWin(id);
+    if (!w) return;
+    if (!winEl(id)) return; // 本来就不在桌面上，没什么可收的
+    const rt = desk.rt.get(id);
+    if (rt && rt.embed) rt.embed.destroy();
+    desk.rt.delete(id);
+    const node = winEl(id);
+    if (node) node.remove();
+    w.docked = true;
+    if (desk.active === id) desk.active = null;
+    // 正在读的那扇被收起来了 → 没有「现在读第几页」了。**不自动挑一扇顶上**
+    // （同 `removeDeskWin`）：那会给用户一个他没在看、也没预期的页码，
+    // 而这一行是要写进他的卡片里的。
+    if (desk.pageId === id) desk.pageId = null;
+    refreshDeskUi();
+    persistDesk();
+  }
+
+  /** 把一扇收着的窗摆回桌面上。已经在桌上就什么都不做。 */
+  function showDeskWin(id) {
+    const w = findWin(id);
+    if (!w || winEl(id)) return;
+    // 收着的时候桌面可能变过宽窄（开关了收纳栏、收起了「边看边记」），存档里
+    // 那组坐标未必还装得下——先夹一遍再摆。不夹的话窗会有一角在屏幕外，而右下角
+    // 那个抓手跟着一起出去，那扇窗就再也改不了尺寸（`clampBox` 头上写的就是这条）。
+    const b = deskBounds();
+    const box =
+      w.kind === "pdf" && w.ratio
+        ? clampRatioBox({ x: w.x, y: w.y, w: w.w, h: w.h }, b.w, b.h, w.ratio, DESK_CHROME)
+        : clampBox({ x: w.x, y: w.y, w: w.w, h: w.h }, b.w, b.h);
+    w.x = box.x;
+    w.y = box.y;
+    w.w = box.w;
+    w.h = box.h;
+    buildDeskWin(w);
+    mountDeskWin(w);
+    desk.active = id;
+    if (w.kind === "pdf") desk.pageId = id;
+    refreshDeskUi();
+  }
+
+  /** 点条目 = **切换**，不是单纯的「开」。条目本身始终留着（用户点名要的）。 */
+  function toggleDockEntry(id) {
+    if (winEl(id)) stowDeskWin(id);
+    else showDeskWin(id);
+    refreshDock();
+  }
+
+  /** 条目右边的 ✕ = **从栏里拿出来，摆回桌面上**。什么都不会被删（用户选的）。 */
+  function unstowDeskWin(id) {
+    const w = findWin(id);
+    if (!w) return;
+    w.docked = false;
+    showDeskWin(id); // 已经开着的话它自己会早退，不会建出第二扇
+    refreshDeskUi();
+    persistDesk();
   }
 
   /** 「＋ 页」：把当前这份文献的下一段摆上桌。 */
@@ -2550,10 +2825,11 @@ export function createReader(ctx, opts = {}) {
     const wasStory = pickIsCrystal(folderPick.purpose);
     folderPick.el.classList.remove("open");
     targetBtn.setAttribute("aria-expanded", "false");
-    // 把上面 openFolderPick 临时点亮的那一栏还回去。判据抄的是 refreshBar 那一条
-    // （没文献就藏），不另立规则——两处口径一旦不一样，就会出现「关掉树之后
-    // 右边多出一栏空的」，而那种坏法看着像布局坏了，查起来要绕远路。
-    if (!st.doc) sideEl.classList.add("kb-v13-reader-side-off");
+    // 把上面 openFolderPick 临时点亮的那一栏还回去。判据收口在 `paintSide` 里
+    // （没文献就藏、用户收过就还收着），不另立规则——两处口径一旦不一样，
+    // 就会出现「关掉树之后右边多出一栏空的」，而那种坏法看着像布局坏了，
+    // 查起来要绕远路。
+    paintSide();
     // 顺手把刚才请走的那一层还回来（只有「什么都没打开」时才需要它）。
     // 阅读器已经挂起/关掉时不做——那会儿屏幕上不该再冒出任何东西，
     // 该由 resume() 按 open() 同一条规矩摆回来。
@@ -2590,7 +2866,7 @@ export function createReader(ctx, opts = {}) {
     // 一份文献都没开就点它的话，树会「打开」在一栏看不见的地方，表现就是
     // 点了没反应。所以这两档临时把那一栏亮出来，收起来时再还回去。
     if (byCrystal) {
-      sideEl.classList.remove("kb-v13-reader-side-off");
+      paintSide(true);
       // 一份文献都没开的时候，整块屏盖着「选哪份文献」那一层。树就长在它底下，
       // 不请走它就等于点不到——症状和「这颗按钮坏了」一模一样。
       hidePicker();
@@ -3605,6 +3881,17 @@ export function createReader(ctx, opts = {}) {
     renderFolderPick();
   });
   deskBtn.addEventListener("click", () => setDeskMode(!desk.on));
+  // 3.0 刀 18。两颗一起看：一颗收窗、一颗收栏，都是「把地方腾出来读」。
+  dockBtn.addEventListener("click", () => setDockMode(!st.dockOn));
+  sideBtn.addEventListener("click", () => setSideTucked(!st.sideTucked));
+  // 「边看边记」是**挤**过去的，不是瞬间换版式：宽度过渡中间量到的那个宽度是个
+  // 不存在的几何，拿它去算网格、去夹桌面窗，算出来的都是废的。所以过渡期间什么都
+  // 不算，等它走完再补一次——`resizeNow()` 就是那个唯一的出口（桌面开着时重新夹
+  // 桌上的窗，否则重排网格）。
+  sideEl.addEventListener("transitionend", (e) => {
+    if (e.target !== sideEl || e.propertyName !== "flex-basis") return;
+    resizeNow();
+  });
   addPageBtn.addEventListener("click", () => addDeskPage());
   cardBoxBtn.addEventListener("click", () => toggleCardBox());
   storyBtn.addEventListener("click", () => {
@@ -3678,6 +3965,12 @@ export function createReader(ctx, opts = {}) {
     desk.active = null;
     desk.pageId = null;
     deskEl.textContent = "";
+    // 3.0 刀 18：栏跟着桌面一起收。`desk.wins` 已经清空，`refreshDock` 会把
+    // 条目一起画没——但**开关状态**得自己复位，否则下次打开阅读器会看见一条
+    // 空栏亮着（顶栏那颗按钮还按着）。存档不受影响：`persistDesk` 在上面已经
+    // 写过了，`docked` 那一位就在那份存档里。
+    st.dockOn = false;
+    refreshDockUi();
     for (const p of paths) releaseSource(p);
   }
 

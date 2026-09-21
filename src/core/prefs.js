@@ -93,6 +93,12 @@ export function sanitizeDesk(raw) {
       y: finite(w.y, 40),
       w: Math.max(DESK_MIN_W, finite(w.w, DESK_MIN_W)),
       h: Math.max(DESK_MIN_H, finite(w.h, DESK_MIN_H)),
+      // 3.0 刀 18 收纳栏：这扇窗在收纳栏里有没有条目。
+      //
+      // **只认布尔真**（不是 `!!w.docked`）：手改出来的 `"false"` 是个真值字符串，
+      // 一收就变成「明明没收过，重开却在栏里」。同 `sanitizeHiddenLinks` 那条
+      // 「`typeof` 严判，别让强制转换造出一条永远悬着的记录」。
+      docked: w.docked === true,
     });
   }
   return { windows: out, perPage };

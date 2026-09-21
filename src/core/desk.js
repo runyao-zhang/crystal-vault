@@ -164,6 +164,14 @@ export function applyDeskBox(el, box) {
  *   内容盒永远胖一圈——见 `clampRatioBox` 的注释。
  * @param {(box, mode: "move"|"resize") => void} spec.onChange 拖动中每一帧（只摆位置，别写盘）
  * @param {(box) => void} spec.onCommit 松手（写盘）
+ * @param {(pt: {x:number,y:number}) => void} [spec.onDragMove] 拖动中的**指针**坐标
+ *   （3.0 刀 18 收纳栏）。盒子是夹在桌面里的，指针不是——窗顶到左墙之后指针
+ *   还能继续往左走，收纳栏就靠这个「走了多远」判断你松手时想不想放进去。
+ * @param {(pt: {x:number,y:number}, info: {moved:boolean, cancelled:boolean}) => boolean|void} [spec.onDrop]
+ *   松手时问一句「这一放有人接手吗」。**返回 `true` = 已接手**，那就不走 `onCommit`
+ *   （收纳栏就是靠它：接手之后那扇窗已经被摘出文档，再按它的盒子写盘、重画没有意义）。
+ *   `pointercancel` 也会走到这里，`info.cancelled` 为真——那是用来清高亮的，
+ *   收手方**必须返回假值**，否则一次取消会变成一次落点。
  * @returns {() => void} 摘监听
  */
 export function bindDeskDrag(ctx, spec) {
@@ -220,6 +228,10 @@ export function bindDeskDrag(ctx, spec) {
     // 把 `mode` 一起交出去：调用方要分清「用户挪了位置」和「用户改了尺寸」——
     // 桌面那边靠它决定这扇窗还要不要跟着内容自动摆形状（挪位置不该锁死形状）。
     spec.onChange(next, drag.mode);
+    // 指针坐标单独交一份：**盒子被夹在桌面里，指针没有**。收纳栏判定的是
+    // 「你松手时指针在不在那条栏上」，而窗永远够不到栏（`clampBox` 的边界
+    // 就是桌面），只看盒子的话这个手势永远不成立。
+    if (spec.onDragMove) spec.onDragMove({ x: e.clientX, y: e.clientY });
     e.preventDefault();
   }
 
@@ -232,6 +244,12 @@ export function bindDeskDrag(ctx, spec) {
     } catch (err) {
       /* 上面就没捕获成功过 */
     }
+    // 先问一句「这一放有人接手吗」。收纳栏会接手，接手之后那扇窗已经被摘出
+    // 文档了——这时候再按它的盒子写盘、再重画一次，是对一个不在屏幕上的东西做事。
+    // `pointercancel`（来电、系统抢走指针）也会走到这里，但它不是一次落点：
+    // 收手方按 `cancelled` 只清高亮、返回假值，下面照旧提交。
+    const cancelled = e.type === "pointercancel";
+    if (spec.onDrop && spec.onDrop({ x: e.clientX, y: e.clientY }, { moved: d.moved, cancelled }) === true) return;
     // 没真动过就不写盘：一次「点一下标题栏」不该产生一次磁盘写。
     if (d.moved) spec.onCommit(spec.box());
   }

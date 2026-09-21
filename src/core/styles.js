@@ -1955,6 +1955,87 @@ const READER = [
   ".kb-v13-reader-empty{font-size:13px;line-height:1.9;color:var(--text-muted, rgba(160,190,220,.5));padding:16px 4px;}",
 ];
 
+// ===== 收纳栏（3.0 刀 18）=====
+//
+// 阅读器左边那条竖栏，装收起来的桌面窗。
+//
+// ⚠️ 它是 `#kb-reader-main` 的**第一个 flex 子元素**，不是浮在桌面上的绝对层。
+// `deskBounds()` 量的是 `#kb-reader-desk` 的 `clientWidth`——栏浮在桌面**上面**的话
+// 那个数一点都不会变小，于是每扇窗还是按老宽度夹取，表现是「窗能拖到栏底下、
+// 被吃掉半扇」。做成 flex 兄弟，那 56px 是浏览器自己扣的，一行算术都不用写。
+const READER_DOCK = [
+  ".kb-v13-reader-dock{",
+  "  flex:0 0 56px;display:flex;flex-direction:column;",
+  "  padding:10px 6px;gap:8px;overflow:hidden;",
+  "  border-right:1px solid var(--background-modifier-border, rgba(0,0,0,.12));",
+  // 底色默认白，可由插件设置改（`--kb-dock-bg`，见 entry-plugin.js 里那一行）。
+  // 做成变量而不是写死：默认浅色是用户点名的，但阅读器其余部分跟着深色主题走，
+  // 两者摆在一起未必合每个人的眼——留一个出口，比替他定死强。
+  "  background:var(--kb-dock-bg,#fff);",
+  "}",
+  ".kb-v13-reader-dock.off{display:none;}",
+  // 拖着窗、指针进到栏上时整条亮一下。**这是这个手势唯一的反馈**：窗被 `clampBox`
+  // 夹在桌面矩形里，永远压不到栏上（栏在桌面外面），用户只能靠这点光知道
+  // 「现在松手就收进去了」。
+  ".kb-v13-reader-dock.kb-v13-dock-hot{",
+  "  box-shadow:inset 0 0 0 2px var(--text-accent, #2f7fd4);",
+  "}",
+  ".kb-v13-dock-list{display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;min-height:0;}",
+  ".kb-v13-dock-entry{display:flex;align-items:center;gap:2px;border-radius:7px;overflow:hidden;}",
+  // 「这条现在正摆在桌面上」——同一条目点一下是收、再点一下是放，得看得出当下在哪一档
+  ".kb-v13-dock-entry.kb-v13-dock-shown{background:rgba(0,120,220,.14);}",
+  ".kb-v13-dock-name{",
+  "  flex:1;min-width:0;text-align:left;cursor:pointer;border:0;",
+  "  padding:7px 6px;border-radius:6px;font-size:12px;line-height:1.3;",
+  "  font-family:system-ui,sans-serif;",
+  // ⚠️ 底色字色都带 `!important`：宿主和各主题统一给 `button` 套表单皮肤，
+  // 而且常排在我们注入的样式之后，同优先级时后到的赢。`.kb-v13-edit-input` 那条
+  // 踩过同一个坑（深色主题里那几个框变成一大块白底）。
+  "  color:var(--text-normal, #1f2933)!important;background-color:transparent!important;",
+  // 标签是文件名，**必须能截断**：一格撑开就会把 56px 的栏顶变形，
+  // 而栏的宽度是被 flex 定死的，变形的是里面的东西，看起来像布局坏了。
+  "  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;",
+  "}",
+  ".kb-v13-dock-name:hover{background-color:rgba(0,0,0,.06)!important;}",
+  ".kb-v13-dock-drop{",
+  "  flex:0 0 auto;cursor:pointer;border:0;",
+  "  padding:4px 5px;border-radius:6px;font-size:11px;line-height:1;",
+  "  color:var(--text-muted, #7a8794)!important;background-color:transparent!important;",
+  "}",
+  ".kb-v13-dock-drop:hover{background-color:rgba(200,40,40,.14)!important;color:#b3261e!important;}",
+  ".kb-v13-dock-empty{font-size:11px;line-height:1.5;padding:6px;color:var(--text-faint, #8b95a1);}",
+  // ---- 「边看边记」收起来（3.0 刀 18）----
+  //
+  // ⚠️ 收起走 `-tucked` 而**不是复用 `-off`**：那个是 `display:none`，而
+  // `display` 不参与过渡——用户要的是「从右边挤出去」，得让宽度真的动起来。
+  //
+  // ⚠️ **这一条在过渡一个会被测量到的宽度。** `deskBounds()`（夹桌面窗）和
+  // `relayout()`（算网格）量的都是活元素的实宽，过渡中间那个值是个不存在的几何。
+  // 处置：过渡期间一次都不量，由 reader.js 那个 `transitionend` 补一次
+  // `resizeNow()`。上面卫星那段注释记的是同一类坑（给面板 width 加 transition，
+  // 卫星会按一个不存在的几何摆一圈）。
+  //
+  // 收起态要**连 padding 和左边框一起归零**：`flex-basis:0` 只让内容盒归零，
+  // 那 16px+18px 的内边距和 1px 边框照旧占着，屏幕上会永远留一条 37px 的死边。
+  ".kb-v13-reader-side{",
+  "  transition:flex-basis .22s cubic-bezier(.22,.61,.36,1),",
+  "    padding .22s cubic-bezier(.22,.61,.36,1),",
+  "    border-left-width .22s cubic-bezier(.22,.61,.36,1),opacity .22s;",
+  "}",
+  ".kb-v13-reader-side-tucked{",
+  "  flex-basis:0;padding-left:0;padding-right:0;border-left-width:0;opacity:0;overflow:hidden;",
+  "}",
+  // 桌面窗标题栏上那颗「收纳」（3.0 刀 18）。和 `✎` / `✕` 同一排。
+  // ⚠️ 必须是**真 `<button>`**：`desk.js` 的 `e.target.closest("button")` 靠它把
+  // 这一颗从拖动起点里排掉——做成 `<div>` 的话按下去会变成拖窗。
+  ".kb-v13-desk-dock{",
+  "  cursor:pointer;border:0;padding:2px 6px;border-radius:5px;",
+  "  font-size:11px;line-height:1;font-family:system-ui,sans-serif;",
+  "  color:var(--text-muted, rgba(150,185,215,.7))!important;background-color:transparent!important;",
+  "}",
+  ".kb-v13-desk-dock:hover{background-color:rgba(255,255,255,.12)!important;color:var(--text-normal, #d7e8fa)!important;}",
+];
+
 // ===== 减弱动态效果 =====
 // 库里原本全是无限循环动画（卡片波浪、粒子、轨道、扫描线），系统开了「减弱动态效果」
 // 也照跑不误。这里尊重该设置：停掉环境性/无限动画，保留一次性反馈。
@@ -1975,6 +2056,9 @@ const REDUCED_MOTION = [
   "  .kb-v13-mask-cover{transition:none!important;}",
   // #9 顶栏模式按钮：同样只有 hover 那一点过渡
   "  .kb-v13-mode-btn,.kb-v13-ifloat-mode-btn{transition:none!important;}",
+  // 3.0 刀 18：收纳栏那几颗按钮的 hover，以及「边看边记」挤出挤进的那一段宽度。
+  // 后者尤其要停——它本来就是为了让人看清"挤"的过程，而这个设置的意思正是别动。
+  "  .kb-v13-dock-name,.kb-v13-dock-drop,.kb-v13-desk-dock,.kb-v13-reader-side{transition:none!important;}",
   "}",
 ];
 
@@ -1991,5 +2075,9 @@ export const CSS = BASE.concat(
   MULTILEVEL,
   CANVAS,
   READER,
+  // ⚠️ 必须排在 READER **后面**：收起态那条 `.kb-v13-reader-side-tucked` 和
+  // 基础那条 `.kb-v13-reader-side` 同优先级，靠"后到的赢"把 `flex-basis` 压下去。
+  // 挪到 READER 前面的话，收起会静默失效（屏幕上什么都不发生）。
+  READER_DOCK,
   REDUCED_MOTION
 ).join("");

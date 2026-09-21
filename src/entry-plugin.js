@@ -60,7 +60,19 @@ const RIBBON_ICON = "gem";
  */
 const DEFAULT_SCRATCH_FOLDER = "草稿纸";
 
-const DEFAULT_SETTINGS = { cardsFolder: DEFAULT_CARDS_FOLDER, scratchFolder: DEFAULT_SCRATCH_FOLDER };
+/**
+ * 3.0 刀 18：阅读器收纳栏那条竖栏的底色。**默认白。**
+ *
+ * 为什么是白的：用户点名要的（他那一侧是浅色主题）。而阅读器其余部分跟着宿主的
+ * 深色主题走，两者并排本来就未必合眼——所以它可配，不是写死的。
+ */
+const DEFAULT_DOCK_COLOR = "#ffffff";
+
+const DEFAULT_SETTINGS = {
+  cardsFolder: DEFAULT_CARDS_FOLDER,
+  scratchFolder: DEFAULT_SCRATCH_FOLDER,
+  dockColor: DEFAULT_DOCK_COLOR,
+};
 
 class CrystalVaultView extends ItemView {
   constructor(leaf, plugin) {
@@ -145,6 +157,9 @@ class CrystalVaultView extends ItemView {
             "/" +
             String(this.plugin.settings.scratchFolder || "").replace(/^\/+|\/+$/g, ""),
         },
+        // 3.0 刀 18：阅读器收纳栏那条竖栏的底色。**只影响一层皮**，
+        // 所以它是设置项而不是核心偏好（理由见 `prefs.js` 那个白名单的坑）。
+        dockColor: this.plugin.settings.dockColor,
         // 样式走仓库根目录的 styles.css（Obsidian 自己加载），运行时一份都不注。
         injectStyles: false,
       });
@@ -242,6 +257,18 @@ class CrystalVaultSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("收纳栏底色")
+      .setDesc(
+        "阅读器左边那条收纳栏（顶栏那颗「收纳栏」开出来的）的底色。默认白色。" +
+          "它只换一层皮，所以**改完当场生效**，不会重开视图——上面两项才要重开。"
+      )
+      .addColorPicker((p) => {
+        p.setValue(this.plugin.settings.dockColor).onChange((v) =>
+          this.plugin.setDockColor(v)
+        );
+      });
+
     containerEl.createEl("p", {
       cls: "setting-item-description",
       text: "改完会自动重开一次视图（换目录等于换了一整份数据）。",
@@ -285,6 +312,9 @@ export default class CrystalVaultPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
     if (!this.settings.cardsFolder) this.settings.cardsFolder = DEFAULT_CARDS_FOLDER;
     if (!this.settings.scratchFolder) this.settings.scratchFolder = DEFAULT_SCRATCH_FOLDER;
+    if (!/^#[0-9a-f]{6}$/i.test(String(this.settings.dockColor || ""))) {
+      this.settings.dockColor = DEFAULT_DOCK_COLOR;
+    }
     // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
     // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），
     // 而且状态写得极频繁，没理由让每次滚动都去动设置页看的那几个值。
@@ -336,6 +366,31 @@ export default class CrystalVaultPlugin extends Plugin {
       }
     }
     new Notice("晶体库：草稿纸改到 " + this.settings.scratchFolder);
+  }
+
+  /**
+   * 改收纳栏底色（3.0 刀 18）。
+   *
+   * ⚠️ **不重挂视图**，与上面两个 setter 正相反。那两个换的是数据（卡片目录、
+   * 草稿纸落点），不重挂就会指着一份不存在的数据；这个只换一个 CSS 变量。
+   * 重挂的代价在这里格外大：阅读器里开着的文献、桌面上摆的那几扇窗全会没。
+   * 而取色器是**拖出来的**，一次拖动会来几十个 `change`——那就是几十次重挂。
+   *
+   * 走 handle 上的 `setDockColor` 而不是自己去 setProperty：那一句话属于核心
+   * （它才知道变量铺在哪一层），这里只负责把值转过去。这个文件里不该有业务逻辑，
+   * 见文件头。
+   */
+  async setDockColor(v) {
+    const next = String(v || "").trim().toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(next) || next === this.settings.dockColor) return;
+    this.settings.dockColor = next;
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const h = leaf.view && leaf.view.handle;
+      if (h && typeof h.setDockColor === "function") h.setDockColor(next);
+    }
+    // 防抖那一条（400ms），不是 `flush()`：拖一次取色器几十个事件，
+    // 每个都整份写一遍 data.json 没必要。寿命上它也只是个设置。
+    this.persist();
   }
 
   async setCardsFolder(v) {

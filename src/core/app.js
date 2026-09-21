@@ -515,6 +515,27 @@ function applyPrefs(ctx) {
   ctx.fs.style.setProperty("--kb-search-color", ctx.state.prefs.searchColor);
 }
 
+/**
+ * 3.0 刀 18：收纳栏那条竖栏的底色。
+ *
+ * ⚠️ 铺在 **`<body>`** 上，不是 `ctx.fs`（上面 `applyPrefs` 铺的那个）。
+ * `#kb-reader` 是挂在 body 下的**兄弟**（见 mount 里 `doc.body.appendChild(readerEl)`
+ * 那一段），而收纳栏长在阅读器里——铺在 `fs` 上它继承不到。症状是「设置里改了色，
+ * 阅读器的收纳栏纹丝不动」，而库里别的地方都跟着变了——那种「一半生效」的 bug
+ * 看着像设置没保存，查起来要绕远路。
+ *
+ * 空串 = 宿主没给，一个字节都不写，样式表里的 `#fff` 兜底接着管。
+ */
+function applyDockColor(ctx) {
+  if (!ctx.doc || !ctx.doc.body) return;
+  // 空串 = 回到样式表里的兜底白。**要 `removeProperty`，不是设成空串**：
+  // 给自定义属性赋空串在 CSSOM 里是一次「无效值」赋值，结果是保留旧值还是不设，
+  // 属于实现细节——别赌，删掉它。
+  const c = String(ctx.dockColor || "");
+  if (c) ctx.doc.body.style.setProperty("--kb-dock-bg", c);
+  else ctx.doc.body.style.removeProperty("--kb-dock-bg");
+}
+
 export async function mount({
   adapter,
   container,
@@ -538,6 +559,14 @@ export async function mount({
   // 核心不该知道 `草稿纸` 这三个字（同 cardsFolder 那条纪律）。
   // 不给就是 `null`，阅读器**不显示那颗按钮**（摆一颗按了没反应的比不摆更糟）。
   scratch = null,
+  // 3.0 刀 18：阅读器收纳栏那条竖栏的底色，`#rrggbb`。空串 = 宿主没给，
+  // 样式表里的 `#fff` 兜底接着管。
+  //
+  // ⚠️ 它是**宿主的设置**（插件设置里那一行），不是核心偏好——不塞进 `prefs.js`
+  // 是因为那边是白名单，而这只影响一层皮；塞进去等于为了一个颜色多担一次
+  // 「下次写盘静默丢掉」的风险（`prefs.js` 里那个坑记过一次）。
+  // dataviewjs 形态不传这一项，就是默认白。
+  dockColor = "",
 }) {
   assertAdapter(adapter);
 
@@ -965,6 +994,8 @@ export async function mount({
     metrics,
     win,
     doc,
+    // 3.0 刀 18：收纳栏底色（见 mount 的入参）。空串 = 宿主没给。
+    dockColor,
     s: metrics.s,
     ring: metrics.ring,
     root,
@@ -1260,6 +1291,9 @@ export async function mount({
   // ---- 粒子 ----
   // 偏好铺上去（CSS 变量挂在 fs 上，样式表里 var() 取）
   applyPrefs(ctx);
+  // 3.0 刀 18：收纳栏底色铺在 body 上（理由见那个函数）——它得让**阅读器**也吃到，
+  // 而阅读器不是 fs 的后代。
+  applyDockColor(ctx);
 
   const particles = fs.querySelector("#kb-particles");
   for (let i = 0; i < 60; i++) {
@@ -1701,7 +1735,13 @@ export async function mount({
       openDoc: (path) => ctx.reader.openDoc(path),
       // 3.0 刀 9-A 桌面：**只读**。开关和加页一律走顶栏那两颗真按钮
       // （「桌面」/「＋ 页」），句柄上不给操作入口——理由同上一行。
-      deskOn: () => ctx.reader.deskOn(),
+      // 3.0 刀 18：宿主在设置页换了收纳栏底色时走它。**刻意不重挂**——
+    // 只换一个 CSS 变量，而重挂会把阅读器里开着的文献、桌面上摆的窗全拆掉。
+    setDockColor: (c) => {
+      ctx.dockColor = String(c || "");
+      applyDockColor(ctx);
+    },
+    deskOn: () => ctx.reader.deskOn(),
       deskWins: () => ctx.reader.deskWins(),
     },
     // 3.0 刀 4 方框。读的是**草稿优先**的那种（和 crystalPos 同一条口径）——
