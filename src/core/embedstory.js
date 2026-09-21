@@ -33,9 +33,8 @@
 // 在哪儿拖都一样。所以结构窗里的改动会同步出现在晶体库那一屏。
 
 import { EL } from "./dom.js";
-import { cutLinkSpans, patchBody, splitCard, stripBodyPrefix } from "./frontmatter.js";
-import { applyCardFields, parseLinks } from "./model.js";
 import { bindPanZoom } from "./panzoom.js";
+import { createStoryWrite } from "./storywrite.js";
 import {
   renderStorylineStage,
   redrawStoryLines,
@@ -389,234 +388,32 @@ export function createEmbedStory(ctx, opts = {}) {
   // 用户不要了：连着拖几根线的时候，每拖完一根都被一个输入框截住，还得先处理它
   // 才轮得到下一根。「连的时候写下理由」这条规矩本身没变——**手写在 `]]` 后面
   // 照样会显示在线上**，只是这扇窗不再代劳、也不再拦那一下。
-  let undoState = null;
   const undoBtn = EL("button", "kb-v13-embedundo", "撤销");
   undoBtn.type = "button";
   undoBtn.style.display = "none";
   bar.append(undoBtn);
 
-  undoBtn.addEventListener("click", () => undoWrite());
-
-  /**
-   * 写一条链接进正文。
-   *
-   * @returns {Promise<"ok"|"dup"|"conflict"|"missing"|"error">}
-   */
-  async function writeStoryLink(fromPath, toPath) {
-    const card = ctx.model.byPath.get(fromPath);
-    const target = ctx.model.byPath.get(toPath);
-    if (!card || !target) return "error";
-    const link = "[[" + target.title + "]]";
-    const base = card.content == null ? "" : card.content;
-    if (base.indexOf(link) >= 0) {
-      // 3.0 刀 13：这一句原来只说"没有重复写"，可接法提示**照样会按你拖的改**，
-      // 屏幕上那根线会挪。用户读到的是「说没写，可线动了」——那是在说谎。
-      say("这两张卡已经连着了。接的位置按你拖的改过来了。", true);
-      return "dup";
-    }
-    const { body } = splitCard(base);
-    const content = patchBody(base, stripBodyPrefix(body) + "\n\n" + link + "\n");
-    let res;
-    try {
-      res = await ctx.adapter.writeCard(card.path, content, { base });
-    } catch (e) {
-      say("写不进去：" + ((e && e.message) || e), false);
-      return "error";
-    }
-    if (!res || !res.ok) {
-      const why =
-        res && res.reason === "conflict"
-          ? "这张卡在别处被改过（多半是手机同步），**没有**写。"
-          : res && res.reason === "missing"
-            ? "这张卡的文件不在了。"
-            : "写盘失败。";
-      say(why, false);
-      return (res && res.reason) || "error";
-    }
-    // 用**回读的真实全文**更新模型，不是我们自己拼的那份（宿主可能规范化了行尾）。
-    applyCardFields(card, {}, res.content);
-    if (ctx.refreshRelations) ctx.refreshRelations();
-    // ⚠️ **不要调 `ctx.refreshCard`**。它的名字看着像「重画那张卡」，实际是
-    // `showHologram(...)`——会把卡片盒收掉、还在背后打开一张卡的面板。
-    // reader.js 的 writeBacklink 在同一个坑上写过一整段注释，这里是同一个坑。
-    if (ctx.refreshCards) ctx.refreshCards();
-    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-    if (ctx.flushViewState) ctx.flushViewState();
-
-    undoState = { entries: [{ path: card.path, prev: base, base: res.content }] };
-    undoBtn.style.display = "";
-    say("已写入 " + link, true);
-    render(view.path, { keepCamera: true });
-    return "ok";
-  }
-
-  /**
-   * 删掉选中的那几根蓝线 = 把笔记正文里的 `[[…]]` 挖掉（3.0 刀 16）。
-   *
-   * 用户 09-20 判的两条：
-   *   · **两个方向都删**——`mergePairs` 把 A→B 和 B→A 合成一根线画，那一根上可能
-   *     压着两条字面量（两张卡各一条）；
-   *   · 不弹确认，只给一层撤销（复用顶栏那颗「撤销」）。
-   *
-   * ⚠️ 这是整个库里**唯一会删用户手写内容**的地方，三条纪律：
-   *   1. 认目标一律**比 `resolveLink` 出来的 path**，绝不比标题——同名卡会让边指错人
-   *      （`edgesUnder` 顶上那段注释说的就是这件事），比错名字 = 删掉**另一张卡**的
-   *      正文。认不出来就**少删、并且说出来**，绝不猜。
-   *   2. 每张卡**只写一次盘**：一张卡同时丢两条链时，分两次写的话第二次会撞上自己
-   *      刚写下去的那一份（基线对不上 → 假冲突）。
-   *   3. `{ base }` **一次都不能省**：省了等于关掉冲突检测，会盲写覆盖手机上刚改的那份。
-   *
-   * @param {{from: string, to: string}[]} pairs 选中的边（mergePairs 的规范序）
-   * @returns {Promise<number>} 真的从正文里挖掉了几处 `[[…]]`
-   */
-  async function removeStoryLinks(pairs) {
-    const list = Array.isArray(pairs) ? pairs : [];
-    if (!list.length) return 0;
-
-    // 按卡分组，**两个方向都塞**：屏幕上一根线只说明"两边之一链向另一个"，
-    // fwd/back 是渲染的产物，不能拿它当"这条是谁写的"。
-    const want = new Map();
-    for (const p of list) {
-      if (!p || !p.from || !p.to || p.from === p.to) continue;
-      for (const [a, b] of [
-        [p.from, p.to],
-        [p.to, p.from],
-      ]) {
-        if (!want.has(a)) want.set(a, new Set());
-        want.get(a).add(b);
-      }
-    }
-
-    const done = [];
-    const failures = [];
-    const missed = [];
-    let removed = 0;
-    let ateLines = false;
-
-    for (const [srcPath, targets] of want) {
-      const card = ctx.model.byPath.get(srcPath);
-      if (!card) {
-        missed.push(srcPath);
-        continue;
-      }
-      const base = card.content == null ? "" : card.content;
-      const { fmBlock, body } = splitCard(base);
-      // 正文里每一处 `[[…]]` 各自解析成谁。**在 body 上解析、也在 body 上切**——
-      // 偏移在一个串上算、在另一个串上切，症状是"删掉了旁边的几个字"。
-      const spans = [];
-      for (const l of parseLinks(body)) {
-        const r = ctx.adapter.resolveLink(l.target, card.path);
-        if (r && r.path && targets.has(r.path)) spans.push({ start: l.start, end: l.end });
-      }
-      if (!spans.length) {
-        missed.push(srcPath);
-        continue;
-      }
-      const cut = cutLinkSpans(body, spans);
-      // ⚠️ 拼 `fmBlock + 新正文`、**不走 patchBody**：patchBody 会把**原样**的正文
-      // 前缀接回去，而链接被挖掉之后写模式 ADD 加的那两行分隔换行就落进了"前缀"
-      // 区间——接回去等于凭空多留一行，文件跟写之前对不上。
-      const next = fmBlock + cut.text;
-      // 空操作护栏：算出来跟原文一模一样就什么都别做。
-      // 这是防"某天算出一个把整篇删空的 bug"的那道安全带。
-      if (next === base) {
-        missed.push(srcPath);
-        continue;
-      }
-      let res;
-      try {
-        res = await ctx.adapter.writeCard(card.path, next, { base });
-      } catch (e) {
-        failures.push(srcPath);
-        continue;
-      }
-      // **一张卡失败不影响其余卡**：一整批里有一张在手机上被改过，
-      // 不该把别的几张也一起卡住。
-      if (!res || !res.ok) {
-        failures.push(srcPath);
-        continue;
-      }
-      applyCardFields(card, {}, res.content);
-      done.push({ path: card.path, prev: base, base: res.content });
-      removed += cut.removed;
-      if (cut.ateLines) ateLines = true;
-    }
-
-    if (done.length) {
-      if (ctx.refreshRelations) ctx.refreshRelations();
-      // ⚠️ **不要调 `ctx.refreshCard`**——同 writeStoryLink 顶上那条注释
-      if (ctx.refreshCards) ctx.refreshCards();
-      if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-      if (ctx.flushViewState) ctx.flushViewState();
-      undoState = { entries: done };
-      undoBtn.style.display = "";
-    }
-
-    // 出了什么事**一律说清楚**，一句都不许静默
-    const parts = [];
-    if (removed) parts.push("删掉 " + removed + " 处 [[链接]]（" + done.length + " 张卡）");
-    if (removed && ateLines) parts.push("连着链那一行一起删了（撤销能回来）");
-    if (missed.length) parts.push("有 " + missed.length + " 张卡没找到对应的 [[链接]]，没动它");
-    if (failures.length) parts.push("有 " + failures.length + " 张没删成（多半是手机同步改过）");
-    say(parts.length ? parts.join("；") + "。" : "没有可删的。", !failures.length && !missed.length);
-
-    if (done.length) {
-      render(view.path, { keepCamera: true });
-      if (ctx.refreshStageUi) ctx.refreshStageUi();
-    }
-    return removed;
-  }
-
-  /**
-   * 写盘之后的后悔药。**只给一层、不给重做**——与 editform 同一条规矩。
-   *
-   * 3.0 刀 16：一次操作可能动了**好几张卡**（删一根蓝线 = 两个方向 = 两张卡），
-   * 所以这里是循环，`entries` 里每张卡各写各的。
-   *
-   * ⚠️ **没全撤回来时按钮要留着、`entries` 只保留失败的那几条**。原来是一失败就
-   *    把 undoState 清空、按钮收起来——那张冲突的卡（恰恰最需要再撤一次的）从此
-   *    永远没机会，而屏幕上什么都不说。
-   */
-  async function undoWrite() {
-    const u = undoState;
-    if (!u) return;
-    undoState = null;
-    undoBtn.style.display = "none";
-    const failed = [];
-    for (const ent of u.entries) {
-      let res;
-      try {
-        res = await ctx.adapter.writeCard(ent.path, ent.prev, { base: ent.base });
-      } catch (e) {
-        failed.push(ent);
-        continue;
-      }
-      // conflict / missing / error 都留着重试——下一轮再撤一次可能就成了
-      if (!res || !res.ok) {
-        failed.push(ent);
-        continue;
-      }
-      const card = ctx.model.byPath.get(ent.path);
-      if (card) applyCardFields(card, {}, res.content);
-    }
-    if (ctx.refreshRelations) ctx.refreshRelations();
-    if (ctx.refreshCards) ctx.refreshCards();
-    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-    if (ctx.flushViewState) ctx.flushViewState();
-    if (failed.length) {
-      undoState = { entries: failed };
-      undoBtn.style.display = "";
-      say("有 " + failed.length + " 张没撤回来（在别处被改过），可以再点一次。", false);
-    } else {
-      say("撤销了。", true);
-    }
-    render(view.path, { keepCamera: true });
-  }
+  // 3.0 刀 17：写那一整套（拖线写链接 / 删蓝线 / 撤销）搬进了 `core/storywrite.js`，
+  // **和晶体库的故事线共用同一份**。这扇窗只提供它独有的三样：往哪儿说话、
+  // 写完之后重画什么、撤销按钮是哪一颗。
+  //
+  // 边界的划法：`storywrite` 不认识"窗"这个概念，`embedstory` 不认识"写盘"这个概念
+  // ——和 storyline.js 那条「这一层不认识适配层」是同一条纪律。
+  const storyWrite = createStoryWrite(fake, {
+    say: (text, ok) => say(text, ok),
+    afterWrite: () => render(view.path, { keepCamera: true }),
+    setUndoVisible: (on) => {
+      undoBtn.style.display = on ? "" : "none";
+    },
+  });
+  undoBtn.addEventListener("click", () => storyWrite.undoWrite());
 
   // 舞台把「拖一根线落在哪张卡上」交到这里（见 storyline.js 的 bindLinkMode）。
-  fake.writeStoryLink = (fromPath, toPath) => writeStoryLink(fromPath, toPath);
-  // 3.0 刀 16：蓝线的「删」走这条路（storyline 那一层不认识适配层）。
-  fake.removeStoryLinks = (pairs) => removeStoryLinks(pairs);
+  // 这两条就是「写模式」在 ctx 这一层的**全部接口** —— storyline.js 只认它们，
+  // 别的什么都不问。库里那份 ctx 挂的是同一个模块的同一个函数。
+  fake.writeStoryLink = storyWrite.writeStoryLink;
+  fake.removeStoryLinks = storyWrite.removeStoryLinks;
+
 
   // ⚠️ **`refreshStoryline` 必须也覆盖掉。**
   //

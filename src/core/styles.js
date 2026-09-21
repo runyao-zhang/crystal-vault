@@ -1205,6 +1205,22 @@ const CANVAS = [
   // 和"按下去会怎样"是两件事——只看字要在脑子里倒一次，加个底色就不用。
   ".kb-v13-hidelinks-btn.kb-v13-hidelinks-on{background:rgba(45,70,105,.62);",
   "  border-color:rgba(150,185,225,.55);color:rgba(205,222,245,.95);}",
+  // 3.0 刀 17：故事线的「画线：看 / 写」和「撤销」。
+  // 用暖色 —— 与结构窗那颗「画线：看 / 写」同一支。`.on` 的意思是
+  // **接下来拖的每一根线都会写进笔记**，得让人一眼看见它还开着。
+  ".kb-v13-linkwrite-btn{appearance:none;margin-left:8px;padding:2px 9px;border-radius:11px;",
+  "  border:1px solid rgba(255,200,110,.3);background:rgba(95,80,50,.28);",
+  "  color:rgba(240,225,195,.9);font:inherit;font-size:11px;line-height:16px;",
+  "  cursor:pointer;white-space:nowrap;transition:background .16s,border-color .16s;}",
+  ".kb-v13-linkwrite-btn:hover{background:rgba(130,105,60,.45);border-color:rgba(255,210,130,.55);}",
+  ".kb-v13-linkwrite-btn:focus-visible{outline:1px solid rgba(255,210,130,.8);outline-offset:1px;}",
+  ".kb-v13-linkwrite-btn.kb-v13-linkwrite-on{background:rgba(255,190,90,.22);",
+  "  border-color:rgba(255,200,110,.7);color:rgba(255,235,185,.98);}",
+  // 顶栏那句话。字号色值抄结构窗的 `.kb-v13-embedhint`，差别是**它会自己消失**
+  // （库的顶栏是常驻的，一句话赖着不走就成了噪音）。
+  ".kb-v13-status{margin-left:10px;font-size:11px;color:rgba(160,195,225,.75);",
+  "  max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+  ".kb-v13-status.kb-v13-status-bad{color:rgba(255,150,140,.9);}",
   // 「选框 / 删除实线」。选框开着时按钮点亮 + 鼠标变方框——
   // **光标就是这套交互的全部反馈**：拖下去到底是框选还是推画面，
   // 光标说了算，不用去回想刚才点没点过那颗按钮。

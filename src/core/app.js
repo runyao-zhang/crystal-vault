@@ -86,9 +86,14 @@ import {
   leaveStoryline,
   setLinking,
   invalidateStoryline,
+  blueSel,
+  marqueeKind,
   hiddenCardSet,
   showAllHidden,
 } from "./storyline.js";
+// 3.0 刀 17：故事线的「写」。**和结构窗共用同一份**，不是各写一套——
+// 这套东西会改用户手写的笔记，两个实现迟早漂移。
+import { createStoryWrite } from "./storywrite.js";
 // 3.0 刀 6 文献阅读器。它是一个**顶层浮层**（不是 state.stage 的第五个值）——
 // 它读的东西（PDF / 图片 / markdown）与晶体层级毫无关系，塞进 stage 那四档
 // 会凭空造出「故事线 + 阅读器」这种没有意义的格子。
@@ -356,6 +361,41 @@ function doResetLayout(ctx) {
   refreshStageUi(ctx);
 }
 
+/** 顶栏那句话挂多久（毫秒）。够看完一句"没删成，因为…"，又不至于赖着不走。 */
+const STATUS_MS = 4200;
+
+/**
+ * 在顶栏说一句话（3.0 刀 17）。
+ *
+ * 库里原来**没有**这个东西：结构窗有 `.kb-v13-embedhint`，而库里只有两处专用的
+ * 提示条（linehint 管框选、select-hint 管选中），都不是通用的。可"写不进去——
+ * 这张卡在别处被改过"这种话必须说得出来，这一套的纪律是「一句都不许静默」。
+ *
+ * 与结构窗那份的差别：**这里会自动消失**。库的顶栏是常驻的，一句话赖着不走就
+ * 成了噪音；结构窗底下那条本来就是它的固定位置。
+ *
+ * ⚠️ 定时器挂 `win` 上、mount 开头清掉——与 `__kbV13PersistTimer` 同一条规矩。
+ * 不挂的话，重挂之后旧实例那个还没到点的定时器，会把新实例刚说的话抹掉：
+ * 表现是"有时候消息一闪就没了"，而且只在重挂之后出现。
+ */
+function sayStatus(ctx, text, ok = true) {
+  const el = ctx.statusEl;
+  if (!el) return;
+  const win = ctx.win || {};
+  if (win.__kbV13StatusTimer) {
+    clearTimeout(win.__kbV13StatusTimer);
+    win.__kbV13StatusTimer = 0;
+  }
+  el.textContent = text || "";
+  el.classList.toggle("kb-v13-status-bad", !ok);
+  if (!text) return;
+  win.__kbV13StatusTimer = setTimeout(() => {
+    win.__kbV13StatusTimer = 0;
+    el.textContent = "";
+    el.classList.remove("kb-v13-status-bad");
+  }, STATUS_MS);
+}
+
 function refreshStageUi(ctx) {
   refreshFacetButtons(ctx);
   const stage = stageOf(ctx);
@@ -394,20 +434,43 @@ function refreshStageUi(ctx) {
   // 编辑模式那行说明：跟着模式开关走（模式在别处被关掉时也要收起来）。
   refreshLineHint(ctx);
 
+  // 3.0 刀 17：故事线的**看 / 写两档**。只在故事线出现。
+  // 默认「看」——写模式下拖一根线就是一次真写盘，而这一屏上满是卡片。
+  if (ctx.linkWriteBtn) {
+    ctx.linkWriteBtn.style.display = stage === "storyline" ? "" : "none";
+    ctx.linkWriteBtn.textContent = ctx.state.linkWrite ? "画线：写" : "画线：看";
+    ctx.linkWriteBtn.classList.toggle("kb-v13-linkwrite-on", !!ctx.state.linkWrite);
+  }
+  // 撤销：**真写过之后才出现**（与「显示全部」同一条规矩：点了没反应的按钮
+  // 比不摆更糟）。有没有得撤问 storyWrite 自己，这里只负责"离开故事线就收起来"。
+  if (ctx.undoBtn) {
+    const canUndo = !!(ctx.storyWrite && ctx.storyWrite.hasUndo());
+    ctx.undoBtn.style.display = stage === "storyline" && canUndo ? "" : "none";
+  }
+
   // 「选框 / 删除实线」：**右键进过图模式之后才出现**（连接模式或连线编辑模式）。
   // 平时不摆——故事线上没在摆弄线的时候，顶上多两颗按钮是噪音。
   const inGraphMode = ctx.state.linking || ctx.state.lineEdit;
+  const blueKind = marqueeKind(ctx) === "blue";
   if (ctx.marqueeBtn) {
     ctx.marqueeBtn.style.display = stage === "storyline" && inGraphMode ? "" : "none";
     // 字说的是**按下去会怎样**（顶栏其它开关都是这个口径）
     ctx.marqueeBtn.textContent = isMarqueeArmed(ctx) ? "退出选框" : "选框";
     ctx.marqueeBtn.classList.toggle("kb-v13-marquee-on", isMarqueeArmed(ctx));
+    ctx.marqueeBtn.title = blueKind
+      ? "打开选框：这时拖鼠标就是框选蓝线。删掉 = 从卡片正文里删掉那条 [[链接]]。"
+      : "打开选框：鼠标变成一个方框，这时拖鼠标就是框选金线。再点一下关掉。";
   }
   if (ctx.delLinesBtn) {
-    const n = marqueeSel(ctx).length;
+    const n = (blueKind ? blueSel(ctx) : marqueeSel(ctx)).length;
     // **只在真的有得删的时候出现**。摆一颗点了没反应的按钮比不摆更糟。
     ctx.delLinesBtn.style.display = stage === "storyline" && n > 0 ? "" : "none";
-    ctx.delLinesBtn.textContent = "删除实线（" + n + "）";
+    // 3.0 刀 17：写模式下按下去删的是**笔记正文**，按钮上还写「删除实线」就是
+    // 在骗人。措辞与结构窗的 syncBar 保持同一套。
+    ctx.delLinesBtn.textContent = (blueKind ? "删除蓝线（" : "删除实线（") + n + "）";
+    ctx.delLinesBtn.title = blueKind
+      ? "把框中的蓝线删掉——笔记正文里对应的 [[链接]] 会一起删掉（可撤销一次）。"
+      : "删掉框选中的那几根金色线。";
   }
 
   // 「隐藏连线」只在故事线出现——别处根本没有线可藏。
@@ -506,6 +569,12 @@ export async function mount({
     clearTimeout(win.__kbV13PersistTimer);
     win.__kbV13PersistTimer = 0;
   }
+  // 同一个套路的第二个：顶栏那句话的定时器。不清的话，旧实例那个还没到点的
+  // timer 会把新实例刚说的话抹掉——只在重挂之后出现的那种"消息一闪就没了"。
+  if (win.__kbV13StatusTimer) {
+    clearTimeout(win.__kbV13StatusTimer);
+    win.__kbV13StatusTimer = 0;
+  }
 
   if (injectStyles) {
     const style = doc.createElement("style");
@@ -574,6 +643,22 @@ export async function mount({
     // 与上面那颗同一条规矩：只在真有东西可显的时候才出场。
     '<button type="button" class="kb-v13-hidelinks-btn" id="kb-fs-showall" style="display:none"' +
     ' title="把右键藏起来的那些卡片的入链出链全部显示回来。">显示全部</button>' +
+    // 3.0 刀 17：**故事线的看 / 写两档**。与结构窗那颗「画线：看 / 写」同义同款。
+    //
+    // 默认「看」——写模式下拖一根线就是一次**真写盘**，而这一屏上满是卡片，
+    // 手滑拖一下就是一次改动。所以它必须是显式点开的，不能是默认档。
+    '<button type="button" class="kb-v13-linkwrite-btn" id="kb-fs-linkwrite" style="display:none"' +
+    ' title="切换「拖一根线」的后果：看 = 只画一根金线，存在库里，不碰笔记；' +
+    '写 = 往起点那张卡的正文里真写一条 [[目标卡]]，笔记跟着变。">画线：看</button>' +
+    // 3.0 刀 17：撤销。**只在真写过之后才出现**（与「显示全部」同一条规矩：
+    // 摆一颗点了没反应的按钮比不摆更糟）。
+    '<button type="button" class="kb-v13-linkwrite-btn" id="kb-fs-undo" style="display:none"' +
+    ' title="把刚才那次写入还原回去。只给一层，不给重做。">撤销</button>' +
+    // 3.0 刀 17：库里的「说一句话」。结构窗有 `.kb-v13-embedhint`，而库里原来
+    // **一个通用消息面都没有**（linehint 是模式门控的、select-hint 专讲选中），
+    // 于是"写不进去""在别处被改过""删掉几处"这些话没地方说——
+    // 而这一套的纪律是「一句都不许静默」。
+    '<span class="kb-v13-status" id="kb-fs-status"></span>' +
     // 连线编辑模式那两颗。**「选框」是这套交互唯一的正经入口**——
     // 上一版把它做成"按住 S 再拖"，在真机上是死的：库嵌在笔记里，点它不会
     // 把焦点从编辑器拿走，按 S 的 keydown 落点是编辑器的 contenteditable，
@@ -783,6 +868,19 @@ export async function mount({
     e.stopPropagation();
     showAllHidden(ctx);
   });
+  // 3.0 刀 17：切「看 / 写」。逐条对齐结构窗那颗的 setWriteMode：
+  // 改状态 → **退掉连线编辑模式**（上一档的选中一并作废，否则按钮上那几个字和
+  // 按下去真正删掉的东西对不上）→ 刷界面。
+  fs.querySelector("#kb-fs-linkwrite").addEventListener("click", (e) => {
+    e.stopPropagation();
+    ctx.state.linkWrite = !ctx.state.linkWrite;
+    setLineEdit(ctx, false);
+    refreshStageUi(ctx);
+  });
+  fs.querySelector("#kb-fs-undo").addEventListener("click", (e) => {
+    e.stopPropagation();
+    storyWrite.undoWrite();
+  });
   fs.querySelector("#kb-fs-marquee").addEventListener("click", (e) => {
     e.stopPropagation();
     setMarqueeArm(ctx, !isMarqueeArmed(ctx));
@@ -914,6 +1012,9 @@ export async function mount({
     addModBtn: fs.querySelector("#kb-fs-addmod"),
     hideLinksBtn: fs.querySelector("#kb-fs-hidelinks"),
     showAllBtn: fs.querySelector("#kb-fs-showall"),
+    linkWriteBtn: fs.querySelector("#kb-fs-linkwrite"),
+    undoBtn: fs.querySelector("#kb-fs-undo"),
+    statusEl: fs.querySelector("#kb-fs-status"),
     marqueeBtn: fs.querySelector("#kb-fs-marquee"),
     delLinesBtn: fs.querySelector("#kb-fs-dellines"),
     // 3.0 刀 9-C：顶栏那颗「文献」。它平时不参与 stage 显隐（任何档都点得到），
@@ -969,10 +1070,19 @@ export async function mount({
       marqueeSel: [],
       marqueeRect: null,
       marqueeArm: false,
-      // 3.0 刀 16：这一次框选删的是**哪一种**线。库里**永远**是 "manual"——
-      // 蓝线那一档（"blue"）只在结构窗的写模式下由右键打开，而库这一屏没有写模式。
-      // 放这里是为了让「读不到就退成 manual」这条兜底有个明确的落点。
+      // 3.0 刀 16：这一次框选删的是**哪一种**线。
+      // 3.0 刀 17：「库里永远是 manual」那句话作废了——库也有了写模式，切到
+      // 「画线：写」再右键空白，这里就会变成 "blue"（与结构窗同一套）。
+      // 放这里是为了让「读不到就退成 manual」那条兜底有个明确的落点。
       marqueeKind: "manual",
+      // 3.0 刀 17：故事线的**写模式**。与结构窗那份同义，只是那边长在影子 state 上。
+      // 拖一根线到底写不写盘，全看它一个。
+      // **不落盘**（同 linking / lineEdit）：它是"我现在想把关系连出来"这个临时
+      // 意图，切一下看法不该把它清掉；但关掉库再开就该回到「看」——写盘这件事
+      // 不该有一个用户不记得自己开过的开关。
+      linkWrite: false,
+      // 蓝线的选中。以前没有正式槽位，靠 blueSel() 里的 Array.isArray 兜底。
+      blueSel: [],
       // 3.0 刀 2 显示模式（"ring" / "canvas" / "grid" / "storyline"）。
       // ⚠️ 与 `ctx.stage`（舞台那个 DOM 节点）同名但完全无关，读的时候看上下文。
       // 它是**推导出来的缓存**：真正的源头是 openCrystal + prefs 里那两档，
@@ -1127,6 +1237,25 @@ export async function mount({
   if (win.__kbV13Reader) win.__kbV13Reader.destroy();
   ctx.reader = createReader(ctx, { el: readerEl, pdfRenderer, injectStyles, scratch });
   win.__kbV13Reader = ctx.reader;
+
+  // ---- 故事线的「写」（3.0 刀 17）----
+  // **和结构窗共用 core/storywrite.js 里那一份**，这里只是把它挂到真 ctx 上、
+  // 告诉它往哪儿说话。三样注入就是两个宿主全部的差别。
+  //
+  // ⚠️ 建在 ctx 字面量**之后**：模块内部要用 ctx.adapter / ctx.model，而字面量
+  // 还没跑完时它们是 undefined。
+  const storyWrite = createStoryWrite(ctx, {
+    say: (text, ok) => sayStatus(ctx, text, ok),
+    afterWrite: () => renderCrystals(ctx),
+    // 撤销按钮的显隐统一走 refreshStageUi（它要同时看"在不在故事线"和
+    // "有没有得撤"两件事），所以这里只是重刷一次界面。
+    setUndoVisible: () => refreshStageUi(ctx),
+  });
+  // 挂在 ctx 上是为了让 `refreshStageUi`（模块级的纯函数）也能问出"有没有得撤"。
+  ctx.storyWrite = storyWrite;
+  // storyline.js 只认这两个口子，别的什么都不问。
+  ctx.writeStoryLink = storyWrite.writeStoryLink;
+  ctx.removeStoryLinks = storyWrite.removeStoryLinks;
 
   // ---- 粒子 ----
   // 偏好铺上去（CSS 变量挂在 fs 上，样式表里 var() 取）
