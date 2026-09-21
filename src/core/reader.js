@@ -1315,17 +1315,27 @@ export function createReader(ctx, opts = {}) {
     close.title = w.docked ? "收回收纳栏" : "把这一页收回去";
     close.addEventListener("click", () => (w.docked ? stowDeskWin(w.id) : removeDeskWin(w.id)));
     bar.append(title, meta, close);
-    // 没收进栏里的窗多一颗「收纳」。**手势之外的那条路**：拖到栏上是主要动作，
-    // 但它没有可见的入口——09-20 那次「右键只有金色线」就是纯手势造成的。
-    // 已经是 `<button>`：`desk.js` 的 `e.target.closest("button")` 靠这个把它
+    // **每一扇窗都有一颗「收纳」，不带条件**（3.0 刀 20）。
+    //
+    // 原来写的是 `if (!w.docked)`，于是**从收纳栏里点出来的那扇窗**（它的
+    // `docked` 已经是真）顶上只剩一颗 ↗ 和一颗 ✕——用户看到的动作里没有「收回去」，
+    // 于是报「访问外部标签页时只有在系统浏览器中访问」（09-21）。而那颗 ✕ 在
+    // 这种状态下虽然也叫「收回收纳栏」，它的样子是关窗，没人会去猜。
+    //
+    // 去掉条件是安全的：`stowDeskWin` 对两种状态本来就是**同一个意思**——
+    // 没条目就建一条，有就只是收起来。所以这一颗的无条件语义可以一句话说清：
+    // **和最小化一样，按下去就是收起来**。
+    //
+    // 它同时也是「拖到栏上」之外的那条**可见**的路：拖拽是主要动作，但纯手势
+    // 没有入口——09-20 那次「右键只有金色线」就是纯手势造成的。
+    //
+    // 必须是真 `<button>`：`desk.js` 的 `e.target.closest("button")` 靠这个把它
     // 从拖动起点里排掉，做成 `<div>` 的话按下去会变成拖窗。
-    if (!w.docked) {
-      const toDock = EL("button", "kb-v13-desk-dock", "收纳");
-      toDock.type = "button";
-      toDock.title = "收进左边的收纳栏：窗从桌面上拿走，栏里留一条，点一下就回来";
-      toDock.addEventListener("click", () => stowDeskWin(w.id));
-      bar.insertBefore(toDock, close);
-    }
+    const toDock = EL("button", "kb-v13-desk-dock", "收纳");
+    toDock.type = "button";
+    toDock.title = "收进左边的收纳栏（同最小化）：窗从桌面上拿走，栏里留一条，点一下就回来";
+    toDock.addEventListener("click", () => stowDeskWin(w.id));
+    bar.insertBefore(toDock, close);
     // 外部标签页多一颗 ↗。它是这扇窗**唯一可靠的出路**：站点可以用响应头拒绝
     // 被嵌（Google 系全都拒），那时候窗里是一片空白、或者站点自己写的一句报错
     // ——而用户此刻要的是「看到那个页面」，不是「研究为什么白屏」（3.0 刀 19）。
