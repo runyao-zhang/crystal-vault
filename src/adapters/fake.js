@@ -53,6 +53,8 @@ export function createFakeAdapter({
   onCreateCard,
   onCreateFolder,
   onTrashFolder,
+  // 3.0 刀 21：改名探针，语义同 onTrashFolder（记一笔，「改了哪个路径」才是要钉的）。
+  onRenameFile,
   onMountEditor,
   storageKey,
 } = {}) {
@@ -342,6 +344,77 @@ export function createFakeAdapter({
     },
 
     /**
+     * 改一个文件或文件夹的名字（3.0 刀 21）。只换叶子，不搬地方。
+     *
+     * ⚠️ 假盘有**四个并行的存储**——`cards`（数组，模型就是从它建起来的）、
+     * `disk`（路径 → 全文）、`folders`（建过的文件夹）、`byName`（名字 → 卡）——
+     * 改名要把它们**全部**改一致。少改一个的症状是「真宿主好好的，只有测试里
+     * 对不上」，而那种错只有一个用例抓得到（`trashFile` 那条 ⚠️ 记的是同一类）。
+     * 改**文件夹**时还要顺带把它下面每一张卡的 `folder` 与 `path` 一起挪。
+     */
+    renameFile(path, newName) {
+      // 探针先跑（与 createFolder / trashFile 同一套）：让测试**看得见改了哪个路径**。
+      if (onRenameFile) {
+        const injected = onRenameFile(path, newName);
+        if (injected !== undefined) return Promise.resolve(injected);
+      }
+      const from = String(path == null ? "" : path).replace(/\/+$/, "");
+      const leaf = String(newName == null ? "" : newName).trim();
+      if (!from || !leaf) return Promise.resolve({ ok: false, reason: "error", message: "空路径或空名字" });
+      const dir = from.split("/").slice(0, -1).join("/");
+      const card = cards.find((c) => c.path === from);
+      const isFile = !!card || /\.md$/i.test(from);
+      const to = (dir ? dir + "/" : "") + leaf + (isFile ? ".md" : "");
+      if (to === from) return Promise.resolve({ ok: true, path: from }); // 名字没变
+      // 目标被占了没有——文件和文件夹都要查（同 createFolder 那条判据）
+      const taken =
+        cards.some((c) => c.path === to) ||
+        folders.has(to) ||
+        cards.some((c) => {
+          const f = String(c.folder == null ? "" : c.folder);
+          return f === to || f.indexOf(to + "/") === 0;
+        });
+      if (taken) return Promise.resolve({ ok: false, reason: "exists", path: to });
+
+      if (isFile) {
+        if (!card) return Promise.resolve({ ok: false, reason: "missing", path: from });
+        const text = disk.get(from);
+        if (text !== undefined) {
+          disk.delete(from);
+          disk.set(to, text);
+        }
+        byName.delete(card.name);
+        card.path = to;
+        card.name = leaf;
+        byName.set(leaf, card);
+        return Promise.resolve({ ok: true, path: to });
+      }
+
+      const known = folders.has(from) || cards.some((c) => String(c.folder || "").indexOf(from + "/") === 0);
+      if (!known) return Promise.resolve({ ok: false, reason: "missing", path: from });
+      // 整棵子树一起挪。**先算完再改**：边遍历边改的话，已经挪过的那几张卡
+      // 会再次命中前缀判断（它们的 `folder` 已经是新路径了）。
+      for (const c of cards) {
+        const f = String(c.folder == null ? "" : c.folder);
+        if (f !== from && f.indexOf(from + "/") !== 0) continue;
+        const np = to + c.path.slice(from.length);
+        const text = disk.get(c.path);
+        if (text !== undefined) {
+          disk.delete(c.path);
+          disk.set(np, text);
+        }
+        c.path = np;
+        c.folder = to + f.slice(from.length);
+      }
+      for (const f of Array.from(folders)) {
+        if (f !== from && f.indexOf(from + "/") !== 0) continue;
+        folders.delete(f);
+        folders.add(to + f.slice(from.length));
+      }
+      return Promise.resolve({ ok: true, path: to });
+    },
+
+    /**
      * 3.0 刀 9 第三版：假适配层**没有**原生编辑器。
      *
      * 浏览器里没有 Obsidian 的编辑器组件，硬造一个假的只会让测试去验一个
@@ -434,6 +507,42 @@ export function createFakeAdapter({
   // 测试专用：现在还有几个订阅者。重挂之后必须回到 1，
   // 多出来的每一个都是一份永远不会生效、却每次都白跑一趟读盘的监听。
   adapter.watchCount = () => vaultWatchers.size;
+
+  // 测试专用（3.0 刀 21）：模拟一次「宿主发现这张卡在别处被改了名」。
+  // 与真宿主一样**先落盘再通知**——核心那边是拿盘上的现状对账的，
+  // 只通知不改盘的话，它一读还是旧的。
+  //
+  // 回调多带一个 `from`（旧路径）。**这就是那个 bug 的解药**：不带的话，
+  // 核心只看得见「别的卡正文里的 [[甲]] 变成了 [[乙]]」，而 `乙` 从没进过它的
+  // `byPath`，于是给 [[乙]] 登记一张内容为空的影子卡（灰的、点进去什么都没有）。
+  adapter.emitRename = async (from, to) => {
+    const leaf = String(to == null ? "" : to).replace(/^.*\//, "").replace(/\.md$/i, "");
+    const res = await adapter.renameFile(from, leaf);
+    if (!res || !res.ok) return res;
+    const c = cards.find((x) => x.path === res.path);
+    if (c && vaultWatchers.size) {
+      const payload = {
+        path: c.path,
+        folder: c.folder,
+        name: c.name,
+        concept: c.concept,
+        tags: c.tags || [],
+        source: c.source,
+        content: disk.get(c.path),
+      };
+      vaultWatchers.forEach((cb) => cb(payload, from));
+    }
+    return res;
+  };
+
+  // 测试专用（3.0 刀 21）：模拟一次「宿主发现这张卡被删了 / 移出卡片目录」。
+  // 删除**读不到文件**，所以这一条只报路径——契约见 adapter.js 的 watchCards。
+  adapter.emitDelete = (path) => {
+    const i = cards.findIndex((c) => c.path === path);
+    if (i >= 0) cards.splice(i, 1);
+    disk.delete(path);
+    if (vaultWatchers.size) vaultWatchers.forEach((cb) => cb(null, undefined, path));
+  };
 
   // 测试专用：连 frontmatter 字段一起改（对应真库里"在别处改了概念/来源/tags"）
   adapter.emitModifyFields = (path, fields, content) => {

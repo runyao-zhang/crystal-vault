@@ -160,6 +160,29 @@ export function safeFileName(name) {
     .trim();
 }
 
+/**
+ * 把用户输入的**晶体名**（= 一个文件夹名）洗成一个能当文件名的串（3.0 刀 21）。
+ *
+ * 与 `safeFileName` 只差一处：**不洗 `# ^ [ ]`**。那四个是为双链服务的
+ * （`#` 是锚点分隔符、`^` 是块引用、`[` `]` 会截断链接文本），而**文件夹名
+ * 不参与任何链接文本**——洗掉它们只是无谓地改用户起的名。
+ *
+ * 两边都要的那一半理由是一样的：Windows 上 `\ / : * ? " < > |` 建文件夹直接
+ * 失败，而那句失败信息是系统口吻的，用户看不懂自己做错了什么。
+ *
+ * ⚠️ **建和改走同一个函数。** `createCrystal` 原来只查了斜杠，于是会出现
+ * 「建的时候能起、改的时候不能」——那比两边都松更让人困惑。
+ */
+export function safeFolderName(name) {
+  return toStr(name)
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "")
+    .slice(0, 80)
+    .trim();
+}
+
 /** 路径最后一段 */
 function baseName(path) {
   const parts = toStr(path).split("/").filter(Boolean);
@@ -465,6 +488,16 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-newcrystal-open" id="kb-reader-newcrystal-open">＋ 新建晶体</button>' +
     '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystaldel"' +
     ' title="删掉一颗晶体（连同里面的卡片）。走回收站——按你在「文件与链接 → 删除的文件」里选的那一档，能捡回来。">删除晶体</button>' +
+    // 3.0 刀 21（用户 09-24）：重命名并进删除那一对。
+    // 顺序是「新建 → 改名 → 删除」，读下来是一条顺的动作线。
+    // 四颗都用 `.kb-v13-newcrystal-del` 的样式——**它们都会动用户的东西**，
+    // 长得一样反而是诚实的。
+    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystalrename"' +
+    ' title="给一颗晶体（= 一个文件夹）改名。走 Obsidian 自己的改名通道，' +
+    '全库指向里面卡片的 [[双链]] 不受影响。">重命名晶体</button>' +
+    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-cardrename"' +
+    ' title="给一张卡片改名。走 Obsidian 自己的改名通道——别的卡片里指向它的 ' +
+    '[[双链]] 会一起跟着改。">重命名卡片</button>' +
     // 3.0 刀 12 第三版（用户 09-20）：「删除晶体」旁边加「删除卡片」。
     '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-carddel"' +
     ' title="删掉一张卡片（不碰它所在的那颗晶体）。同样走回收站。">删除卡片</button>' +
@@ -514,6 +547,7 @@ export function createReader(ctx, opts = {}) {
   const newCrystalBox = $("kb-reader-newcrystal");
   const newCrystalForm = $("kb-reader-newcrystal-form");
   const newCrystalName = $("kb-reader-newcrystal-name");
+  const newCrystalGo = $("kb-reader-newcrystal-go");
   const newCrystalMsg = $("kb-reader-newcrystal-msg");
   const nativeHost = $("kb-reader-nativehost");
   const nameEl = $("kb-reader-name");
@@ -3085,11 +3119,14 @@ export function createReader(ctx, opts = {}) {
     // 3.0 刀 12 第三版：删一张卡（用户 09-20）。**这一档要看得见卡片**，
     // 别的档用 `foldersOnly` 把它们剥掉了。
     deletecard: { hd: "删除哪张卡", find: "搜卡片" },
+    // 3.0 刀 21：重命名那两档。与删除那两档一一对应——同一棵树、同一种挑法。
+    renamecrystal: { hd: "重命名哪颗晶体", find: "搜晶体" },
+    renamecard: { hd: "重命名哪张卡", find: "搜卡片" },
   };
   /** 这几档挑的是**晶体**（收 key），只有 target 挑文件夹（收宿主路径）。 */
-  const pickIsCrystal = (p) => p === "story" || p === "crystal" || p === "delete";
+  const pickIsCrystal = (p) => p === "story" || p === "crystal" || p === "delete" || p === "renamecrystal";
   /** 这一档挑的是**卡片**（收 path），树里要保留卡片那一级。 */
-  const pickIsCard = (p) => p === "deletecard";
+  const pickIsCard = (p) => p === "deletecard" || p === "renamecard";
 
   /** 打开这棵树。`purpose` 见 folderPick 那只常量上面那段。 */
   function openFolderPick(purpose) {
@@ -3359,6 +3396,12 @@ export function createReader(ctx, opts = {}) {
    */
   /** 有一件破坏性的事在等用户点头（目前只有「删除晶体」）。Esc 认它。 */
   let pendingDelete = null;
+
+  // 3.0 刀 21：「新建晶体」那个表单现在**双用**——建一颗新的，或者给一颗已有的
+  // 改名。差别只有按钮文案和提交时走哪个函数，所以复用同一个输入框，不另起一套
+  // UI（用户 09-24 选的）。
+  let newCrystalMode = "create"; // create | rename-crystal | rename-card
+  let renameTarget = null; // 晶体那条收 **key**，卡片那条收 **path**（同删除那两档）
 
   async function returnFromNativeCompose() {
     const nc = nativeCompose;
@@ -3798,7 +3841,17 @@ export function createReader(ctx, opts = {}) {
     sayNewCrystal("已删除「" + label + "」——进了回收站，能捡回来。", true);
   }
 
+  /** 表单恢复到「建一颗新晶体」那一档。收起来时也要复位——见 `closeNewCrystal`。 */
+  function paintNewCrystalForm() {
+    const renaming = newCrystalMode !== "create";
+    newCrystalGo.textContent = renaming ? "改名" : "建";
+    newCrystalName.placeholder = newCrystalMode === "rename-card" ? "卡片名" : "晶体名（= 一个文件夹）";
+  }
+
   function openNewCrystal() {
+    newCrystalMode = "create";
+    renameTarget = null;
+    paintNewCrystalForm();
     newCrystalBox.classList.add("open");
     sayNewCrystal("", true);
     newCrystalName.value = "";
@@ -3807,10 +3860,257 @@ export function createReader(ctx, opts = {}) {
 
   function closeNewCrystal() {
     newCrystalBox.classList.remove("open");
+    // 模式跟着复位。不复位的话，关掉再点「＋ 新建晶体」会带着上一次那条「改名」
+    // 的文案和一个已经作废的目标——看着像界面卡住了。
+    newCrystalMode = "create";
+    renameTarget = null;
+    paintNewCrystalForm();
     sayNewCrystal("", true);
   }
 
+  // ---- 重命名（3.0 刀 21）----
+  //
+  // 用户 09-24 的原话是「希望你能在边看边记中增加按钮：重命名卡片，重命名晶体」。
+  // 触发它的那件事在这份代码里查出来是这样的：**插件从来就没有「改卡片名字」
+  // 这个动作**，而用户是在 Obsidian 那边改的名；插件没订改名事件（见
+  // `entry-obsidian.js` 的 watchCards），于是别人链过去就成了一张灰的、点进去
+  // 什么都没有的**影子卡**。所以这一刀有两半：这里给一条**正确的路**，
+  // 那边补上**根因**。
+
+  function renameCrystalFlow() {
+    hidePicker();
+    pendingDelete = null;
+    if (!(ctx.model.crystalKeys || []).length) {
+      sayNewCrystal("这张库里还没有晶体。", false);
+      return;
+    }
+    openFolderPick("renamecrystal");
+    sayNewCrystal("挑一颗要改名的晶体。", true);
+  }
+
+  function renameCardFlow() {
+    hidePicker();
+    pendingDelete = null;
+    if (!(ctx.model.allCards || []).length) {
+      sayNewCrystal("这张库里还没有卡片。", false);
+      return;
+    }
+    openFolderPick("renamecard");
+    sayNewCrystal("挑一张要改名的卡。", true);
+  }
+
+  /** 挑完之后把表单打开、**预填当前名字**、等用户改。 */
+  function beginRename(mode, target, current) {
+    newCrystalMode = mode;
+    renameTarget = target;
+    paintNewCrystalForm();
+    newCrystalBox.classList.add("open");
+    newCrystalName.value = toStr(current);
+    sayNewCrystal("改个名字，回车确认。「取消」或 Esc 放弃。", true);
+    newCrystalName.focus();
+    try {
+      newCrystalName.select();
+    } catch (e) {
+      /* 选不中不影响改 */
+    }
+  }
+
+  function startRenameCrystal(node) {
+    hideFolderPick();
+    hidePicker();
+    beginRename("rename-crystal", toStr(node.key), toStr(node.name));
+  }
+
+  function startRenameCard(path) {
+    const card = ctx.model.byPath.get(toStr(path));
+    hideFolderPick();
+    hidePicker();
+    if (!card) return;
+    // ⚠️ 预填的是**文件名**，不是 `card.title`。`title` 是显示名，建卡时那截
+    // `卡片-` 前缀是被剥掉的（`stripCardPrefix`）——拿它当新名字回填，一改名
+    // 那张卡的 `卡片-` 前缀就没了，而库里别处按文件名认人的地方全会跟着变。
+    const leaf = baseName(card.path).replace(/\.md$/i, "");
+    beginRename("rename-card", card.path, leaf);
+  }
+
+  /**
+   * 改完名之后，把**别处存着的旧路径**一起挪到新路径上。
+   *
+   * 模型那边由 `ctx.reconcileCards()` 对账，不用管。要管的是另外三处**模型管不着**
+   * 的地方——它们各自私下记着一份路径或晶体 key：
+   *
+   *   · 视图状态 `openCrystal` / `crystalPath`：面包屑指着的那条路
+   *   · 偏好 `readerStoryCrystal`：结构窗固定看的那颗
+   *   · 桌面窗 `w.path`（看的哪个文件）/ `w.crystal`（结构窗看哪颗晶体）
+   *
+   * 不改的话，用户正站在被改名的那颗晶体里、面包屑却指着一条不存在的路；
+   * 桌面上那扇卡片窗会写「找不到这张卡」。
+   *
+   * ⚠️ **只有「我们自己改名」这条路有映射**——我们确切知道 old→new。外部改名
+   * 那条路上核心只知道「少了一个路径」，不知道它去了哪儿：那种情况下桌面窗会
+   * 停在失效路径上，**这是已知缺口**，关掉阅读器再开一次就好。
+   */
+  function remapAfterRename(oldPath, newPath, oldKey, newKey) {
+    const swap = (v, from, to) => {
+      const s = toStr(v);
+      if (!s || !from) return s;
+      if (s === from) return to;
+      return s.indexOf(from + "/") === 0 ? to + s.slice(from.length) : s;
+    };
+    // 桌面窗
+    let touchedDesk = false;
+    for (const w of desk.wins) {
+      const np = swap(w.path, oldPath, newPath);
+      if (np !== w.path) {
+        w.path = np;
+        touchedDesk = true;
+      }
+      if (oldKey) {
+        const nc = swap(w.crystal, oldKey, newKey);
+        if (nc !== w.crystal) {
+          w.crystal = nc;
+          touchedDesk = true;
+        }
+      }
+    }
+    if (touchedDesk) persistDesk();
+    // 视图状态 + 偏好
+    const s = ctx.state;
+    if (!s) return;
+    s.openCrystal = swap(s.openCrystal, oldKey, newKey);
+    if (Array.isArray(s.crystalPath)) s.crystalPath = s.crystalPath.map((k) => swap(k, oldKey, newKey));
+    // ⚠️ 直接改字段、**不整体重建 prefs**：`sanitizePrefs` 是白名单，重建会把
+    // 用户别处调好的设置一起抹掉（`persistDesk` 那段注释记过这条）。
+    if (oldKey && s.prefs && toStr(s.prefs.readerStoryCrystal)) {
+      s.prefs.readerStoryCrystal = swap(s.prefs.readerStoryCrystal, oldKey, newKey);
+      if (ctx.savePrefs) ctx.savePrefs();
+    }
+  }
+
+  /** 表单那颗主按钮：按模式分派到「建」或两种「改名」。 */
   async function createCrystal() {
+    if (newCrystalMode === "rename-crystal") return doRenameCrystal();
+    if (newCrystalMode === "rename-card") return doRenameCard();
+    return doCreateCrystal();
+  }
+
+  /** 改完名之后的公共收尾：模型对账 → 重画 → 落状态。 */
+  async function afterRename(message) {
+    closeNewCrystal();
+    // ⚠️ **模型走对账，不自己搓索引**：`rebuildGroups` 是只写不删的，自己改
+    // `nodes`/`byKey`/`groups` 迟早漏一处，而漏掉的表现是「不报错、只是屏幕上
+    // 不对」。对账那条路和**外部改名**是同一条（`app.js` 的 reconcileCards）。
+    if (ctx.reconcileCards) await ctx.reconcileCards();
+    if (ctx.renderCrystals) ctx.renderCrystals();
+    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+    if (ctx.refreshCards) ctx.refreshCards();
+    if (ctx.refreshOrphans) ctx.refreshOrphans();
+    if (ctx.refreshFolders) ctx.refreshFolders();
+    if (ctx.flushViewState) ctx.flushViewState();
+    sayNewCrystal(message, true);
+  }
+
+  /** 改名失败那句话。三种 reason 说三句不同的话，绝不把枚举值念给用户听。 */
+  function renameFailure(res, name, what) {
+    const r = res && res.reason;
+    if (r === "missing") return "它已经不在了。";
+    if (r === "exists") return "已经有一个叫「" + name + "」的" + what + "了，换个名字";
+    if (r === "unsupported") return "这个宿主没有改名能力，没有改。";
+    return "改不了：" + toStr((res && res.message) || "未知错误");
+  }
+
+  /** 真改一颗晶体（= 一个文件夹）的名字。**只换叶子，不搬地方。** */
+  async function doRenameCrystal() {
+    const key = toStr(renameTarget);
+    const node = findFolderNode(cardTree(), key);
+    if (!node) {
+      closeNewCrystal();
+      return;
+    }
+    const raw = toStr(newCrystalName.value).trim();
+    if (!raw) {
+      sayNewCrystal("先给它起个名字", false);
+      newCrystalName.focus();
+      return;
+    }
+    // 带斜杠就等于往别处建/挪，那不是这一颗按钮的意思——换地方请用「将建在」。
+    if (raw.indexOf("/") >= 0 || raw.indexOf("\\") >= 0) {
+      sayNewCrystal("名字里不能带斜杠——要换地方请用上面的「将建在」", false);
+      return;
+    }
+    const name = safeFolderName(raw);
+    const oldName = toStr(node.name);
+    if (!name) {
+      sayNewCrystal("这个名字洗完之后是空的，换一个", false);
+      return;
+    }
+    if (name === oldName) {
+      sayNewCrystal("名字没变，什么都没做。", true);
+      closeNewCrystal();
+      return;
+    }
+    const oldFolder = toStr(node.folder);
+    let res;
+    try {
+      res = await adapter.renameFile(oldFolder, name);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (!res || !res.ok) {
+      sayNewCrystal(renameFailure(res, name, "文件夹"), false);
+      return;
+    }
+    // 新 key：晶体 key 就是「去掉根目录之后的那截路径」，而它一定以叶子名结尾。
+    // 所以从旧 key 里把旧叶子换掉就够了，不必去问 rootFolder 是什么。
+    const newFolder = toStr(res.path) || oldFolder;
+    const newKey = key.slice(0, Math.max(0, key.length - oldName.length)) + name;
+    // **先改持旧路径的那三处，再对账重画**：反过来的话，重画那一刻面包屑和桌面窗
+    // 还指着旧路径，屏幕上会闪一下「找不到这张卡」。
+    remapAfterRename(oldFolder, newFolder, key, newKey);
+    await afterRename("改好了：「" + oldName + "」现在叫「" + name + "」。");
+  }
+
+  /** 真改一张卡片的名字。**只换叶子，不搬地方。** */
+  async function doRenameCard() {
+    const path = toStr(renameTarget);
+    const card = ctx.model.byPath.get(path);
+    if (!card) {
+      closeNewCrystal();
+      return;
+    }
+    const raw = toStr(newCrystalName.value).trim();
+    if (!raw) {
+      sayNewCrystal("先给它起个名字", false);
+      newCrystalName.focus();
+      return;
+    }
+    const name = safeFileName(raw);
+    const oldLeaf = baseName(card.path).replace(/\.md$/i, "");
+    if (!name) {
+      sayNewCrystal("这个名字洗完之后是空的，换一个", false);
+      return;
+    }
+    if (name === oldLeaf) {
+      sayNewCrystal("名字没变，什么都没做。", true);
+      closeNewCrystal();
+      return;
+    }
+    let res;
+    try {
+      res = await adapter.renameFile(path, name);
+    } catch (e) {
+      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+    }
+    if (!res || !res.ok) {
+      sayNewCrystal(renameFailure(res, name, "卡"), false);
+      return;
+    }
+    const newPath = toStr(res.path) || path;
+    remapAfterRename(path, newPath, "", "");
+    await afterRename("改好了：「" + oldLeaf + "」现在叫「" + name + "」。");
+  }
+
+  async function doCreateCrystal() {
     const name = toStr(newCrystalName.value).trim();
     if (!name) {
       sayNewCrystal("先给这颗晶体起个名字", false);
@@ -4071,6 +4371,9 @@ export function createReader(ctx, opts = {}) {
     say("", true);
   });
   $("kb-reader-newcrystal-open").addEventListener("click", () => openNewCrystal());
+  // 3.0 刀 21：重命名两颗。和删除那两颗同一套「先挑、再填、再确认」。
+  $("kb-reader-crystalrename").addEventListener("click", () => renameCrystalFlow());
+  $("kb-reader-cardrename").addEventListener("click", () => renameCardFlow());
   $("kb-reader-crystaldel").addEventListener("click", () => deleteCrystalFlow());
   $("kb-reader-carddel").addEventListener("click", () => deleteCardFlow());
   $("kb-reader-newcrystal-cancel").addEventListener("click", () => closeNewCrystal());
@@ -4098,15 +4401,20 @@ export function createReader(ctx, opts = {}) {
       if (!node) return;
       // 同一个点击分流，落点按用途分：挑建卡文件夹收的是**宿主路径**，
       // 挑晶体那两档要的是**晶体 key**。两个都在 node 上，别拿错了。
+      // ⚠️ **新档必须加在这个 `else` 前面。** 结尾那个 `else` 是没有守卫的，
+      // 漏掉的 purpose 会被**静默当成「设置将建在」**——点一下「重命名晶体」
+      // 却把建卡目录改了，而且屏幕上什么都不说。
       if (folderPick.purpose === "story") gotoStoryline(node.key);
       else if (folderPick.purpose === "crystal") chooseStoryCrystal(node.key);
       else if (folderPick.purpose === "delete") confirmDeleteCrystal(node.key);
+      else if (folderPick.purpose === "renamecrystal") startRenameCrystal(node);
       else chooseFolder(node.folder);
       return;
     }
-    // 卡片那一行（只有「删除哪张卡」这一档树里才有它）
+    // 卡片那一行（只有「删除哪张卡」「重命名哪张卡」这两档树里才有它）
     if (hit.kind === "card") {
       if (folderPick.purpose === "deletecard") confirmDeleteCard(hit.path);
+      else if (folderPick.purpose === "renamecard") startRenameCard(hit.path);
       return;
     }
     if (hit.kind !== "toggle") return;

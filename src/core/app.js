@@ -6,7 +6,7 @@
 import { assertAdapter } from "../adapter.js";
 import { sanitizeViewState, collectViewState, defaultViewState, forgetScreen } from "./viewstate.js";
 import { sanitizePrefs, collectPrefs } from "./prefs.js";
-import { EL } from "./dom.js";
+import { EL, toStr } from "./dom.js";
 import { beginInlineRename } from "./inlinerename.js";
 import { CSS } from "./styles.js";
 import { createMetrics } from "./layout.js";
@@ -283,13 +283,139 @@ function sameCard(a, b) {
  *      为基线，保存时适配层的 writeCard 会按基线比对回一个 conflict，那条路
  *      已经能干净地处理「别处被改过」。这里插一手只会把用户刚打的字连表单一起收掉。
  */
-function applyExternalChange(ctx, incoming) {
-  if (!incoming || !incoming.path) return;
+/**
+ * 拿**盘上的现状**跟模型对账（3.0 刀 21）。
+ *
+ * 为什么需要它：`byPath` 是拿**文件路径**当键的，而它只由 `createModel` 和
+ * `addCard` 写入——一次改名（路径变了）、一次删除（路径没了）在这个模型里
+ * **没有对应的写法**（`applyCardFields` 改不了 `path` 也改不了 `title`）。
+ * 所以这里不试图理解「刚才发生了什么」，只问一句「盘上现在有什么」。
+ *
+ * ⚠️ **不自己搓索引。** `rebuildGroups()` 是**只写不删**的
+ * （`for (const n of allNodes) groups[n.key] = …`），自己动手改
+ * `nodes` / `byKey` / `groups` 迟早漏一处，而漏掉的表现是
+ * **不报错、只是屏幕上不对**——`removeFolder` 那段注释专门数过有五处索引
+ * 记着同一件事。所以这里只做**差分**，动作全部委托给
+ * `removeCard` / `removeFolder` / `addCard` 这三个各自把五处都管对了的操作。
+ *
+ * ⚠️ **也不换对象**：模型卡被卡面 DOM 的 `el._card`、开着的面板、卫星同时握着，
+ * 换一个新对象只会更新其中一处，屏幕上就是一半新一半旧（同 `applyCardFields`
+ * 那条约定）。所以对得上的那些卡一个字都不动，只有真正没了/新来的才增删。
+ *
+ * 代价是它要重读一遍卡片目录。换来的是不必在这个模型里开一个「改键」的口子。
+ * 只在改名/删除这类**罕见**事件上跑，不在 modify 那条高频路上跑。
+ */
+async function reconcileCards(ctx) {
   // 这个实例已经被宿主摘掉了（重挂）：继续写是写进一棵摘下来的树，屏幕上什么都
   // 不会发生。与 editform.js 里「await 之后回头看 ctx 还在不在树上」同一条理由。
   if (!ctx.fs || !ctx.fs.isConnected) return;
+
+  let incoming = null;
+  try {
+    incoming = (await ctx.adapter.loadCards()) || [];
+  } catch (e) {
+    // ⚠️ **读盘失败就一个字都不动。** 拿一次失败的读去做减法，等于把整个库
+    // 从模型里清空——而屏幕上看起来就是「库突然空了」，比不做还糟。
+    return;
+  }
+  // 这一趟读盘是异步的，回来时实例可能已经被重挂了（同上面那条）。
+  if (!ctx.fs || !ctx.fs.isConnected) return;
+
+  const wanted = new Set(incoming.map((c) => toStr(c && c.path)).filter(Boolean));
+  const hitFolders = new Set();
+  let touched = false;
+
+  // 1) 模型里有、盘上没有的 → 摘掉。改名走这一支（旧路径没了）。
+  for (const c of ctx.model.allCards.slice()) {
+    if (wanted.has(c.path)) continue;
+    hitFolders.add(toStr(c.folder));
+    if (ctx.model.removeCard) {
+      ctx.model.removeCard(c.path);
+      touched = true;
+    }
+  }
+
+  // 2) 盘上有、模型里没有的 → 补进来。改名走这一支（新路径第一次出现）。
+  for (const n of incoming) {
+    if (!n || !n.path) continue;
+    if (ctx.model.byPath.get(n.path)) continue;
+    if (ctx.model.addCard) {
+      ctx.model.addCard(n);
+      touched = true;
+    }
+  }
+
+  // 3) 幽灵晶体。一个被**改名**的文件夹，它的卡片在上面第 1 步被摘光了，
+  //    而节点还在——`removeCard` 是**有意**留空节点的（理由是「那个文件夹在盘上
+  //    确实存在」，见 model.js 那段），可改名之后它不在盘上了。
+  //
+  //    所以问一次盘：这个文件夹今天还在不在。范围**只限这一趟被摘空的那些**，
+  //    不横扫所有空节点——一个本来就在那儿空着的晶体不该被这一步碰到。
+  //
+  //    ⚠️ 只在 `listFolders` 真的给出数组时才做。它的契约是「装着 .md 的文件夹、
+  //    或者一个文件都没有的文件夹」，所以「被清空的合法文件夹」会被列出来、不会
+  //    被误删；而它抛了、或某个宿主没实现时，宁可留一个空壳也不冒删错的风险。
+  if (hitFolders.size && typeof ctx.adapter.listFolders === "function") {
+    let live = null;
+    try {
+      live = await ctx.adapter.listFolders();
+    } catch (e) {
+      live = null;
+    }
+    if (Array.isArray(live) && ctx.fs && ctx.fs.isConnected) {
+      const ok = new Set(live.map((p) => toStr(p).replace(/\/+$/, "")));
+      for (const f of hitFolders) {
+        if (!f || ok.has(f)) continue; // 盘上还在，不是幽灵
+        // 还有卡住在这个文件夹下面 → 它只是空了，不是没了
+        const stillHome = incoming.some((c) => {
+          const x = toStr(c && c.folder);
+          return x === f || x.indexOf(f + "/") === 0;
+        });
+        if (stillHome) continue;
+        if (ctx.model.removeFolder) {
+          ctx.model.removeFolder(f);
+          touched = true;
+        }
+      }
+    }
+  }
+
+  if (!touched) return;
+
+  // 顺序与 refreshAfterWrite 一致，理由也一样：正文里的双链是关系图、卫星、
+  // 孤岛标的唯一来源，模型没改对之前算出来的图是旧的。
+  if (ctx.refreshRelations) ctx.refreshRelations();
+  // 面板开着的那张卡整个没了（被删 / 改名）→ 收掉那个选中位。不收的话顶栏会一直
+  // 声称「上次看到的是这张」，而那张已经不在库里了。
+  if (ctx.state.selectedCard && !ctx.model.allCards.some((c) => c.title === ctx.state.selectedCard)) {
+    ctx.state.selectedCard = null;
+  }
+  if (ctx.refreshCards) ctx.refreshCards();
+  if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+  if (ctx.refreshOrphans) ctx.refreshOrphans();
+  if (ctx.refreshFolders) ctx.refreshFolders();
+  if (ctx.flushViewState) ctx.flushViewState();
+}
+
+function applyExternalChange(ctx, incoming, from, gone) {
+  if (!ctx.fs || !ctx.fs.isConnected) return;
+
+  // 3.0 刀 21：**改名与删除走对账那条路。**
+  //
+  // 这两件事有一个共同点：核心**没法用打补丁表达**（补丁只能改内容，改不了
+  // `path`，也说不出「这张卡没了」）。所以不猜、不算映射，直接拿盘上的现状
+  // 对一遍账——两条路共用一份实现。
+  //
+  // 这么做的另一个好处是：**我们自己那颗「改名」按钮跑的是同一条路**。
+  // 不这么做的话，插件改名和外部改名会有两份实现，而它们迟早会漂移。
+  if (gone || from) {
+    reconcileCards(ctx);
+    return;
+  }
+
+  if (!incoming || !incoming.path) return;
   const card = ctx.model.byPath.get(incoming.path);
-  if (!card) return; // 不是我们的卡（别处新增的、改了名的、别的目录的）
+  if (!card) return; // 不是我们的卡（别处新增的、别的目录的）
 
   // ★ 快速路径。挡的主要是**我们自己写盘的回声**：保存会触发宿主那边的 modify，
   // 通知转一圈又回到这里。内容一个字节没变时，这里就该原地返回。
@@ -1129,6 +1255,10 @@ export async function mount({
     unbindScrollListeners: () => unbindScrollListeners(ctx),
     persistViewState: () => schedulePersist(ctx),
     flushViewState: () => writeViewState(ctx),
+    // 3.0 刀 21：拿盘上的现状跟模型对账。阅读器那颗「改名」按钮改完盘之后走它。
+    // 与 watcher 那条路**共用同一份实现**——分开写的话，插件改名和外部改名
+    // 迟早会漂移成两套行为。
+    reconcileCards: () => reconcileCards(ctx),
     closeFullscreen: () => closeFullscreen(),
     // 编辑保存后刷新用。editform.js 不 import hologram（会绕成环：
     // hologram 要 import editform 拿编辑入口），所以走 ctx 这根线——
@@ -1576,7 +1706,7 @@ export async function mount({
   if (typeof win.__kbV13Watch === "function") win.__kbV13Watch();
   const stopWatch =
     typeof adapter.watchCards === "function"
-      ? adapter.watchCards((card) => applyExternalChange(ctx, card))
+      ? adapter.watchCards((card, from, gone) => applyExternalChange(ctx, card, from, gone))
       : null;
   win.__kbV13Watch = stopWatch;
 

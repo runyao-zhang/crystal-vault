@@ -229,27 +229,49 @@ export function createObsidianAdapter({
       // 宿主的事件比核心想要的密得多：一次保存连着来 modify + metadataCache changed，
       // 一次同步拖下来更是连着来一串。在这里就压成一记——核心连「事件有多密」
       // 都不该知道，那是宿主的事。
-      const pending = new Map(); // path -> File，一记窗口内同一个文件只算一次
+      const pending = new Map(); // path -> { file, from }，一记窗口内同一个文件只算一次
+      const dead = new Set(); // 路径没了的那些（删除 / 移出卡片目录）
       let timer = 0;
-      const bump = (file) => {
+      const flush = async () => {
+        const files = Array.from(pending.values());
+        const lost = Array.from(dead);
+        pending.clear();
+        dead.clear();
+        // 先报「没了」。改名会同时产生「旧路径消失」和「新路径出现」两条，
+        // 而核心那边是拿**盘上现在有什么**重新对账的，先后其实不影响结果——
+        // 但先清旧的读起来顺。
+        for (const p of lost) cb(null, undefined, p);
+        for (const it of files) {
+          let card;
+          try {
+            card = await readCard(it.file);
+          } catch (e) {
+            continue; // 读不出来（正被删/改名）就别惊动核心
+          }
+          cb(card, it.from);
+        }
+      };
+      const schedule = () => {
+        clearTimeout(timer);
+        timer = setTimeout(flush, WATCH_DEBOUNCE_MS);
+      };
+      const bump = (file, from) => {
         const path = file && file.path;
         // 前缀一定带斜杠：不带的话「知识卡片2」这种同前缀目录会被误伤
         if (!path || !path.startsWith(cardsFolder + "/") || !path.endsWith(".md")) return;
-        pending.set(path, file);
-        clearTimeout(timer);
-        timer = setTimeout(async () => {
-          const files = Array.from(pending.values());
-          pending.clear();
-          for (const f of files) {
-            let card;
-            try {
-              card = await readCard(f);
-            } catch (e) {
-              continue; // 读不出来（正被删/改名）就别惊动核心
-            }
-            cb(card);
-          }
-        }, WATCH_DEBOUNCE_MS);
+        // `from` 只有改名那一支有。核心靠它知道「这张卡以前在哪儿」——
+        // 没有它的话，一个被改名的卡在核心眼里就是「一张没见过的卡」，
+        // 而那条路是直接 return 的（见 app.js 那句「不是我们的卡」）。
+        pending.set(path, { file, from: toStr(from) });
+        schedule();
+      };
+      // 3.0 刀 21：删除。**读不到文件**，所以不能走 `bump`（它里面要 readCard）——
+      // 只把这个路径推给核心，让它知道那份卡已经不在了。
+      const gone = (file) => {
+        const path = file && file.path;
+        if (!path || !path.startsWith(cardsFolder + "/") || !path.endsWith(".md")) return;
+        dead.add(path);
+        schedule();
       };
       // 两处都要听，理由不同：
       //   vault.modify          —— 内容变了（别处改盘、别的设备同步下来）
@@ -258,13 +280,25 @@ export function createObsidianAdapter({
       //     把过期字段写进模型——而后面再没有第三个事件来纠正它，那张卡的概念/来源
       //     就这么错下去，直到重开。
       // 两个事件会被 400ms 的防抖收进同一记（按 path 去重），不会重复读盘。
-      const refModify = app.vault.on("modify", bump);
+      // 3.0 刀 21 起还听**改名**与**删除**，因为光有「内容变了」是不够的：
+      // 改一张卡的名字，核心只看得见「别的卡正文里的 [[甲]] 变成了 [[乙]]」，
+      // 而 `乙` 从没进过它的 byPath——于是给 [[乙]] 登记一张**内容为空的影子卡**
+      // （灰色、「暂无描述」、点进去什么都没有）。用户 09-24 报的就是这个。
+      //
+      // ⚠️ **`create` 故意不订**：我们自己建的卡走 `addCard`（已经登记过了），
+      // 而「外面新增一张卡」是另一个特性。这是有意留白，不是漏了。
+      const refModify = app.vault.on("modify", (f) => bump(f));
       const refMeta = app.metadataCache.on("changed", (file) => bump(file));
+      const refRename = app.vault.on("rename", (file, oldPath) => bump(file, oldPath));
+      const refDelete = app.vault.on("delete", (file) => gone(file));
       return () => {
         clearTimeout(timer);
         pending.clear();
+        dead.clear();
         app.vault.offref(refModify);
         app.metadataCache.offref(refMeta);
+        app.vault.offref(refRename);
+        app.vault.offref(refDelete);
       };
     },
 
@@ -447,6 +481,68 @@ export function createObsidianAdapter({
       } catch (e) {
         return { ok: false, reason: "error", message: errText(e) };
       }
+    },
+
+    /**
+     * 改一个文件或文件夹的名字（3.0 刀 21）。**只换叶子，不搬地方。**
+     *
+     * ⚠️ **优先 `fileManager.renameFile`，因为只有它会更新链接。** 别的卡里写着
+     * `[[甲]]`，把 `甲.md` 改成 `乙.md` 之后那一处该跟着变成 `[[乙]]`——不做的
+     * 话链接当场断掉，而断掉的表现是「别的卡里冒出一张灰的、点进去什么都没有的
+     * 影子卡」（用户 09-24 报的就是这个，根因写在 adapter.js 那段）。
+     *
+     * 它还受用户设置里「文件与链接 → 自动更新内部链接」那一档管——那是他的选择，
+     * 不替他改。
+     *
+     * 退到 `vault.rename` 时**只搬文件、不动链接**，是降级不是等价。两个都没有
+     * 就回 `unsupported`，核心据此不显示按钮（同 trashFile 那条规矩）。
+     */
+    async renameFile(path, newName) {
+      // 去掉结尾斜杠：`a/b/` 和 `a/b` 是同一个东西，不去的话下面拼出来的
+      // 目标路径会多一段空段。
+      const from = toStr(path).replace(/\/+$/, "");
+      const leaf = toStr(newName).trim();
+      if (!from || !leaf) return { ok: false, reason: "error", message: "空路径或空名字" };
+      let target = null;
+      try {
+        target = app.vault.getAbstractFileByPath(from);
+      } catch (e) {
+        target = null;
+      }
+      if (!target) return { ok: false, reason: "missing", path: from };
+      // `children` 是宿主区分文件夹与文件的判据（与适配层别处同一条）。
+      // 文件要补回 `.md`——`newName` 按契约是**不含扩展名**的叶子名。
+      const isDir = target.children !== undefined;
+      const dir = from.split("/").slice(0, -1).join("/");
+      const to = (dir ? dir + "/" : "") + leaf + (isDir ? "" : ".md");
+      if (to === from) return { ok: true, path: from }; // 名字没变，什么都不用做
+      try {
+        if (app.vault.getAbstractFileByPath(to)) return { ok: false, reason: "exists", path: to };
+      } catch (e) {
+        /* 查不了就当没被占，交给下面那一步报 */
+      }
+      try {
+        const fm = app.fileManager;
+        if (fm && typeof fm.renameFile === "function") {
+          await fm.renameFile(target, to);
+        } else if (typeof app.vault.rename === "function") {
+          await app.vault.rename(target, to);
+        } else {
+          return { ok: false, reason: "unsupported", path: from };
+        }
+      } catch (e) {
+        return { ok: false, reason: "error", message: errText(e) };
+      }
+      // 回读**真正落到哪儿**：宿主可能因为重名把它改成了 `名字 1`。
+      // 同 createCard 那条纪律——核心不能假设写进去什么样就是什么样。
+      let landed = to;
+      try {
+        const after = app.vault.getAbstractFileByPath(to);
+        if (after && after.path) landed = after.path;
+      } catch (e) {
+        /* 读不回来就用我们拼的那个 */
+      }
+      return { ok: true, path: landed };
     },
 
     async mountEditor(el, opts = {}) {
