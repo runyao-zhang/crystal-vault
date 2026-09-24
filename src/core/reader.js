@@ -3959,21 +3959,39 @@ export function createReader(ctx, opts = {}) {
     };
     // 桌面窗
     let touchedDesk = false;
+    const stale = []; // 这一趟被改了路径的那些窗——DOM 还照着**旧**路径画着
     for (const w of desk.wins) {
+      let hit = false;
       const np = swap(w.path, oldPath, newPath);
       if (np !== w.path) {
         w.path = np;
-        touchedDesk = true;
+        hit = true;
       }
       if (oldKey) {
         const nc = swap(w.crystal, oldKey, newKey);
         if (nc !== w.crystal) {
           w.crystal = nc;
-          touchedDesk = true;
+          hit = true;
         }
+      }
+      if (hit) {
+        touchedDesk = true;
+        stale.push(w.id);
       }
     }
     if (touchedDesk) persistDesk();
+    // ⚠️ **改完路径还得把窗重画一遍。** 桌面窗的 DOM 是照着**开窗那一刻的路径**
+    // 画好的：只把 `w.path` 改掉的话，窗里躺着的还是上一次画的那份东西——
+    // 卡片窗会一直写着「找不到这张卡：<旧路径>」，而模型那边其实早就对了。
+    // 用户 09-24 报的就是这个（「我自己那颗按钮仍然有问题」）。
+    //
+    // ⚠️ 这一步**必须排在 `reconcileCards` 之后**：对账之前 `byPath` 里还是旧路径，
+    // 这时候重画出来的是「新路径查不到卡」。顺序是 **模型 → 持有的路径 → DOM**，
+    // 反了任何一步，屏幕上看到的都是中间那个自相矛盾的瞬间。
+    for (const id of stale) {
+      const w = findWin(id);
+      if (w && winEl(id)) mountDeskWin(w);
+    }
     // 视图状态 + 偏好
     const s = ctx.state;
     if (!s) return;
@@ -3994,13 +4012,22 @@ export function createReader(ctx, opts = {}) {
     return doCreateCrystal();
   }
 
-  /** 改完名之后的公共收尾：模型对账 → 重画 → 落状态。 */
-  async function afterRename(message) {
+  /**
+   * 改完名之后的公共收尾。**三步的顺序是硬的：模型 → 持有的路径 → DOM。**
+   *
+   * ⚠️ 第一版是反的（先改 `w.path` 再对账），于是中间有一段自相矛盾的瞬间：
+   * `w.path` 已经是新路径，而 `byPath` 里还只有旧的——**任何在这中间发生的重画
+   * 都会写出「找不到这张卡」**。用户 09-24 报的正是这个。
+   */
+  async function afterRename(message, oldPath, newPath, oldKey, newKey) {
     closeNewCrystal();
-    // ⚠️ **模型走对账，不自己搓索引**：`rebuildGroups` 是只写不删的，自己改
-    // `nodes`/`byKey`/`groups` 迟早漏一处，而漏掉的表现是「不报错、只是屏幕上
-    // 不对」。对账那条路和**外部改名**是同一条（`app.js` 的 reconcileCards）。
+    // 1) 模型跟上盘。**走对账，不自己搓索引**：`rebuildGroups` 是只写不删的，
+    //    自己改 `nodes`/`byKey`/`groups` 迟早漏一处，而漏掉的表现是「不报错、
+    //    只是屏幕上不对」。这条路和**外部改名**是同一条（`app.js` 的 reconcileCards）。
     if (ctx.reconcileCards) await ctx.reconcileCards();
+    // 2) 模型管不着的那几处旧路径（视图状态 / 偏好 / 桌面窗），顺带重画受影响的窗
+    remapAfterRename(oldPath, newPath, oldKey, newKey);
+    // 3) 重画
     if (ctx.renderCrystals) ctx.renderCrystals();
     if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
     if (ctx.refreshCards) ctx.refreshCards();
@@ -4064,10 +4091,7 @@ export function createReader(ctx, opts = {}) {
     // 所以从旧 key 里把旧叶子换掉就够了，不必去问 rootFolder 是什么。
     const newFolder = toStr(res.path) || oldFolder;
     const newKey = key.slice(0, Math.max(0, key.length - oldName.length)) + name;
-    // **先改持旧路径的那三处，再对账重画**：反过来的话，重画那一刻面包屑和桌面窗
-    // 还指着旧路径，屏幕上会闪一下「找不到这张卡」。
-    remapAfterRename(oldFolder, newFolder, key, newKey);
-    await afterRename("改好了：「" + oldName + "」现在叫「" + name + "」。");
+    await afterRename("改好了：「" + oldName + "」现在叫「" + name + "」。", oldFolder, newFolder, key, newKey);
   }
 
   /** 真改一张卡片的名字。**只换叶子，不搬地方。** */
@@ -4106,8 +4130,7 @@ export function createReader(ctx, opts = {}) {
       return;
     }
     const newPath = toStr(res.path) || path;
-    remapAfterRename(path, newPath, "", "");
-    await afterRename("改好了：「" + oldLeaf + "」现在叫「" + name + "」。");
+    await afterRename("改好了：「" + oldLeaf + "」现在叫「" + name + "」。", path, newPath, "", "");
   }
 
   async function doCreateCrystal() {

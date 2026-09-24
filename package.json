@@ -1,6 +1,6 @@
 {
   "name": "crystal-vault",
-  "version": "1.3.43",
+  "version": "1.3.44",
   "description": "Turn a folder of Markdown cards into a living crystal vault.",
   "license": "GPL-3.0",
   "repository": {
