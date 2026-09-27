@@ -2,7 +2,7 @@
 
 把一文件夹的 Markdown 卡片变成一座**能看的知识晶体库**。
 截图预览：
-<img width="1917" height="1016" alt="image" src="https://github.com/user-attachments/assets/0190a5dd-e3d9-4c51-8220-a01bd77afcce" />
+<img width="1917" height="1016" alt="image" src="https://github.com/user-attachments/assets/0a4f224e-f3fc-4a80-8a1e-ea524075750f" />
 
 而它真正的战场是**文献模式**：一边读 PDF / 图片 / Markdown，一边把读到的东西当场立成结构——
 读完一章，那一章的结构也就搭好了。**桌面**把这些摆成一桌能拖能缩的窗，
