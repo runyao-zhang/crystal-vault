@@ -3109,12 +3109,21 @@ export function createReader(ctx, opts = {}) {
   function importCardToStory(path) {
     const w = desk.wins.find((x) => x.kind === "storyline");
     const rt = w ? rtOf(w.id) : null;
+    hideFolderPick();
+    // ⚠️ **收完树还要再请一次那层「选哪份文献」**，与 `chooseStoryCrystal` 那三行
+    // 逐字同一条理由：`hideFolderPick` 结尾有一条把那一层还回来的兜底
+    // （`wasStory && !st.doc && …` → `showPicker()`），而那是给**取消**准备的
+    // ——一份文献都没开的人关掉树，屏幕上总得有东西。
+    //
+    // 这里不是取消：用户挑定了卡，接下来要在**结构窗上**拖它，而那一层铺满
+    // 整个 page 区，会把桌面连结构窗一起盖住。卡片其实已经渲进去了，
+    // 但用户看到的是一片「选哪份文献」——读起来就是「导入没生效」。
+    // （`pickNeedsSide` 把 importcard 并进来之后，这条兜底对导入这条路也成立了。）
+    hidePicker();
     if (!rt || !rt.embed) {
-      hideFolderPick();
       say("结构窗没开着——先打开结构窗再引卡。", false);
       return;
     }
-    hideFolderPick();
     rt.embed.importCard(path);
   }
 
@@ -4480,6 +4489,21 @@ export function createReader(ctx, opts = {}) {
       // ⚠️ **新档必须加在这个 `else` 前面。** 结尾那个 `else` 是没有守卫的，
       // 漏掉的 purpose 会被**静默当成「设置将建在」**——点一下「重命名晶体」
       // 却把建卡目录改了，而且屏幕上什么都不说。
+      //
+      // 3.0 刀 31：**挑卡片的那几档（删卡 / 重命名卡 / 导入卡）先拦一道。**
+      // 它们走 `pickIsCard`，树里每一组的**文件夹名**都带 `data-op-pick`，
+      // 而用户在找一张卡的时候点文件夹名，意思是"展开它看看里面"，
+      // 不是"就选它了"。不拦的话这一下会掉进下面那个没有守卫的 `else`：
+      // 建卡目录被改成那个文件夹、选择器当场关掉、还念一句「以后的卡建在：X」
+      // ——**导入这件事没了，而且改掉的是他的设置**。
+      // 当成小三角那一下的同一个动作（展开 / 收起），这才是他点它时想要的事。
+      // （删卡 / 重命名卡那两档本来就有这个洞，一并堵上。）
+      if (pickIsCard(folderPick.purpose)) {
+        if (folderPick.open.has(node.key)) folderPick.open.delete(node.key);
+        else folderPick.open.add(node.key);
+        renderFolderPick();
+        return;
+      }
       if (folderPick.purpose === "story") gotoStoryline(node.key);
       else if (folderPick.purpose === "crystal") chooseStoryCrystal(node.key);
       else if (folderPick.purpose === "delete") confirmDeleteCrystal(node.key);

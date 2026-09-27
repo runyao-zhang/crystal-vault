@@ -1316,6 +1316,15 @@ export async function mount({
       stage: "ring",
     },
     hideTooltip: () => hideTooltip(ctx),
+    // 3.0 刀 31：**一层通用的「说一句话」**。
+    //
+    // 原来只有结构窗那一侧有（`opts.onSay` → 窗里底下那条），库里那句是
+    // `sayStatus(ctx, …)` 这个模块内函数，别的模块够不着。故事线里"这一下为什么
+    // 什么都没发生"总得有个地方说——`storyline.js` 不认识顶栏，只认这个口子。
+    //
+    // 两边**行为有意不一样**（见 `sayStatus` 顶上那段）：库里那句会自己消失，
+    // 窗里那条是常驻的。
+    say: (text, ok = true) => sayStatus(ctx, text, ok),
     // #10 面板偏移的复位。hologram.js 收面板时要调，但它自己要用 holodrag 的
     // shiftSatellites，互相 import 会绕成环——所以走 ctx 这根线（本文件里
     // hideTooltip / unbindScrollListeners 都是这个套路）。

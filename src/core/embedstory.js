@@ -534,6 +534,10 @@ export function createEmbedStory(ctx, opts = {}) {
   fake.refreshStoryline = () => render(view.path, { keepCamera: true });
   // 同一个坑的第二处：模式开关改完状态都调它，默认那份刷的是晶体库的顶栏。
   fake.refreshStageUi = syncBar;
+  // 3.0 刀 31：storyline.js 里那些"这一下为什么什么都没发生"的话走这个口子
+  // ——它不认识这一扇窗，也不该认识（同 `writeStoryLink` 那条边界）。
+  // 库那一侧挂的是 `sayStatus`（会自己消失），这儿的 `say` 是窗里那条常驻说明。
+  fake.say = (text, ok = true) => say(text, ok);
 
   /** 全部装进视野。窗口尺寸是 0 时直接跳过——那会儿算出来的是垃圾。 */
   function fit() {

@@ -120,6 +120,8 @@ Imported cards are drawn as **dotted purple rectangles**, so they never read as 
 > - Only the **structure window** can import; once imported, the card also shows up if you open the same crystal's storyline in the vault itself.
 > - 「删除实线 / 删除蓝线」 has nothing to do with it — **importing never deletes anything**.
 > - One crystal can hold at most 500 imports (a guard against corrupt saves, not a limit you will ever meet).
+> - An imported card **cannot join a sub-crystal box** — those boxes draw their membership from folders. Dropping one there tells you so; use 「＋ 框」 to make a manual box instead.
+> - Clicking a **folder name** in the picker expands it (it does not mean "pick this folder"). That is the feel in all three card-picking modes (import / delete card / rename card).
 
 ## Read-and-jot: turn what you read into a card on the spot
 

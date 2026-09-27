@@ -455,22 +455,37 @@ export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
  * 而用户看到的只是"有时候进去有时候不进"。
  *
  * @param {string[]} targets 要重新判归属的卡片路径
- * @returns {boolean} 真的改了东西吗（决定要不要落盘）
+ * @returns {{changed:boolean, crystalHit:(string|null)}}
+ *   `changed` = 真的改了东西吗（决定要不要落盘）；
+ *   `crystalHit` = 有卡落在了**子晶体框**上（那个框收不下它，见下）。
  */
 export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
   const v = view(ctx);
-  if (!v || !Array.isArray(v.boxes) || !targets || !targets.length) return false;
+  if (!v || !Array.isArray(v.boxes) || !targets || !targets.length) {
+    return { changed: false, crystalHit: null };
+  }
   // 先把结果全算出来。这一步**不碰模型**——算的过程中模型在变的话，
   // 后面的 hitBoxAt 拿到的 geometry 和最终写进去的就对不上了。
   const want = new Map();
+  // 3.0 刀 31：**子晶体框收不下卡**，而它是屏幕上最大最好认的那个落点，
+  // 所以「拖进去了、什么都没发生」是很容易撞上的一下。
+  //
+  // 收不下的理由不是懒：子晶体框的成员是**文件夹长出来的**（`boxesOf` 里算的，
+  // 有意不落盘——文件夹一改名，落盘的成员表就和盘上对不上了）。一张卡在不在
+  // 那个框里，等价于"它在不在那个文件夹里"，而这件事不该由一次拖动来回答。
+  // 这里只**如实报告**这一下落在哪儿，说不说话由调用方定（这一层不认识"说什么"）。
+  let crystalHit = null;
   for (const p of targets) {
     const at = pos.get(p);
     if (!at) continue;
     const center = { x: at.x + NODE_W / 2, y: at.y + NODE_H / 2 };
     const hit = hitBoxAt(boxes, pos, NODE_W, NODE_H, center);
-    want.set(p, hit ? String(hit.id) : null);
+    // ⚠️ `hitBoxAt` 是**倒着扫**的（手动框排在数组后面，先命中），所以走到
+    //    「命中的是子晶体框」这一支，等价于"没有任何手动框罩着它"。
+    if (hit && hit.crystal) crystalHit = crystalHit || String(hit.id);
+    want.set(p, hit && !hit.crystal ? String(hit.id) : null);
   }
-  if (!want.size) return false;
+  if (!want.size) return { changed: false, crystalHit };
 
   let changed = false;
   // 1) 先把这一批从**所有**框里摘干净（连它本来待着的那个也摘）。
@@ -495,7 +510,7 @@ export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
     }
   }
   if (changed) afterWrite(ctx);
-  return changed;
+  return { changed, crystalHit };
 }
 
 export function toggleBox(ctx, id) {

@@ -942,7 +942,21 @@ export function bindStorylineDrag(ctx) {
       for (const card of viewCards(c, cp)) pos.set(card.path, nodePosOf(c, card, layout));
       // 一次算完、一次落盘。一张一张调的话，一次拖 8 张 = 8 次整窗重画
       // （`afterWrite` 里带着 `refreshStoryline`），屏幕上会一顿一顿地闪。
-      assignCards(c, targets, boxes, pos, NODE_W, NODE_H);
+      const res = assignCards(c, targets, boxes, pos, NODE_W, NODE_H);
+      // 3.0 刀 31：**只有"外来卡掉进子晶体框"才说话。**
+      //
+      // 为什么别的都不说：本层的卡本来就住在自己那个子晶体框里，拖一下十有八九
+      // 还落在同一个框上——每拖一次弹一句，那才是真的吵。
+      // 而外来卡不一样：它**没有任何文件夹**，所以永远进不了任何子晶体框，
+      // 拖进去是**注定什么都不会发生**的一下。那正是这个库里最忌讳的
+      // 「点了没反应」，而这里恰好有一句现成的话可以说。
+      const imported = new Set(importsOf(c));
+      if (res.crystalHit && targets.some((p) => imported.has(p)) && c.say) {
+        c.say(
+          "这是子晶体框——它的成员是文件夹长出来的，装不进外来卡。要给它分组，用「＋ 框」建一个手动框。",
+          false
+        );
+      }
     },
   });
 }
@@ -2347,8 +2361,15 @@ export function bindLineEdit(ctx) {
     "pointerdown",
     (e) => {
       if (ctx.state.stage !== "storyline" || !isLineEdit(ctx) || !ctx._panzoom) return;
-      // 抓手上的按下是"挪拐点"，不归框选管
-      if (e.target && e.target.closest && e.target.closest(".kb-v13-sbend")) return;
+      // 抓手上的按下是"挪拐点"，不归框选管。
+      //
+      // 3.0 刀 31：外来卡上那颗「✕ 拿走」**同理，而且这条是漏网的**——
+      // `itemdrag` 那边早就用 `ignore` 挡住了同一个坑，这里没跟着挡。症状很具体：
+      // 选框开着时点 ✕，只要按下和抬起之间动过 1px（这条路**没有** 4px 阈值），
+      // 它就当场起了一个框选；松手时 `ateClick` 立起来，紧接着那一下 click
+      // 被吃掉 —— **✕ 一声不响地没发生**，屏幕上只闪了个框。纯点击（一像素不动）
+      // 反而是好的，所以这是"手抖才现形"那一类。
+      if (e.target && e.target.closest && e.target.closest(".kb-v13-sbend,.kb-v13-snode-unimport")) return;
       if (e.button !== 0) return;
       // **「选框」开着**才框选。关着的时候拖动仍然是平移画面——
       // 编辑模式里最常做的事还是挪卡片、推画面，不能把拖动整个占掉。
