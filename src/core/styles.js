@@ -1383,6 +1383,36 @@ const CANVAS = [
   "  box-shadow:0 0 0 1px rgba(120,240,255,.45),0 4px 16px rgba(0,0,0,.42);",
   "}",
   ".kb-v13-snode.kb-v13-snode-picked:hover{border-color:rgba(150,250,255,.98);}",
+  // 3.0 刀 31：**从别的晶体引进来的**那张卡。
+  //
+  // 它和这一屏的卡长得几乎一样，而这正是要防的事——用户需要一眼看出
+  // 「这张不是我文件夹里的」。用紫色（青=本层、金=手工线、紫=外来，三色不撞）
+  // + 点线边框（与「线已藏」那档同一套语汇：**这张卡不按本层的规矩参与**）。
+  //
+  // ⚠️ 点线这件事和 `.kb-v13-snode-hidden` 会**同时出现**（藏了链的外来卡），
+  //    CSS 里后写的那条赢——两条都只是 border-style:dashed/dotted，
+  //    颜色各给各的，叠在一起也读得懂。别把这条挪到 hidden 前面去。
+  ".kb-v13-snode.kb-v13-snode-import{",
+  "  border-style:dotted;border-color:rgba(178,150,255,.62);",
+  "  background:rgba(20,14,40,.92);",
+  "}",
+  ".kb-v13-snode.kb-v13-snode-import:hover{border-color:rgba(198,175,255,.95);}",
+  // 「拿走」那颗。**常驻可见**（不是 hover 才出来）：外来卡本来就没几张，
+  // 而"怎么把它弄走"是用户看着这张卡时最先问的问题——藏起来等于让他去找。
+  // 压暗 + 悬停才亮，是为了别喧宾夺主。
+  ".kb-v13-snode-unimport{",
+  "  position:absolute;right:5px;top:4px;width:16px;height:16px;padding:0;",
+  "  display:flex;align-items:center;justify-content:center;",
+  "  font:inherit;font-size:10px;line-height:1;cursor:pointer;z-index:6;",
+  "  border-radius:4px;border:1px solid rgba(178,150,255,.4);",
+  "  background:rgba(20,14,40,.9);color:rgba(198,175,255,.75);",
+  "}",
+  ".kb-v13-snode-unimport:hover{",
+  "  border-color:rgba(255,150,150,.85);background:rgba(60,20,28,.95);",
+  "  color:rgba(255,190,190,.98);",
+  "}",
+  // 标题给那颗按钮让出位置——不让的话它压在字上，两条都读不清。
+  ".kb-v13-snode-import .kb-v13-snode-title{padding-right:20px;}",
 ];
 
 // ===== 3.0 刀 6：文献阅读器 =====

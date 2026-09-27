@@ -28,6 +28,10 @@ import {
   // 理由写在 storyboxes.js 那一段上：两套写 `paths` 的代码迟早漂成两种判据。
   assignCards,
 } from "./storyboxes.js";
+// 3.0 刀 31「从别的晶体引一张卡进来」。表与落座都归它管；
+// 这里只负责**把引来的那张算进每一处几何里**——漏掉任何一处，
+// 表现都是「卡片画出来了，但拖不动 / 连不上 / 框不住」。
+import { importsOf, importedCards, unimportCard, afterImport } from "./storyimports.js";
 import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
@@ -59,6 +63,24 @@ function cardsUnder(ctx, path) {
 }
 
 /**
+ * 3.0 刀 31：这一屏**要画的全部卡** = 这个文件夹里递归拿到的 + 用户从别处引进来的。
+ *
+ * ⚠️ **排布算法只吃前者**（`layoutFor` 里调的仍然是 `cardsUnder`）。这不是疏忽：
+ * `edgesUnder` 里那条「按文件名连」的底链是**按数组相邻对**建的，中间插一张外来卡
+ * 等于凭空多出两根「01 → 外来户 → 02」的链，整屏的次序当场全乱。
+ * 外来卡的位置从 `crystalPos` 来——引进来的那一刻就写进去了（见 storyimports）。
+ *
+ * 这个函数是**唯一的入口**：渲染、画线、拖动、连线、判归属全走它。
+ * 哪一处漏了它，症状都是同一类「卡片画出来了，但拖不动 / 连不上 / 框不住」，
+ * 而且**不报错**。
+ */
+function viewCards(ctx, path) {
+  const base = cardsUnder(ctx, path);
+  const extra = importedCards(ctx, base, path);
+  return extra.length ? base.concat(extra) : base;
+}
+
+/**
  * 取这一层的边。**只保留两端都在这组卡片里的边。**
  *
  * ⚠️ 关系图的键是 **title 不是 path**，同名卡（两个文件夹里都有「01-总览」）
@@ -66,6 +88,11 @@ function cardsUnder(ctx, path) {
  * `cardByTitle` 拿回卡片、再拿它的 path 核对归属——对不上就丢掉。
  */
 function edgesUnder(ctx, cards) {
+  // 3.0 刀 31：外来卡有哪些。**只用来拦幽灵**，见下面那段。
+  // 这里现读一次而不是让调用方传进来：`edgesUnder` 有四个调用点，
+  // 多一个参数就多四处可能忘了传的地方，而忘了传的表现是「右上角凭空多出一排
+  // ↗ 别的晶体的虚线框」——不报错，只是屏幕上多了一堆没人要的东西。
+  const imported = new Set(importsOf(ctx));
   const byTitle = new Map();
   for (const c of cards) if (!byTitle.has(c.title)) byTitle.set(c.title, c);
   const have = new Set(cards.map((c) => c.path));
@@ -94,6 +121,13 @@ function edgesUnder(ctx, cards) {
       const target = byTitle.get(r.title);
       const toPath = target && have.has(target.path) ? target.path : null;
       if (!toPath) {
+        // 3.0 刀 31：**外来卡不生成幽灵。**
+        //
+        // 幽灵的意思是「这颗晶体的结构在别处还有下文」（点了会带你跳过去）。
+        // 而引进来的那张卡**压根不属于这颗晶体**——它连出去的那些东西不是这一屏的
+        // 下文，是它自己那颗晶体的下文。给它也生一串幽灵，右上角会凭空多出一排
+        // ↗ 别的卡片的虚线框，而它们和用户此刻在摆的这张图毫无关系。
+        if (imported.has(c.path)) continue;
         // 链到这一组之外去了。**不能静默丢掉**——丢一条就少一层依赖，
         // 排出来的深度是错的、画面会骗人。记成幽灵节点（画成虚框、点了跳过去）。
         if (r.title && r.title !== c.title) ghosts.set(r.title, r.reason || "");
@@ -163,7 +197,10 @@ function ghostTop() {
  * 「这条线还有下文」的提示，看不到就等于没有。
  */
 export function storylineBounds(ctx, path) {
-  const cards = cardsUnder(ctx, path);
+  // 3.0 刀 31：**外来卡要算进包围盒**。不算的话 `fit()` 框出来的是文件夹那一块，
+  // 而引进来的卡落在视口中心——于是"进来一张卡"这件事在屏幕上完全看不出来
+  // （它在框外面），而用户明明点过按钮。
+  const cards = viewCards(ctx, path);
   const { ghosts } = edgesUnder(ctx, cards);
   if (!cards.length && !ghosts.size) return null;
   const layout = layoutFor(ctx, path);
@@ -219,9 +256,15 @@ function ensureHandleLayer(ctx) {
  * 这是故事线最容易翻车的地方，所以形态从一开始就是小的。
  */
 export function renderStorylineStage(ctx, path) {
-  const cards = cardsUnder(ctx, path);
+  // 3.0 刀 31：`base` 是文件夹里递归拿到的，`extra` 是从别处引进来的。
+  // **写成两个而不是直接 `viewCards`**，是因为下面那个节点循环要拿 `importSet`
+  // 给外来卡挂「✕ 拿走」那颗按钮——而"哪些是外来的"这件事只有这里知道。
+  const base = cardsUnder(ctx, path);
+  const extra = importedCards(ctx, base, path);
+  const cards = extra.length ? base.concat(extra) : base;
+  const importSet = new Set(extra.map((c) => c.path));
   const { chain, links, ghosts } = edgesUnder(ctx, cards);
-  const layout = cards.length ? layoutFor(ctx, path) : { positions: new Map() };
+  const layout = base.length ? layoutFor(ctx, path) : { positions: new Map() };
   const pos = new Map();
   for (const c of cards) pos.set(c.path, nodePosOf(ctx, c, layout));
 
@@ -359,7 +402,8 @@ export function renderStorylineStage(ctx, path) {
 
       const layout = layoutFor(ctx, cp);
       const now = new Map();
-      for (const c of cardsUnder(ctx, cp)) now.set(c.path, nodePosOf(ctx, c, layout));
+      // 3.0 刀 31：外来卡也归框管——它进了框，拖框就该带着它一起走。
+      for (const c of viewCards(ctx, cp)) now.set(c.path, nodePosOf(ctx, c, layout));
       const start = new Map();
       for (const p of box.paths) start.set(p, { ...(now.get(p) || { x: 0, y: 0 }) });
 
@@ -429,6 +473,30 @@ export function renderStorylineStage(ctx, path) {
     });
   }
 
+  // 3.0 刀 31：外来卡上那颗「✕ 拿走」，委托一次（节点每帧重建，逐张挂会漏）。
+  //
+  // ⚠️ **绑舞台、用捕获**，两样都是硬的：
+  //   · 绑 `ctx.canvas` 不行——`bindLinkGuard` 也是 canvas 上的捕获监听，
+  //     而它**注册得更早**（mount 时），同元素同阶段按注册顺序跑，它会先把
+  //     这一下 `stopImmediatePropagation` 掉。舞台是 canvas 的祖先，
+  //     捕获阶段天然更早，稳。
+  //   · 不用捕获不行——冒泡回到舞台上时，那颗按钮早已被上面的守卫吃掉了。
+  if (!ctx.stage._kbUnimport) {
+    ctx.stage._kbUnimport = true;
+    ctx.stage.addEventListener(
+      "click",
+      (e) => {
+        const t = e.target;
+        const btn = t && t.closest ? t.closest("[data-unimport]") : null;
+        if (!btn) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (unimportCard(ctx, btn.getAttribute("data-unimport"))) afterImport(ctx);
+      },
+      true
+    );
+  }
+
   const svg = ensureLinkLayer(ctx);
   paintStoryLines(ctx, svg, cards, path, layout);
 
@@ -464,6 +532,14 @@ export function renderStorylineStage(ctx, path) {
     // 写了双链的卡，那读起来是「我的双链丢了」，不是「我把它藏了」。
     // 顺带也告诉他"再右键一次能显回来"这件事有地方可试。
     if (hidden.has(c.path)) el.classList.add("kb-v13-snode-hidden");
+    // 3.0 刀 31：这是**从别的晶体引进来的**那张卡。标出来是必须的——
+    // 它看起来和这一屏的卡一模一样，而"这张不是我文件夹里的"正是用户
+    // 唯一需要知道的事（他可能正奇怪这张卡怎么在这儿、以及怎么弄走它）。
+    const isImport = importSet.has(c.path);
+    if (isImport) {
+      el.classList.add("kb-v13-snode-import");
+      el.title = "这是从别的晶体引进来的卡。它本身还在原来那个文件夹里，一个字没动。";
+    }
     // 3.0 刀 30：这张卡在这一轮框选里被选中了（卡档）。**重建之后也得补上**——
     // 高亮只在框选过程中刷是不够的：拖动整批时会重画，选中标记跟着一起没了。
     if (picked.has(c.path)) el.classList.add("kb-v13-snode-picked");
@@ -477,6 +553,20 @@ export function renderStorylineStage(ctx, path) {
       // 四边中点的连接点。平时藏着（CSS 里 .kb-v13-linking 才让它们显形）——
       // 一屏几十张卡、每张挂四个小圆点，那画面没法看。
       LINK_SIDES.map((sd) => '<div class="kb-v13-port" data-side="' + sd + '"></div>').join("");
+    // 「拿走」那颗。**挂在节点上而不是靠右键**：右键在这张图上已经有三个意思了
+    // （看模式进连接模式、写模式藏双链、落在线上进连线编辑），再塞第四个
+    // 就是 09-20「右键只有金色线」那类"点了之后发生什么全看运气"。
+    //
+    // 用 `innerHTML` 之后 append（不能用 innerHTML 拼进去）：`esc(c.path)` 那条
+    // 纪律只对文本内容成立，路径要进的是**属性**，走 DOM API 才不会漏转义。
+    if (isImport) {
+      const kill = EL("button", "kb-v13-snode-unimport", "✕");
+      kill.type = "button";
+      kill.setAttribute("data-unimport", c.path);
+      kill.title = "把这张卡从这一屏拿走。\n它本身一个字都不动——还留在原来那个文件夹里，";
+      kill.title += "别人指向它的双链也都在。想再放回来，点顶栏「导入卡片」再引一次。";
+      el.appendChild(kill);
+    }
     ctx.canvas.appendChild(el);
   }
 
@@ -724,14 +814,16 @@ export function redrawStoryLines(ctx) {
   const svg = ctx._sLink;
   if (!svg || !svg.parentNode) return;
   const path = ctx.state.crystalPath || [];
-  const cards = cardsUnder(ctx, path);
+  const cards = viewCards(ctx, path);
   if (!cards.length) return;
   paintStoryLines(ctx, svg, cards, path);
 }
 
 /** 只把位置写回去，不重建——拖动过程中用（重建会丢指针捕获） */
 export function applyStorylinePositions(ctx, path) {
-  const cards = cardsUnder(ctx, path);
+  // 3.0 刀 31：外来卡也要跟着走。漏掉它的症状很具体——整框拖动或整批拖动时，
+  // 外来卡**留在原地不动**，而它明明在框里（框走了、卡没走，一眼就看得出来）。
+  const cards = viewCards(ctx, path);
   const layout = layoutFor(ctx, path);
   for (const el of ctx.canvas.querySelectorAll(".kb-v13-snode")) {
     const p = el.dataset.path;
@@ -766,8 +858,11 @@ export function bindStorylineDrag(ctx) {
     selector: ".kb-v13-snode",
     keyOf: (el) => el.dataset.path,
     stage: "storyline",
-    // 连接点是控件，不是「这张卡的一部分」——按它是要拉线，不是要挪卡
-    ignore: ".kb-v13-port",
+    // 连接点是控件，不是「这张卡的一部分」——按它是要拉线，不是要挪卡。
+    // 3.0 刀 31：外来卡上那颗「✕ 拿走」同理，而且这一条更实际——它只有 16px，
+    // 手一抖就超过 4px 的拖动阈值，于是 itemdrag 会把它当成一次拖动、
+    // 拖完再 `swallowNextClick` 把点击吃掉：**明明是点 ✕，卡片却挪了一点、也没有被拿走**。
+    ignore: ".kb-v13-port,.kb-v13-snode-unimport",
     posOf: (c, path) => {
       const card = c.model.byPath.get(path);
       if (!card) return { x: 0, y: 0 };
@@ -841,7 +936,10 @@ export function bindStorylineDrag(ctx) {
       if (!boxes.length) return;
       const layout = layoutFor(c, cp);
       const pos = new Map();
-      for (const card of cardsUnder(c, cp)) pos.set(card.path, nodePosOf(c, card, layout));
+      // ⚠️ 3.0 刀 31：**必须带上外来卡**，否则"把引进来那张拖进框"这条主路是死的
+      // ——`assignCards` 从这张表里取位置，取不到就 `continue`，
+      // 于是松手之后什么也没发生，而用户明明把它拖进框里了。
+      for (const card of viewCards(c, cp)) pos.set(card.path, nodePosOf(c, card, layout));
       // 一次算完、一次落盘。一张一张调的话，一次拖 8 张 = 8 次整窗重画
       // （`afterWrite` 里带着 `refreshStoryline`），屏幕上会一顿一顿地闪。
       assignCards(c, targets, boxes, pos, NODE_W, NODE_H);
@@ -1041,7 +1139,9 @@ function sideHintMap(ctx) {
 /** 位置表：这一层每张卡此刻在哪（世界坐标） */
 function posMapOf(ctx, path, layout) {
   const m = new Map();
-  for (const c of cardsUnder(ctx, path)) m.set(c.path, nodePosOf(ctx, c, layout));
+  // 3.0 刀 31：外来卡也要在这张表里。它管着**拖一根线**——表里没有那张卡的话，
+  // 从它身上拉不出线，也连不到它身上（`bindLinkMode` 两头都查这张表）。
+  for (const c of viewCards(ctx, path)) m.set(c.path, nodePosOf(ctx, c, layout));
   return m;
 }
 

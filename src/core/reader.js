@@ -2099,6 +2099,9 @@ export function createReader(ctx, opts = {}) {
       // 窗里那颗「晶体：X」：换一颗看。走的是**同一个选择器**（复用首页那棵树），
       // 好处是它同时把 desk 那一层的入口、抬头、搜索都一起处理了。
       onPickCrystal: () => openFolderPick("crystal"),
+      // 3.0 刀 31：窗顶栏那颗「导入卡片」——开同一棵树，挑一张**别的晶体**的卡。
+      // 挑完由 `importCardToStory` 调回 `view.importCard(path)`。
+      onPickCard: () => openFolderPick("importcard"),
     });
     rt.embed = view;
     box.appendChild(view.root);
@@ -3094,6 +3097,27 @@ export function createReader(ctx, opts = {}) {
     body.appendChild(box);
   }
 
+  /**
+   * 3.0 刀 31：把挑中的那张卡引到**结构窗**里去。
+   *
+   * ⚠️ 结构窗**至多只有一扇**（`chooseStoryCrystal` 那边找的就是
+   * `wins.find(w => w.kind === "storyline")`，没有就建、有就换晶体）。
+   * 所以这里不需要问"是哪一扇"——但也正因为如此，**没开结构窗时必须说一句话**：
+   * 入口长在结构窗的顶栏上，能点到它说明窗开着；真走到这儿没窗，
+   * 那只可能是窗在这一趟里被关掉了，而那时的静默返回等于"点了没反应"。
+   */
+  function importCardToStory(path) {
+    const w = desk.wins.find((x) => x.kind === "storyline");
+    const rt = w ? rtOf(w.id) : null;
+    if (!rt || !rt.embed) {
+      hideFolderPick();
+      say("结构窗没开着——先打开结构窗再引卡。", false);
+      return;
+    }
+    hideFolderPick();
+    rt.embed.importCard(path);
+  }
+
   function chooseFolder(path) {
     ctx.state.prefs = { ...(ctx.state.prefs || {}), readerFolder: toStr(path) };
     if (ctx.savePrefs) ctx.savePrefs();
@@ -3103,7 +3127,9 @@ export function createReader(ctx, opts = {}) {
   }
 
   function hideFolderPick() {
-    const wasStory = pickIsCrystal(folderPick.purpose);
+    // 收尾与开场**必须用同一个判据**（`pickNeedsSide`）：两边一旦不一样，
+    // 就会出现「关掉树之后右边多出一栏空的」或者「该还回来的那层没还」。
+    const wasStory = pickNeedsSide(folderPick.purpose);
     folderPick.el.classList.remove("open");
     targetBtn.setAttribute("aria-expanded", "false");
     // 把上面 openFolderPick 临时点亮的那一栏还回去。判据收口在 `paintSide` 里
@@ -3135,16 +3161,30 @@ export function createReader(ctx, opts = {}) {
     // 3.0 刀 21：重命名那两档。与删除那两档一一对应——同一棵树、同一种挑法。
     renamecrystal: { hd: "重命名哪颗晶体", find: "搜晶体" },
     renamecard: { hd: "重命名哪张卡", find: "搜卡片" },
+    // 3.0 刀 31：从**别的晶体**引一张卡进结构窗。抬头必须点明"别的"——
+    // 挑了自己晶体里本来就有的卡会被挡下来（并说一句为什么），
+    // 而用户看到"引进来"三个字时未必想得到这一层。
+    importcard: { hd: "引哪张卡进来（挑别的晶体里的）", find: "搜卡片" },
   };
   /** 这几档挑的是**晶体**（收 key），只有 target 挑文件夹（收宿主路径）。 */
   const pickIsCrystal = (p) => p === "story" || p === "crystal" || p === "delete" || p === "renamecrystal";
   /** 这一档挑的是**卡片**（收 path），树里要保留卡片那一级。 */
-  const pickIsCard = (p) => p === "deletecard" || p === "renamecard";
+  const pickIsCard = (p) => p === "deletecard" || p === "renamecard" || p === "importcard";
+  /**
+   * 这几档的**入口不在「边看边记」那一栏里**，所以得先把那一栏请出来
+   * ——树长在那儿，而那一栏没有文献时是整块藏着的（见 `openFolderPick` 里那段）。
+   *
+   * ⚠️ 不能直接写成 `pickIsCrystal(p) || pickIsCard(p)`：删除卡片 / 重命名卡片
+   * 那两颗按钮**就长在那一栏里**，点得到它们说明那一栏开着，多请一次是白跑；
+   * 而更要紧的是那两档现在**不该**顺手 `hidePicker()`——那个动作有副作用
+   * （把"选哪份文献"那层请走），改的是它们今天的行为。
+   */
+  const pickNeedsSide = (p) => pickIsCrystal(p) || p === "importcard";
 
   /** 打开这棵树。`purpose` 见 folderPick 那只常量上面那段。 */
   function openFolderPick(purpose) {
     folderPick.purpose = PICK_TEXT[purpose] ? purpose : "target";
-    const byCrystal = pickIsCrystal(folderPick.purpose);
+    const byCrystal = pickNeedsSide(folderPick.purpose);
     // 那棵树长在「边看边记」这一栏里，而这一栏**没有文献时是整块藏着的**
     // （见 refreshBar 最后一行）。挑晶体那两颗按钮却在顶栏、永远点得到——
     // 一份文献都没开就点它的话，树会「打开」在一栏看不见的地方，表现就是
@@ -4451,6 +4491,7 @@ export function createReader(ctx, opts = {}) {
     if (hit.kind === "card") {
       if (folderPick.purpose === "deletecard") confirmDeleteCard(hit.path);
       else if (folderPick.purpose === "renamecard") startRenameCard(hit.path);
+      else if (folderPick.purpose === "importcard") importCardToStory(hit.path);
       return;
     }
     if (hit.kind !== "toggle") return;

@@ -64,6 +64,9 @@ export function defaultViewState() {
     boxes: [],
     boxNames: {},
     collapsedBoxes: [],
+    // 3.0 刀 31：从**别的晶体**引进来、摆在这一层上的卡。
+    // 形状与 `cardLinks` 一样：`{ "<晶体路径>": [卡片路径, ...] }`。
+    imports: {},
     openCrystal: null,
     selectedCrystal: null,
     selectedCard: null,
@@ -285,6 +288,9 @@ function sanitizeHiddenLinks(raw) {
  */
 const MAX_BOXES = 200;
 const MAX_BOX_MEMBERS = 2000;
+/** 一层最多引进来多少张卡。和 `MAX_BOX_MEMBERS` 一样是**不可信输入的上限**，
+ *  不是产品上的建议值——一个坏存档不该能把每一帧的渲染拖死。 */
+const MAX_IMPORTS = 500;
 function sanitizeBoxes(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -352,6 +358,32 @@ function sanitizeCollapsedBoxes(raw) {
   return out;
 }
 
+/**
+ * 引进来的卡（3.0 刀 31）。形状与 `sanitizeCardLinks` 一样是**两层表**：
+ * 键是晶体路径、值是卡片路径数组。
+ *
+ * 逐条过滤而不是整表作废：一条坏路径不该把用户摆好的另外几层一起冲掉
+ * （同上面 `sanitizeViewState` 顶上那条「逐字段退化」的纪律）。
+ */
+function sanitizeImports(raw) {
+  if (!isObj(raw)) return {};
+  const out = {};
+  for (const [key, list] of Object.entries(raw)) {
+    if (!key || !Array.isArray(list)) continue;
+    const keep = [];
+    const seen = new Set();
+    for (const p of list) {
+      if (keep.length >= MAX_IMPORTS) break;
+      if (typeof p !== "string" || !p || seen.has(p)) continue;
+      seen.add(p);
+      keep.push(p);
+    }
+    // 空数组**不存**：它在功能上等于"这一层没引过卡"，存着只是让存档变胖。
+    if (keep.length) out[key] = keep;
+  }
+  return out;
+}
+
 function sanitizeCrystalPos(raw) {
   if (!isObj(raw)) return {};
   const out = {};
@@ -392,6 +424,7 @@ export function sanitizeViewState(raw) {
     boxes: sanitizeBoxes(raw.boxes),
     boxNames: sanitizeBoxNames(raw.boxNames),
     collapsedBoxes: sanitizeCollapsedBoxes(raw.collapsedBoxes),
+    imports: sanitizeImports(raw.imports),
     openCrystal: nullableStr(raw.openCrystal),
     selectedCrystal: nullableStr(raw.selectedCrystal),
     selectedCard: nullableStr(raw.selectedCard),

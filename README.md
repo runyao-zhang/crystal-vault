@@ -106,6 +106,21 @@ Without this, filing a dozen cards into one box meant dragging them **one at a t
 > - **There is no "delete" in card mode**: the 「删除实线 / 删除蓝线」 button hides itself. Boxing cards only moves them around — it **does not touch a single word of your notes**.
 > - To un-highlight them, **click empty space** or press **Esc**.
 
+### Import a card: borrow one from another crystal
+
+A crystal only ever draws the cards **in its own folder**. But you often want a card in crystal A to link to a card in crystal B — so hit 「**导入卡片**」 (Import card) in the structure window's top bar and pick one:
+
+1. it **lands in the middle of the window** (it does not tuck itself into a corner — you need to see that it arrived);
+2. drag it into any box and it belongs there, so **cross-level blue links** work from then on;
+3. to get rid of it, click the **✕ in its top-right corner**.
+
+Imported cards are drawn as **dotted purple rectangles**, so they never read as belonging to this layer. **The card itself is not touched at all**: it stays in its own folder and every `[[link]]` pointing at it is intact. Take it away and import it again later and even the position you gave it is still there.
+
+> - Importing a card that is **already in this crystal** is refused, and it tells you why.
+> - Only the **structure window** can import; once imported, the card also shows up if you open the same crystal's storyline in the vault itself.
+> - 「删除实线 / 删除蓝线」 has nothing to do with it — **importing never deletes anything**.
+> - One crystal can hold at most 500 imports (a guard against corrupt saves, not a limit you will ever meet).
+
 ## Read-and-jot: turn what you read into a card on the spot
 
 The column on the right of the reader. Fill in **name / concept / source / body** and you have a card — without leaving the page.

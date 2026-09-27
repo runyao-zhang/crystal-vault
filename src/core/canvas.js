@@ -86,6 +86,14 @@ export function beginDraft(ctx) {
     boxes: (v.boxes || []).map((b) => ({ ...b, paths: (b.paths || []).slice() })),
     boxNames: { ...(v.boxNames || {}) },
     collapsedBoxes: (v.collapsedBoxes || []).slice(),
+    // 3.0 刀 31「引进来的卡」。**理由同上一条，而且更直白**：引进来的那张卡
+    // 只在草稿里有的话，`commitDraft` 那一刻草稿里没有这一格，
+    // 而它是 `{ ...state.view, ...draft }` 展开合并——这一格会被上一份存档
+    // 原样盖过去，**用户辛苦引进来摆好的卡整个消失**。
+    //
+    // 两层表，**里面那层数组也要拷**：浅拷的话草稿和存档共用同一个数组，
+    // 在草稿里 push 一张，存档那一份当场跟着变（`importsOf` 读的就是它）。
+    imports: JSON.parse(JSON.stringify(v.imports || {})),
   };
 }
 
@@ -110,6 +118,9 @@ export function isDraftDirty(ctx) {
     x: o.boxes || [],
     xn: o.boxNames || {},
     xc: o.collapsedBoxes || [],
+    // 3.0 刀 31：引进来哪几张卡也是「我刚摆的东西」——不算上的话，
+    // 屏幕右下角那个「未保存」小点会说假话（同上面那三条）。
+    im: o.imports || {},
   });
   return JSON.stringify(pick(a)) !== JSON.stringify(pick(b));
 }

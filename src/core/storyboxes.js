@@ -20,6 +20,8 @@
 //   · 鼠标悬停那张卡时，**和它有关联的、正收着的框**，边框绕一圈闪。
 // 不这么做的话，收起等于「把线删了」——而用户明明没删，那读起来是「我的双链丢了」。
 
+import { importsUnder } from "./storyimports.js";
+
 const BOX_PAD = 22;
 /** 标题栏高度。收起时那个框就只剩这一条。 */
 const BAR_H = 26;
@@ -121,6 +123,12 @@ export function boxesOf(ctx, path) {
   //    这一层的卡表过滤**，别在这里判——那要问 model，而这个函数会被每帧调。
   const live = new Set();
   for (const c of cardsUnderPath(ctx, path)) live.add(c.path);
+  // 3.0 刀 31：**引进来的卡也算"在这一层上"。**
+  //
+  // 不算的话，用户把外来卡拖进框的**下一帧**它就被下面那个 filter 剔掉了：
+  // 框里明明摆着那张卡，框却不认它——展开收起时它跟着消失又出现，
+  // 或者干脆被当成"框外"的卡。而这一切都不报错。
+  for (const p of importsUnder(ctx, path)) live.add(p);
   for (const b of manualOf(ctx)) {
     // ⚠️ **空框照样要画**（`paths` 是空数组也放行）。
     //

@@ -57,7 +57,9 @@ import {
   deletePickedFor,
   hiddenCardSet,
   showAllHidden,
+  storylineCards,
 } from "./storyline.js";
+import { importCard } from "./storyimports.js";
 
 /** 结构窗那一小块自绘界面的样式。
  *
@@ -288,7 +290,25 @@ export function createEmbedStory(ctx, opts = {}) {
     "框只是分组——删框、移出，都**不会动你的卡片**。";
   addBoxBtn.addEventListener("click", () => createBox(fake, []));
 
-  bar.append(crystalBtn, modeBtn, kindBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, hint);
+  // 3.0 刀 31（用户 09-27）：「从别的晶体引一张卡进来」。
+  //
+  // 与「＋ 框」同一条规矩：**只要在故事线里就一直摆着**，不做成"有东西可引才出现"
+  // ——入口在需要它的那一刻恰好不可见，是 09-20 那次「右键只有金色线」的同一个错。
+  //
+  // 它只负责**开那颗选择器**（树长在「边看边记」那一栏里，reader 才有）；
+  // 挑完之后 reader 调回 `view.importCard(path)`，见这个对象末尾那一段。
+  const importBtn = EL("button", "kb-v13-embedact");
+  importBtn.type = "button";
+  importBtn.textContent = "导入卡片";
+  importBtn.title =
+    "从别的晶体引一张卡到这一屏上来，把两张不同晶体的卡片连起来。\n" +
+    "引进来那张卡会落在这扇窗的正中间，等你拖它进某个收纳方框。\n" +
+    "它本身一个字都不动——还在原来那个文件夹里。拿走就点它右上角那颗 ✕。";
+  importBtn.addEventListener("click", () => {
+    if (opts.onPickCard) opts.onPickCard();
+  });
+
+  bar.append(crystalBtn, modeBtn, kindBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, importBtn, hint);
   stage.appendChild(world);
   root.append(stage, bar);
 
@@ -591,6 +611,39 @@ export function createEmbedStory(ctx, opts = {}) {
     },
     writeMode: () => !!fake.state.linkWrite,
     setWriteMode,
+    /**
+     * 3.0 刀 31：把一张**别的晶体**的卡引到这一屏上来。选择器挑完由 reader 调回来。
+     *
+     * ⚠️ 三种"引不进来"都要**说话**，一个都不许静默——这条路上三个都很容易撞上：
+     *   · 卡本来就在这一屏里（用户挑了当前晶体自己的卡）；
+     *   · 已经引过了；
+     *   · 路径指不到卡（挑完之后卡被删了 / 改了名）。
+     * 「点了没反应」是这个库里反复栽过的一类，而这里恰好有现成的话可以说。
+     */
+    importCard: (path) => {
+      const p = String(path || "");
+      const card = p && ctx.model.byPath ? ctx.model.byPath.get(p) : null;
+      if (!card) {
+        say("那张卡找不到了（可能刚被删掉或者改了名）。", false);
+        return false;
+      }
+      // 「本来就在这一屏里」要问 `storylineCards`（文件夹递归那一份）。
+      // 不先判的话会一路走到 core，而 core 那边只会**安静地回 false**——
+      // 它不知道该怎么跟用户解释这件事。
+      if (storylineCards(fake, view.path).some((c) => c.path === p)) {
+        say("「" + card.title + "」本来就在这颗晶体里，不用引。", false);
+        return false;
+      }
+      if (!importCard(fake, p, storylineCards(fake, view.path))) {
+        say("「" + card.title + "」已经引进来过了——它就在这一屏上。", false);
+        return false;
+      }
+      // 落座的位置是 core 算的（视口正中），所以这里**不能 keepCamera:false**：
+      // 一 fit 相机就动了，卡片反而不在用户刚才看的地方。
+      render(view.path, { keepCamera: true });
+      say("引进来了：「" + card.title + "」。拖它进某个收纳方框就归它；不想要就点它右上角那颗 ✕。", true);
+      return true;
+    },
     /** 卡片被改过之后重画（关系图变了）。**不重新 fit**，保住用户推到的位置。 */
     refresh: () => render(view.path, { keepCamera: true }),
     say,
