@@ -1549,6 +1549,18 @@ const READER = [
   ".kb-v13-desk-close:hover{color:var(--text-error, #f87171);}",
   // 内容盒：和网格里的页盒是同一套底（画布 + 文字层都挂进来），
   // 所以留白、居中、裁剪的规矩跟 `.kb-v13-reader-page` 保持一致。
+  // 3.0 刀 22：桌面卡片窗顶上那一行「概念」。
+  // 它和正文一样是**宿主渲染出来的富文本**（可能含 $公式$），所以字色必须自己声明
+  // ——宿主是浅色主题时，不声明就会拿到一份按深色底调过的字色（同 `.kb-v13-overlay`
+  // 那条注释里说的问题）。
+  ".kb-v13-desk-concept{",
+  "  flex:0 0 auto;padding:10px 12px 8px;margin:0;",
+  "  border-bottom:1px solid var(--background-modifier-border, rgba(0,0,0,.1));",
+  "  font-size:13px;font-weight:600;color:var(--text-normal, #1f2933);",
+  "}",
+  ".kb-v13-desk-concept:empty{display:none;}",
+  // 概念那一行里的公式与正文同宽排布，别让它撑破窗
+  ".kb-v13-desk-concept p{margin:0;}",
   ".kb-v13-desk-page{",
   "  position:relative;flex:1 1 auto;overflow:hidden;",
   // 同 `.kb-v13-reader-page`：**不能写死白**，markdown 窗里的字色由宿主主题决定。

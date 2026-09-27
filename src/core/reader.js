@@ -2184,6 +2184,19 @@ export function createReader(ctx, opts = {}) {
           return;
         }
         renderDeskMeta(w, meta);
+        // 3.0 刀 22：卡片窗顶上补一行「概念」（用户 09-27 报的）。
+        //
+        // ⚠️ **必须走 `renderMarkdown`，不能拿 textContent 塞进去。**
+        // 概念里写的 `$公式$` 要渲染成公式——textContent 只会原样显示生的 `$...$`，
+        // 而这正是「概念不能渲染 latex 公式」那个症状的成因。
+        // 宿主那套渲染器本来就认 `$...$`（全息面板顶部那一行走的就是它），
+        // 所以这里只是**把它接上**，不自己造一套。
+        const concept = toStr(card.concept);
+        if (concept) {
+          const conceptEl = EL("div", "kb-v13-desk-concept");
+          box.appendChild(conceptEl);
+          await adapter.renderMarkdown(concept, conceptEl, w.path);
+        }
         await adapter.renderMarkdown(splitCard(card.content || "").body, box, w.path);
         return;
       }
