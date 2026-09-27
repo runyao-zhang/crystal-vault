@@ -32,8 +32,29 @@ This is the half that pairs with the desk.
 The annoying part of reading is *"what does this actually look like in my vault?"* — switch away to check, and you come back having lost your line. The Structure window puts that structure in **a window on the same desk**, right beside the page:
 
 - **A glance, not a departure.** Switching away is *leaving*; a window beside you is just a glance.
-- **Draw a link and the note changes for real.** Drag a line between two cards and it writes a real `[[link]]` into the note — with a field for *why* you linked them, and one undo.
-- **Pin it to one crystal.** You choose which crystal it watches, and it is still watching it next time.
+- **Pin it to one crystal.** The 「晶体：…」 button in its top bar picks which crystal it watches, and it is still watching it next time.
+
+### Draw: view / write
+
+The 「**画线：看 / 写**」 toggle in the top bar decides **what dragging a line actually does**:
+
+| Mode | What dragging a line does |
+| --- | --- |
+| **看 (view)** — default | Draws a **gold** line. It lives in the library's own view state and **does not touch your notes at all**. |
+| **写 (write)** | Writes a **real `[[target card]]`** into the source card's body — the note changes. The line is **blue**. |
+
+That is what the two colours mean: **a gold line is a way of looking; a blue line is something that genuinely exists in your notes.**
+
+Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in the card's body**, not something drawn on screen. Get it wrong and there is one undo (the same undo as the card editor's).
+
+### Right-click: three places, three results
+
+- **Right-click a card → hide every link going into and out of it.**
+  When one card has a dozen lines running through it, clearing them all out leaves the rest of the structure readable at a glance. **Right-click it again to bring them back.** While anything is hidden, a 「**显示全部**」 (Show all) button appears in the top bar and restores everything at once.
+- **Right-click on a gold line → enter link-edit mode.** A 「**选框**」 (Marquee) button appears in the top bar; drag to box in some lines, and a 「**删除实线（N）**」 (Delete lines) button appears.
+- **Right-click empty space (in 写 mode) → the same 「选框」 button, but this one boxes *blue* lines.** What appears then is 「**删除蓝线（N）**」 — and pressing it removes the matching `[[link]]` **from the card's body**.
+
+> One detail: the **card right-click is opened by 写 mode**. In 看 mode, right-clicking a card still does the old thing (enters link mode). But **once a card is hidden, right-clicking it works in either mode** — otherwise switching back to 看 would leave the hidden state reachable only from the top-bar button.
 
 ## Read-and-jot: turn what you read into a card on the spot
 
