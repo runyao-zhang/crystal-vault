@@ -104,11 +104,17 @@ Download `main.js`, `manifest.json` and `styles.css` from the [latest release](h
 ## Getting started
 
 1. Open the plugin settings and point **Card folder** at the folder you keep your notes in. It defaults to `cards` — if you do not have one yet, create a folder with that name in your vault. The settings pane tells you right away whether that path exists and how many crystals are in it.
-2. Click the gem icon in the ribbon (or run the command **Crystal Vault: Open**).
-3. Make a subfolder inside your card folder. That is a crystal.
-4. Write a card. See the format below.
-5. Link cards to each other with `[[double brackets]]` and watch the structure appear.
-6. Hit **文献 / Reader** in the top bar, pick a PDF, image or Markdown file — then switch to **Desk** and open a **Structure window**. That is what using this thing actually looks like day to day.
+2. **Drop something readable into the card folder** — the book you are reading, a course handout, a paper. **A PDF is best** (images work too). **Do not put an empty file in** — the reader will just say *"this document has nothing to display"*. Once it is in there it shows up in the reader's document list, which step 6 needs.
+3. Click the gem icon in the ribbon (or run the command **Crystal Vault: Open**).
+4. Make a subfolder inside your card folder. That is a crystal.
+5. Write a card. See the format below.
+6. Link cards to each other with `[[double brackets]]` and watch the structure appear.
+7. Hit **文献 / Reader** in the top bar, pick the file you just dropped in — then switch to **Desk** and open a **Structure window**. That is what using this thing actually looks like day to day.
+
+> **Which formats work:** the reader accepts **PDF / images (png, jpg, jpeg, gif, webp, bmp, svg, avif) / Markdown**.
+> **PPTX is not among them and will not be** — export it to PDF first.
+>
+> ⚠️ A `.md` dropped into the card folder is **also a card** (a subfolder is a crystal, a `.md` is a card), so that markdown will show up in the vault too. Keep it simple and use a PDF.
 
 ## The card format
 
