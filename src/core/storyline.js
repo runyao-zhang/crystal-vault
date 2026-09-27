@@ -22,10 +22,11 @@ import {
   renameBox,
   deleteBox,
   setBoxRect,
-  boxOfPath,
-  addCardToBox,
-  removeCardFromBox,
-  hitBoxAt,
+  // 3.0 刀 30：归属判定整批走 `assignCards`——单张那条路已经并进去了
+  // （"批里只有一张"是它的特例）。原来那三个单张的入口
+  // （`boxOfPath` / `addCardToBox` / `removeCardFromBox`）已经删掉，
+  // 理由写在 storyboxes.js 那一段上：两套写 `paths` 的代码迟早漂成两种判据。
+  assignCards,
 } from "./storyboxes.js";
 import { beginInlineRename } from "./inlinerename.js";
 
@@ -229,6 +230,8 @@ export function renderStorylineStage(ctx, path) {
   // 下面这个循环里加的，两处各要一次。（漏掉这一个的后果是整屏渲染直接
   // ReferenceError，连库都进不去——测试逮住了，别把它挪进 paintStoryLines。）
   const hidden = hiddenCardSet(ctx);
+  // 3.0 刀 30：这一轮框选中的卡（卡档）。用 Set 是因为下面那个循环每帧都要问一次。
+  const picked = new Set(cardSel(ctx));
 
   // 3.0 刀 23「收纳方框」（用户 09-27 第 2/3/4 条）。
   //
@@ -429,12 +432,23 @@ export function renderStorylineStage(ctx, path) {
   const svg = ensureLinkLayer(ctx);
   paintStoryLines(ctx, svg, cards, path, layout);
 
+  // 3.0 刀 30：框选卡片的命中几何。**和 `_manualHit` / `_blueHit` 一样是画的时候
+  // 顺手留下的**——卡片住在世界层里，`_cardHit` 是唯一能按世界坐标问"这个框扫到
+  // 哪些卡"的地方（同那两份注释）。
+  //
+  // ⚠️ **这里必须清空重来**，而且要在循环**外面**：`cards` 为空时循环一次都不跑，
+  // 放在里面的话上一轮那份几何会原地留着，屏幕上明明没有卡，框选却还能选中它们。
+  ctx._cardHit = [];
+
   for (const c of cards) {
     // 收起来的框里的卡**不画**（用户第 4 条）。只是不画——数据一个字没动，
     // 框一展开原样回来。
     const bid = ctx._boxMember.get(c.path);
     if (bid && ctx._boxCollapsed.has(bid)) continue;
     const p = pos.get(c.path);
+    // ⚠️ 这一句要**排在上面那个 continue 之后**：收起来的框里的卡没画，
+    // 也就不该能被框选中——否则用户框一下会把一批看不见的卡也拖走。
+    ctx._cardHit.push({ path: c.path, x: p.x, y: p.y, w: NODE_W, h: NODE_H });
     const el = EL("div", "kb-v13-snode");
     el.dataset.path = c.path;
     el.dataset.title = c.title;
@@ -450,6 +464,9 @@ export function renderStorylineStage(ctx, path) {
     // 写了双链的卡，那读起来是「我的双链丢了」，不是「我把它藏了」。
     // 顺带也告诉他"再右键一次能显回来"这件事有地方可试。
     if (hidden.has(c.path)) el.classList.add("kb-v13-snode-hidden");
+    // 3.0 刀 30：这张卡在这一轮框选里被选中了（卡档）。**重建之后也得补上**——
+    // 高亮只在框选过程中刷是不够的：拖动整批时会重画，选中标记跟着一起没了。
+    if (picked.has(c.path)) el.classList.add("kb-v13-snode-picked");
     el.style.left = p.x + "px";
     el.style.top = p.y + "px";
     el.style.width = NODE_W + "px";
@@ -736,6 +753,15 @@ export function applyStorylinePositions(ctx, path) {
  * 视图状态的顶层形状是冻结的，加不了第二个表，把语义讲清楚比加字段划算。
  */
 export function bindStorylineDrag(ctx) {
+  // 3.0 刀 30：这一趟要一起拖的那几张（含被按住的那一张），以及它们**按下时**
+  // 各自在哪。整批拖动全靠这两样：`group` 说拖谁，`groupStart` 是那个不动的原点。
+  //
+  // 为什么原点不能拿 onMove 的第一帧凑：指针要走过 4px 阈值才触发第一帧 onMove，
+  // 拿那一帧当原点的话，整批会先**平移掉那 4px**再跟着走——而屏幕上一帧就是一次
+  // 位移，看着是"一跳"。
+  let group = null;
+  let groupStart = null;
+
   bindItemDrag(ctx, {
     selector: ".kb-v13-snode",
     keyOf: (el) => el.dataset.path,
@@ -751,12 +777,44 @@ export function bindStorylineDrag(ctx) {
       const l = layoutOf(c);
       if (l.crystalPos) l.crystalPos[path] = p;
     },
+    // 按下那一下拍快照。**按住的这张在选中集里**才整批走——
+    // 框选完之后顺手去拖一张**没选中**的卡，意思显然是"我要挪这一张"，
+    // 不是"顺便把刚才那五张也带上"。
+    onStart: (c, path) => {
+      const sel = cardSel(c);
+      group = sel.indexOf(path) >= 0 ? sel.slice() : [path];
+      groupStart = new Map();
+      const cp = c.state.crystalPath || [];
+      const layout = layoutFor(c, cp);
+      for (const p of group) {
+        const card = c.model.byPath.get(p);
+        if (card) groupStart.set(p, nodePosOf(c, card, layout));
+      }
+    },
     // 拖动过程中：位置**当场写进草稿**，并把线重画一遍。
     // 不写的话，线是按「卡片此刻在哪」算的，而它读的还是旧位置——照样不动。
     onMove: (c, path, p) => {
       const l = layoutOf(c);
-      if (l.crystalPos) l.crystalPos[path] = p;
+      if (!l.crystalPos) l.crystalPos = {};
+      const base = groupStart ? groupStart.get(path) : null;
+      const many = group && group.length > 1;
+      if (many && base) {
+        // 整批：**从按下时那个原点整体平移同样的世界位移**。
+        // 逐张累加是错的——那样第一张走 10px、第二张就变成 20px 了。
+        const dx = p.x - base.x;
+        const dy = p.y - base.y;
+        for (const [gp, s] of groupStart) l.crystalPos[gp] = { x: s.x + dx, y: s.y + dy };
+        // ⚠️ 剩下那几张走 `applyStorylinePositions`——它**只改 left/top，不重建 DOM**。
+        // 重建的话，被按住那一张正拿着的指针捕获当场没掉，拖动断在半路
+        // （同方框拖动那一段的警告）。
+        applyStorylinePositions(c, c.state.crystalPath || []);
+      } else {
+        l.crystalPos[path] = p;
+      }
       redrawStoryLines(c);
+      // 列表只在框选时刷新过一次，而这一趟可能重画过节点（相机、方框收起…），
+      // 高亮得补回来。它只改类名，每帧跑不心疼。
+      applyCardPicked(c);
     },
     // 3.0 刀 24：松手那一刻判一次归属——**拖进框 / 拖出框都走这一下**
     // （用户 09-27 拍的：拖进去 = 加入，拖到框外 = 移出）。
@@ -767,25 +825,26 @@ export function bindStorylineDrag(ctx) {
     //
     // 判的是**卡片中心**而不是左上角：`crystalPos` 存的是左上角，
     // 而用户眼里"这张卡在不在框里"看的是整张卡。
+    //
+    // 3.0 刀 30：**一次判一整批**（用户 09-27：「更不能这样移动到收纳方框里面」）。
+    // 单独一张那条老路一个字没变——它只是"这批只有一张"的特例。
     onDrop: (c, path) => {
+      // ⚠️ 先把这一趟的状态放掉。下面有几条提前 return（没框 / 拿不到位置），
+      // 漏放的话下一趟 onStart 之前 `group` 还指着上一批——而 onStart 一定会
+      // 覆盖它，所以真正会出事的是**别的地方**将来读到它。放了干净。
+      const sel = cardSel(c);
+      const targets = sel.indexOf(path) >= 0 && sel.length ? sel.slice() : [path];
+      group = null;
+      groupStart = null;
       const cp = c.state.crystalPath || [];
       const boxes = boxesOf(c, cp);
       if (!boxes.length) return;
       const layout = layoutFor(c, cp);
       const pos = new Map();
       for (const card of cardsUnder(c, cp)) pos.set(card.path, nodePosOf(c, card, layout));
-      const at = pos.get(path);
-      if (!at) return;
-      const center = { x: at.x + NODE_W / 2, y: at.y + NODE_H / 2 };
-      const hit = hitBoxAt(boxes, pos, NODE_W, NODE_H, center);
-      const cur = boxOfPath(c, path);
-      if (hit) {
-        // 落进某个框：已经在**这个**框里就什么都不做（免得每次拖都写一次盘）
-        if (String(hit.id) !== String(cur)) addCardToBox(c, hit.id, path);
-        return;
-      }
-      // 落在所有框外面：原本在框里的话，就是"拖出来 = 移出"
-      if (cur) removeCardFromBox(c, path);
+      // 一次算完、一次落盘。一张一张调的话，一次拖 8 张 = 8 次整窗重画
+      // （`afterWrite` 里带着 `refreshStoryline`），屏幕上会一顿一顿地闪。
+      assignCards(c, targets, boxes, pos, NODE_W, NODE_H);
     },
   });
 }
@@ -1624,6 +1683,9 @@ export function setLineEdit(ctx, on) {
     // 选框开关跟着模式一起关：它只在编辑模式里有意义，
     // 留着的话下次右键进模式时鼠标会**一进来就是框**，而用户没点过那颗按钮。
     ctx.state.marqueeArm = false;
+    // 3.0 刀 30：卡档同理，而且更明显——它是顶栏另一颗按钮点开的，
+    // 留着的话下次进编辑模式那颗按钮会亮着「框：卡」，而用户这一轮没点过它。
+    ctx.state.marqueeCard = false;
     if (ctx.fs) ctx.fs.classList.remove("kb-v13-marquee-arm");
   }
   if (ctx.fs) ctx.fs.classList.toggle("kb-v13-lineedit", next);
@@ -1641,22 +1703,31 @@ export function refreshLineHint(ctx) {
     el.style.display = "none";
     return;
   }
-  const blue = marqueeKind(ctx) === "blue";
-  const n = (blue ? blueSel(ctx) : marqueeSel(ctx)).length;
+  const kind = marqueeKind(ctx);
+  const card = kind === "card";
+  const blue = kind === "blue";
+  const n = card ? cardSel(ctx).length : (blue ? blueSel(ctx) : marqueeSel(ctx)).length;
   // 文案按"此刻该做什么"分三档。顶栏那颗「选框」是这套交互唯一的入口，
   // 说明条的第一句就得把它指出来——否则用户只会盯着线发呆。
   //
   // 3.0 刀 16：蓝线那一档多一句「会从笔记里删掉」。**这几个字不能省**——那是
   // 全窗唯一改用户手写内容的路，而确认弹窗是用户 09-20 明确不要的，
   // 说明条就是仅有的告知。
+  //
+  // 3.0 刀 30：卡档多一句「按住其中任意一张拖走」。框选完了站在那儿不动是
+  // **默认会发生的事**——用户不知道下一步是"拖其中一张"的话，框选就白做了。
   el.textContent = n
-    ? blue
-      ? "已选中 " + n + " 根蓝色线 · 点「删除蓝线」或按 D（会从笔记里删掉）· Esc 退出"
-      : "已选中 " + n + " 根金色线 · 点「删除实线」或按 D · Esc 退出"
+    ? card
+      ? "已选中 " + n + " 张卡 · 按住其中任意一张拖走，整批一起动（拖进/拖出方框也一样）· Esc 退出"
+      : blue
+        ? "已选中 " + n + " 根蓝色线 · 点「删除蓝线」或按 D（会从笔记里删掉）· Esc 退出"
+        : "已选中 " + n + " 根金色线 · 点「删除实线」或按 D · Esc 退出"
     : isMarqueeArmed(ctx)
-      ? blue
-        ? "拖动鼠标，框住要删的蓝色线（删的是笔记里的 [[链接]]）· Esc 退出"
-        : "拖动鼠标，框住要删的金色线 · Esc 退出"
+      ? card
+        ? "拖动鼠标，框住要挪的卡片 · Esc 退出"
+        : blue
+          ? "拖动鼠标，框住要删的蓝色线（删的是笔记里的 [[链接]]）· Esc 退出"
+          : "拖动鼠标，框住要删的金色线 · Esc 退出"
       : "点顶栏「选框」，然后拖出方框 · Esc 退出";
   el.classList.toggle("kb-v13-linehint-hit", n > 0);
   el.style.display = "block";
@@ -1673,13 +1744,72 @@ export function blueSel(ctx) {
 }
 
 /**
- * 这一次框选删的是**哪一种**线（3.0 刀 16）。
+ * 框选中的卡片（3.0 刀 30）。存的是**卡片路径**，不是节点元素——
+ * 元素每帧重建，存它等于存了一个下一帧就失效的东西。
  *
- * 库那一屏永远读回 `"manual"`（它的 state 里根本没写过别的值），所以那条老路
- * 一个字节都没变。
+ * 单独一张表，**不并进 `marqueeSel`**：那张表里每一条是 `{from,to}`，
+ * 和路径是两种形状，混着放的话 `deletePicked` 会把路径当线去查。
+ */
+export function cardSel(ctx) {
+  return Array.isArray(ctx.state.cardSel) ? ctx.state.cardSel : [];
+}
+
+/**
+ * 把"选中了哪几张卡"这个状态**刷到现成的节点元素上**，不重建 DOM。
+ *
+ * 为什么需要这么一条：框选过程中每一帧走的都是 `redrawStoryLines`，
+ * 而它**只碰 SVG**（见它顶上那条「绝不能重建节点」——被拖的那个元素一换掉，
+ * 指针捕获就没了）。所以选中高亮得另有一条只改类名的路。
+ */
+export function applyCardPicked(ctx) {
+  const sel = new Set(cardSel(ctx));
+  const host = ctx.canvas;
+  if (!host || !host.querySelectorAll) return;
+  for (const el of host.querySelectorAll(".kb-v13-snode")) {
+    const p = el.dataset.path;
+    if (!p) continue; // 幽灵节点没有路径，永远不参与选中
+    el.classList.toggle("kb-v13-snode-picked", sel.has(p));
+  }
+}
+
+/**
+ * 这次框选**扫的是什么**（3.0 刀 16 的线，3.0 刀 30 加的卡）。
+ *
+ * 三种返回值：
+ *   `"manual"` 金色手工线   `"blue"` 笔记正文里的 `[[链接]]`   `"card"` 卡片
+ *
+ * ⚠️ **卡是独立一档，不是"第四种线"**：`card` 由 `marqueeCard` 那个开关单独决定，
+ * 而且它一开着就**压过**线那两档。这么切是因为线那两档是**右键**定的
+ * （右键落在金线上 = manual、落在空白 = blue），而卡档只能由顶栏那颗按钮点开
+ * ——两条入口写同一个字段的话，右键一次就把用户点开的卡档踢掉了。
  */
 export function marqueeKind(ctx) {
+  if (ctx.state.marqueeCard) return "card";
   return ctx.state.marqueeKind === "blue" ? "blue" : "manual";
+}
+
+/** 这一趟框选扫的是卡片吗（框选卡片、整批拖走那一档） */
+export function isCardMarquee(ctx) {
+  return !!ctx.state.marqueeCard;
+}
+
+/**
+ * 在「框线」和「框卡」之间换档（3.0 刀 30，用户 09-27 拍板的 B）。
+ *
+ * 这是**跟顶栏那颗按钮一对**的开关，不是右键那种"顺手切一下"。换档要把上一档
+ * 的选中整个作废：线档选的是 `from/to`、卡档存的是卡片路径，两张表混在一起的话
+ * 按钮上的数字和按下去真正动的东西就对不上了（同 `setMarqueeKind` 那条）。
+ */
+export function setCardMarquee(ctx, on) {
+  const next = !!on;
+  if (!!ctx.state.marqueeCard === next) return false;
+  ctx.state.marqueeCard = next;
+  clearPicked(ctx);
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  refreshLineHint(ctx);
+  redrawStoryLines(ctx);
+  applyCardPicked(ctx);
+  return true;
 }
 
 /**
@@ -1691,15 +1821,22 @@ export function marqueeKind(ctx) {
  *
  * ⚠️ 调用方要把它排在 `setLineEdit` **前面**：`setLineEdit(ctx, true)` 在已经是
  * true 时提前返回、根本不刷界面，标签会停在上一档那三个字。
+ *
+ * ⚠️ **3.0 刀 30 起它同时把卡档关掉。** 右键在这个图里的意思从头到尾是同一句
+ * ——「我要摆弄线」；不关的话，人在卡档里右键一下会进到"按钮写着框卡、拖出来
+ * 却是框线"的状态，而那正是这一刀要消灭的那类错。
  */
 export function setMarqueeKind(ctx, kind) {
   const next = kind === "blue" ? "blue" : "manual";
-  if (marqueeKind(ctx) === next) return false;
+  const wasCard = !!ctx.state.marqueeCard;
+  if (!wasCard && marqueeKind(ctx) === next) return false;
+  ctx.state.marqueeCard = false;
   ctx.state.marqueeKind = next;
   clearPicked(ctx);
   if (ctx.refreshStageUi) ctx.refreshStageUi();
   refreshLineHint(ctx);
   redrawStoryLines(ctx);
+  applyCardPicked(ctx);
   return true;
 }
 
@@ -1713,7 +1850,15 @@ export function setMarqueeKind(ctx, kind) {
 export function clearPicked(ctx) {
   ctx.state.marqueeSel = [];
   ctx.state.blueSel = [];
+  // 3.0 刀 30：卡档的选中。**这一条最容易漏**——漏了的话，切回线档之后
+  // 上一轮选中的那几张卡还亮着边，而点「删除实线」删的是线。
+  ctx.state.cardSel = [];
   ctx.state.marqueeRect = null;
+  // ⚠️ **顺带把屏幕上的高亮也擦掉。** 卡片的选中标记长在节点元素的类名上，
+  // 而这条路有四个调用点，其中两个**完全不会重画节点**（`setLineEdit(false)`
+  // 只重画线；框选起手那一下也是只重画线）。少这一句的表现是：退出编辑模式之后
+  // 那几张卡还亮着边，而此刻点它们已经没有任何特殊含义了——用户会以为还选着。
+  applyCardPicked(ctx);
 }
 
 /**
@@ -1833,6 +1978,25 @@ function segHitsRect(a, b, r) {
  */
 function pickInRect(ctx, rect, kind) {
   const out = [];
+  // 3.0 刀 30：卡档。几何是 `renderStorylineStage` 建的那一份 `_cardHit`，
+  // **和线那两份一样是"画的时候顺手留下的"**——卡片住在世界层里、命中测试
+  // 永远轮不到它们自己（同 `_manualHit` 那条注释）。
+  //
+  // 判的是**矩形与卡片矩形相交**，与线那一档同一条口径（不是"整张卡装进框里"）。
+  // 一把框住整列卡是最常见的用法，要求"完全装进去"会让边上一列永远选不中。
+  if (kind === "card") {
+    for (const g of ctx._cardHit || []) {
+      if (
+        g.x + g.w >= rect.x &&
+        g.x <= rect.x + rect.w &&
+        g.y + g.h >= rect.y &&
+        g.y <= rect.y + rect.h
+      ) {
+        out.push(g.path);
+      }
+    }
+    return out;
+  }
   if (kind === "blue") {
     for (const g of ctx._blueHit || []) {
       const pts = g.pts || [];
@@ -1859,6 +2023,12 @@ function pickInRect(ctx, rect, kind) {
 
 /** 把选中的那些线删掉 */
 function deletePicked(ctx) {
+  // 3.0 刀 30：卡档里框选出来的是**卡片**，没有"删除"这回事——按 D 时静默返回。
+  // ⚠️ 不能让它往下走到 `marqueeSel`：那一支是"把金线从 cardLinks 里删掉"，
+  // 而卡档下 marqueeSel 是空的（换档时清过），走到那儿只是白跑一趟；
+  // 真正危险的是**哪天有人往 marqueeSel 里塞了路径**，那时它会拿路径去比
+  // `l.from`，一条也对不上，于是「按 D 什么也没发生」——看着像坏了。
+  if (marqueeKind(ctx) === "card") return 0;
   if (marqueeKind(ctx) === "blue") return deletePickedBlue(ctx);
   const sel = marqueeSel(ctx);
   if (!sel.length) return 0;
@@ -2083,10 +2253,27 @@ export function bindLineEdit(ctx) {
       // **「选框」开着**才框选。关着的时候拖动仍然是平移画面——
       // 编辑模式里最常做的事还是挪卡片、推画面，不能把拖动整个占掉。
       if (!isMarqueeArmed(ctx)) return;
+      // 旗子一律在这一下清掉，**不管下面走哪条路**：它是"刚框完那一下 click 要吃掉"，
+      // 而任何一次新的按下都说明那一下 click 早就过去了。留在卡档那条 return 之后
+      // 的话，它会被留到下一次点击——那一下本该是"点空白退出编辑模式"，却被吃掉。
+      ateClick = false;
+      // 3.0 刀 30：卡档里，按在**已经选中的那张卡**上 = 整批一起拖，不归框选管。
+      //
+      // ⚠️ 这一条是"框选完再拖走"能成立的**全部理由**：框一松手，用户的下一个
+      //    动作就是按住其中一张把它拖出去。不放行的话，这一下会重新开一个框选
+      //    ——框选矩形从卡片上起手，一拖就把选中清空，看着像"选好的东西一碰就没了"。
+      //
+      // ⚠️ 这里**只 return，不能 stopPropagation**：这一下要留给 itemdrag 去拖。
+      //    平移那边不会跟着抢——panzoom 的 `onPointerDown` 头一句就是
+      //    `if (e.target !== gesture) return;`，按在卡片上它根本不起手。
+      if (isCardMarquee(ctx)) {
+        const node = e.target && e.target.closest && e.target.closest(".kb-v13-snode");
+        const p = node && node.dataset.path;
+        if (p && cardSel(ctx).indexOf(p) >= 0) return;
+      }
       e.stopPropagation();
       e.stopImmediatePropagation();
       const w = ctx._panzoom.clientToWorld(e.clientX, e.clientY);
-      ateClick = false; // 旗子不许漏到下一次操作上
       marquee = { id: e.pointerId, x: e.clientX, y: e.clientY, wx: w.x, wy: w.y, rect: null };
       clearPicked(ctx); // 两边的选中一起清，免得上一轮那一份的数字留在按钮上
       redrawStoryLines(ctx);
@@ -2111,9 +2298,13 @@ export function bindLineEdit(ctx) {
     // "manual"，走的还是 `_manualHit`——那条老路一个字没变。
     const kind = marqueeKind(ctx);
     const hits = pickInRect(ctx, rect, kind);
-    if (kind === "blue") ctx.state.blueSel = hits;
+    if (kind === "card") ctx.state.cardSel = hits;
+    else if (kind === "blue") ctx.state.blueSel = hits;
     else ctx.state.marqueeSel = hits;
     redrawStoryLines(ctx);
+    // 卡档的高亮只能这么刷：`redrawStoryLines` 只碰 SVG，而选中标记长在节点上
+    // （它自己顶上那条写着"绝不能重建节点"，理由是指针捕获）。
+    if (kind === "card") applyCardPicked(ctx);
   });
 
   const end = (e) => {

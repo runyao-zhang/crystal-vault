@@ -90,6 +90,10 @@ import {
   invalidateStoryline,
   blueSel,
   marqueeKind,
+  // 3.0 刀 30：框选卡片那一档（顶栏「框：卡」⇄「选框：线」）与它的选中表。
+  isCardMarquee,
+  setCardMarquee,
+  cardSel,
   hiddenCardSet,
   showAllHidden,
 } from "./storyline.js";
@@ -579,18 +583,39 @@ function refreshStageUi(ctx) {
   // 「选框 / 删除实线」：**右键进过图模式之后才出现**（连接模式或连线编辑模式）。
   // 平时不摆——故事线上没在摆弄线的时候，顶上多两颗按钮是噪音。
   const inGraphMode = ctx.state.linking || ctx.state.lineEdit;
-  const blueKind = marqueeKind(ctx) === "blue";
+  const mKind = marqueeKind(ctx);
+  const cardKind = mKind === "card";
+  const blueKind = mKind === "blue";
+  // 3.0 刀 30：换档那颗（「选框：线」⇄「框：卡」）。与旁边那颗「选框」**各管一件事**
+  // ——这颗说"框住的东西是什么"，那颗说"现在能不能框"。合成一颗轮着切的话，
+  // 点了之后落在哪一档没法从屏幕上读出来（09-20「右键只有金色线」是同一类坑）。
+  if (ctx.marqueeKindBtn) {
+    ctx.marqueeKindBtn.style.display = stage === "storyline" && inGraphMode ? "" : "none";
+    ctx.marqueeKindBtn.textContent = cardKind ? "框：卡" : "选框：线";
+    ctx.marqueeKindBtn.classList.toggle("kb-v13-marquee-on", cardKind);
+    ctx.marqueeKindBtn.title = cardKind
+      ? "现在是「框选卡片」：拖出方框把几张卡一起框住，然后按住其中任意一张\n" +
+        "整批一起拖走——拖进收纳方框就归它，拖到框外就移出来。点一下换回框线。\n" +
+        "（框选卡片不会删任何东西——卡档里没有「删除」这回事。）"
+      : "现在是「框选线」：拖出方框把几根线一起框住，再点「删除实线 / 删除蓝线」删掉。\n" +
+        "点一下换成框选卡片——那档是用来整批挪卡片的。";
+  }
   if (ctx.marqueeBtn) {
     ctx.marqueeBtn.style.display = stage === "storyline" && inGraphMode ? "" : "none";
     // 字说的是**按下去会怎样**（顶栏其它开关都是这个口径）
     ctx.marqueeBtn.textContent = isMarqueeArmed(ctx) ? "退出选框" : "选框";
     ctx.marqueeBtn.classList.toggle("kb-v13-marquee-on", isMarqueeArmed(ctx));
-    ctx.marqueeBtn.title = blueKind
-      ? "打开选框：这时拖鼠标就是框选蓝线。删掉 = 从卡片正文里删掉那条 [[链接]]。"
-      : "打开选框：鼠标变成一个方框，这时拖鼠标就是框选金线。再点一下关掉。";
+    ctx.marqueeBtn.title = cardKind
+      ? "打开选框：鼠标变成一个方框，这时拖鼠标就是框选卡片（框完按住其中一张整批拖走）。再点一下关掉。"
+      : blueKind
+        ? "打开选框：这时拖鼠标就是框选蓝线。删掉 = 从卡片正文里删掉那条 [[链接]]。"
+        : "打开选框：鼠标变成一个方框，这时拖鼠标就是框选金线。再点一下关掉。";
   }
   if (ctx.delLinesBtn) {
-    const n = (blueKind ? blueSel(ctx) : marqueeSel(ctx)).length;
+    // 卡档下**恒为 0**，于是这颗按钮自己收起来：卡档里没有"删除"这回事
+    // （它删的是线；卡片只有移动）。写成 0 而不是"另外判一次 cardKind"，
+    // 是因为下面那句 `n > 0` 同时管着显隐和文案——一个数管一处，不会对不上。
+    const n = cardKind ? 0 : (blueKind ? blueSel(ctx) : marqueeSel(ctx)).length;
     // **只在真的有得删的时候出现**。摆一颗点了没反应的按钮比不摆更糟。
     ctx.delLinesBtn.style.display = stage === "storyline" && n > 0 ? "" : "none";
     // 3.0 刀 17：写模式下按下去删的是**笔记正文**，按钮上还写「删除实线」就是
@@ -831,6 +856,11 @@ export async function mount({
     // 上一版把它做成"按住 S 再拖"，在真机上是死的：库嵌在笔记里，点它不会
     // 把焦点从编辑器拿走，按 S 的 keydown 落点是编辑器的 contenteditable，
     // 被守卫当成打字丢掉了。按钮看得见、点得到、跟焦点没关系。
+    // 3.0 刀 30：换档那颗。**与「选框」各管一件事**——这颗说"框住的东西是什么"
+    // （线 / 卡），那颗说"现在能不能框"。合成一颗轮着切的话，点了之后落在哪一档
+    // 没法从屏幕上读出来（09-20「右键只有金色线」是同一类坑）。
+    '<button type="button" class="kb-v13-marquee-btn" id="kb-fs-marqueekind" style="display:none"' +
+    ' title="现在是「框选线」。点一下换成框选卡片——那档是用来整批挪卡片的。">选框：线</button>' +
     '<button type="button" class="kb-v13-marquee-btn" id="kb-fs-marquee" style="display:none"' +
     ' title="打开选框：鼠标变成一个方框，这时拖鼠标就是框选金线。再点一下关掉。">选框</button>' +
     '<button type="button" class="kb-v13-dellines-btn" id="kb-fs-dellines" style="display:none"' +
@@ -1061,6 +1091,10 @@ export async function mount({
     e.stopPropagation();
     storyWrite.undoWrite();
   });
+  fs.querySelector("#kb-fs-marqueekind").addEventListener("click", (e) => {
+    e.stopPropagation();
+    setCardMarquee(ctx, !isCardMarquee(ctx));
+  });
   fs.querySelector("#kb-fs-marquee").addEventListener("click", (e) => {
     e.stopPropagation();
     setMarqueeArm(ctx, !isMarqueeArmed(ctx));
@@ -1199,6 +1233,7 @@ export async function mount({
     undoBtn: fs.querySelector("#kb-fs-undo"),
     statusEl: fs.querySelector("#kb-fs-status"),
     marqueeBtn: fs.querySelector("#kb-fs-marquee"),
+    marqueeKindBtn: fs.querySelector("#kb-fs-marqueekind"),
     delLinesBtn: fs.querySelector("#kb-fs-dellines"),
     // 3.0 刀 9-C：顶栏那颗「文献」。它平时不参与 stage 显隐（任何档都点得到），
     // 取到引用只是为了在「读者被挂起」时把文案换成「回到文献」。
@@ -1266,6 +1301,13 @@ export async function mount({
       linkWrite: false,
       // 蓝线的选中。以前没有正式槽位，靠 blueSel() 里的 Array.isArray 兜底。
       blueSel: [],
+      // 3.0 刀 30：框选**卡片**那一档，以及它选中了哪几张（存卡片路径）。
+      // 与 marqueeKind 分开是因为两者的入口不一样：线的两档由**右键**定，
+      // 卡档只由顶栏那颗「选框：线 / 框：卡」点开。挤在同一个字段里的话，
+      // 右键一次就把用户点开的卡档踢回线档了。
+      // **不落盘**（同 linking / lineEdit / marqueeArm）：一次操作中途的状态。
+      marqueeCard: false,
+      cardSel: [],
       // 3.0 刀 2 显示模式（"ring" / "canvas" / "grid" / "storyline"）。
       // ⚠️ 与 `ctx.stage`（舞台那个 DOM 节点）同名但完全无关，读的时候看上下文。
       // 它是**推导出来的缓存**：真正的源头是 openCrystal + prefs 里那两档，

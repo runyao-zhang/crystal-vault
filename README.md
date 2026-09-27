@@ -69,7 +69,7 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 - **Right-click a card → hide every link going into and out of it.**
   When one card has a dozen lines running through it, clearing them all out leaves the rest of the structure readable at a glance. **Right-click it again to bring them back.** While anything is hidden, a 「**显示全部**」 (Show all) button appears in the top bar and restores everything at once.
-- **Right-click on a gold line → enter link-edit mode.** A 「**选框**」 (Marquee) button appears in the top bar; drag to box in some lines, and a 「**删除实线（N）**」 (Delete lines) button appears.
+- **Right-click on a gold line → enter link-edit mode.** Two buttons appear in the top bar, 「**选框：线**」 and 「**选框**」; drag to box in some lines, and a 「**删除实线（N）**」 (Delete lines) button appears. (Click the first one and it turns into 「**框：卡**」 — that mode is for **moving a batch of cards at once**, see below.)
 - **Right-click empty space (in 写 mode) → the same 「选框」 button, but this one boxes *blue* lines.** What appears then is 「**删除蓝线（N）**」 — and pressing it removes the matching `[[link]]` **from the card's body**.
 
 > One detail: the **card right-click is opened by 写 mode**. In 看 mode, right-clicking a card still does the old thing (enters link mode). But **once a card is hidden, right-clicking it works in either mode** — otherwise switching back to 看 would leave the hidden state reachable only from the top-bar button.
@@ -84,6 +84,27 @@ Collapsing puts the cards inside away together with the lines running to them �
 - hover that card and the collapsed boxes it relates to **flash around their edge**.
 
 Without that, collapsing would read as *"my links are gone"* when you never deleted anything. While a box is open, the cards inside link outward with blue lines as usual — **across levels included**.
+
+### 框：卡 — move a whole batch at once
+
+Two buttons sit next to each other in the structure window's top bar, and they **do two different jobs**:
+
+| Button | What it tells you |
+| --- | --- |
+| **选框：线** ⇄ **框：卡** | **what** the marquee catches |
+| **选框** ⇄ **退出选框** | **whether** you can marquee right now |
+
+The default is 「选框：线」: right-click to enter link-edit mode, drag a box around some lines, then hit 「删除实线 / 删除蓝线」. Click 「选框：线」 and it becomes 「**框：卡**」 — now the box you drag **catches cards**:
+
+1. box in a few cards and they **light up with a cyan edge**;
+2. **drag any one of them and the whole batch moves**;
+3. on release the whole batch is re-checked for membership: **drop it inside a box and it joins; drop it outside and it leaves**.
+
+Without this, filing a dozen cards into one box meant dragging them **one at a time**.
+
+> - Press on a card that is **not** in the selection and only that card moves — after boxing an area, reaching for a different card clearly means "move *this* one", not "and those five as well".
+> - **There is no "delete" in card mode**: the 「删除实线 / 删除蓝线」 button hides itself. Boxing cards only moves them around — it **does not touch a single word of your notes**.
+> - To un-highlight them, **click empty space** or press **Esc**.
 
 ## Read-and-jot: turn what you read into a card on the spot
 

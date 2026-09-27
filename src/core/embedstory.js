@@ -51,6 +51,8 @@ import {
   marqueeSel,
   blueSel,
   marqueeKind,
+  isCardMarquee,
+  setCardMarquee,
   setLineEdit,
   deletePickedFor,
   hiddenCardSet,
@@ -153,6 +155,11 @@ function makeFacade(ctx, view) {
   // 把它写成 "blue"，反噬的是库那一屏。
   st.blueSel = [];
   st.marqueeKind = "manual";
+  // 3.0 刀 30：框选卡片那一档，以及它选中了哪几张。**同一条理由，而且这条最险**——
+  // 透到真 state 的话，在结构窗里框选几张卡，切回库那一屏会看到那几张卡也亮着边
+  // （路径是同一个库里的路径，真的对得上），而库里根本没有卡档这个概念。
+  st.marqueeCard = false;
+  st.cardSel = [];
   st.hideLinks = false;
   fake.state = st;
   fake.fs = view.root; // 模式类名（kb-v13-linking 等）挂在这一扇窗自己的根上
@@ -170,6 +177,10 @@ function makeFacade(ctx, view) {
   // 3.0 刀 16：蓝线的命中几何，上面那条警告对它一字不差地成立——不归零的话，
   // 框选读的是**库那一屏**的蓝线，删掉的却是这个窗里正指着的笔记。
   fake._blueHit = null;
+  // 3.0 刀 30：卡片的命中几何。**又是同一条**——不归零的话，在结构窗里框选卡片
+  // 会把**库那一屏**的卡片几何当成本窗的用，而两屏看的多半不是同一颗晶体，
+  // 于是"框住五张、选中三张"，或者拖走一批屏幕上没碰过的卡。
+  fake._cardHit = null;
   fake._rubber = null;
   fake._rubberSide = null;
   fake.lineHint = null;
@@ -217,6 +228,20 @@ export function createEmbedStory(ctx, opts = {}) {
   marqueeBtn.type = "button";
   marqueeBtn.title = "打开选框：这时拖鼠标就是框选金线。再点一下关掉。";
   marqueeBtn.style.display = "none";
+  // 3.0 刀 30（用户 09-27）：「框选卡片、整批拖走」。
+  //
+  // 顶栏那颗「选框」拆成两颗，**各管一件事**：
+  //   · 这一颗（「选框：线」⇄「框：卡」）说的是**框住的东西是什么**；
+  //   · 旁边那颗（「选框」⇄「退出选框」）说的是**现在能不能框**。
+  //
+  // 为什么不合成一颗按钮轮着切：那需要在一颗按钮上塞两个动作（切档 / 开关），
+  // 而"点了之后是哪一个"没法从屏幕上读出来——正是 09-20 那次「右键只有金色线」
+  // 栽过的同一类坑。两颗按钮各写各的状态，看一眼就知道现在在哪一档。
+  const kindBtn = EL("button", "kb-v13-embedact");
+  kindBtn.type = "button";
+  kindBtn.textContent = "选框：线";
+  kindBtn.style.display = "none";
+  kindBtn.addEventListener("click", () => setCardMarquee(fake, !isCardMarquee(fake)));
   const delBtn = EL("button", "kb-v13-embedact");
   delBtn.type = "button";
   delBtn.title = "删掉框选中的那几根金线。";
@@ -263,7 +288,7 @@ export function createEmbedStory(ctx, opts = {}) {
     "框只是分组——删框、移出，都**不会动你的卡片**。";
   addBoxBtn.addEventListener("click", () => createBox(fake, []));
 
-  bar.append(crystalBtn, modeBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, hint);
+  bar.append(crystalBtn, modeBtn, kindBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, hint);
   stage.appendChild(world);
   root.append(stage, bar);
 
@@ -301,6 +326,38 @@ export function createEmbedStory(ctx, opts = {}) {
   bindLinkMode(fake);
   bindBendEditing(fake);
   bindLineEdit(fake);
+
+  // 3.0 刀 30：**结构窗里的 Esc 归这扇窗自己收。**
+  //
+  // ⚠️ 这一条不能交给 app.js 那条总调度。那条读的是**真** ctx 的 `state.lineEdit`，
+  // 而这一扇窗的模式长在影子 state 上（见 makeFacade 顶上那段）——于是窗里按 Esc
+  // 什么也不会发生（库那侧没进编辑模式，整条链上没有分支认领它，最后落到
+  // 「overlay 还开着 → 什么也不做」）。说明条上从 3.0 刀 5 起就写着「Esc 退出」，
+  // 不认它就是那句话在骗人。
+  //
+  // 卡档里尤其要紧：框选完想取消选中，除了 Esc 就只剩「点空白」——
+  // 而点空白连整个编辑模式一起退了，用户想接着框下一片就得重新点开两条按钮。
+  //
+  // ⚠️ 用**捕获**：要抢在 reader.js 的 onKeydown（它管着阅读器自己的翻页键）和
+  // app.js 那条之前。`stopImmediatePropagation` 也是必须的——同元素的后续监听
+  // 之间 stopPropagation 拦不住，少了这句这一下会接着去关掉整块阅读器。
+  const onEsc = (e) => {
+    if (e.key !== "Escape") return;
+    // **只认领"这一刻屏幕上真有这一扇窗"的那一下。** 窗口收进收纳栏 / 被挂起时
+    // 尺寸是 0×0（同 `fit()` 和 `onResize` 用的判据），那会儿按 Esc 的人
+    // 要找的是别的东西——吞掉它等于让 Esc 在别处静默失效。
+    const rect = root.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    if (!fake.state.lineEdit) return;
+    // 正在我们自己的编辑表单里打字时不认领——那一下的意思是「从输入框里出来」，
+    // 归 reader.js 的 typingNow 那条管，这里抢了就把人锁在框里了。
+    const a = doc.activeElement;
+    if (a && a.closest && a.closest(".kb-v13-editform")) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setLineEdit(fake, false);
+  };
+  doc.addEventListener("keydown", onEsc, true);
 
   // 点节点 = 把那张卡摆到桌面上（用户 09-19 选的）。**不打开全息面板**：
   // 面板会盖住半张桌子，把用户刚摆好的版面搅了——而那正是他选桌面模式的理由。
@@ -349,18 +406,35 @@ export function createEmbedStory(ctx, opts = {}) {
    */
   function syncBar() {
     const kind = marqueeKind(fake);
+    const card = kind === "card";
     const blue = kind === "blue";
     const editing = !!fake.state.lineEdit;
     const armed = !!fake.state.marqueeArm;
-    const n = (blue ? blueSel(fake) : marqueeSel(fake)).length;
+    // 卡档下**必须是 0**，于是「删除实线 / 删除蓝线」那颗自己收起来：卡档里没有
+    // "删除"这回事（卡片只有移动）。写成 0 而不是"另外判一次 card"，
+    // 是因为下面那句 `n > 0` 同时管着显隐和文案——一个数管一处，不会对不上。
+    const n = card ? 0 : (blue ? blueSel(fake) : marqueeSel(fake)).length;
+    // 换档那颗：编辑模式里一直摆着（**不能"有卡才出现"**——没有可见入口的
+    // 手势就是 09-20 那颗"右键只有金色线"的同一种死法）。
+    kindBtn.style.display = editing ? "" : "none";
+    kindBtn.textContent = card ? "框：卡" : "选框：线";
+    kindBtn.classList.toggle("on", card);
+    kindBtn.title = card
+      ? "现在是「框选卡片」：拖出方框把几张卡一起框住，然后按住其中任意一张\n" +
+        "整批一起拖走——拖进收纳方框就归它，拖到框外就移出来。点一下换回框线。\n" +
+        "（框选卡片不会删任何东西——卡档里没有「删除」这回事。）"
+      : "现在是「框选线」：拖出方框把几根线一起框住，再点「删除实线 / 删除蓝线」删掉。\n" +
+        "点一下换成框选卡片——那档是用来**整批挪卡片**的。";
     marqueeBtn.style.display = editing ? "" : "none";
     marqueeBtn.textContent = armed ? "退出选框" : "选框";
     marqueeBtn.classList.toggle("on", armed);
-    marqueeBtn.title = blue
-      ? "打开选框：这时拖鼠标就是框选蓝线。删掉 = 从卡片正文里删掉那条 [[链接]]。"
-      : "打开选框：这时拖鼠标就是框选金线。再点一下关掉。";
+    marqueeBtn.title = card
+      ? "打开选框：这时拖鼠标就是框选卡片（框完按住其中一张整批拖走）。再点一下关掉。"
+      : blue
+        ? "打开选框：这时拖鼠标就是框选蓝线。删掉 = 从卡片正文里删掉那条 [[链接]]。"
+        : "打开选框：这时拖鼠标就是框选金线。再点一下关掉。";
     // **只在真的有得删的时候出现**：摆一颗点了没反应的按钮比不摆更糟
-    // （与库顶栏那颗同一条规矩）。
+    // （与库顶栏那颗同一条规矩）。卡档下 `n` 恒为 0，它自己就收起来了。
     delBtn.style.display = editing && n > 0 ? "" : "none";
     delBtn.textContent = (blue ? "删除蓝线（" : "删除实线（") + n + "）";
     delBtn.title = blue
@@ -484,6 +558,10 @@ export function createEmbedStory(ctx, opts = {}) {
     fake._sHandle = null;
     fake._manualHit = null;
     fake._blueHit = null;
+    // 3.0 刀 30：同上。这里清一次是防「换晶体」那一趟——`renderStorylineStage`
+    // 开头也会重建，但那是**渲染之后**的事：万一哪次渲染提前返回了（没卡、
+    // 路径为空），留着的那份几何对应的是上一颗晶体的卡片。
+    fake._cardHit = null;
     renderStorylineStage(fake, view.path);
     if (!keepCamera) fit();
     refreshLineHint(fake);
@@ -519,6 +597,10 @@ export function createEmbedStory(ctx, opts = {}) {
     /** 收掉只属于这一屏的运行时状态（模式、选中）。离开这一档时要叫一次。 */
     leave: () => leaveStoryline(fake),
     destroy: () => {
+      // ⚠️ Esc 那条是挂在 **doc** 上的，不摘的话这扇窗关掉之后它还活着：
+      // 每开一次结构窗就攒一个监听，而它们全都读着已经没人要的 fake——
+      // 表现是"关掉窗之后再按 Esc，别的窗口莫名退出编辑模式"。
+      doc.removeEventListener("keydown", onEsc, true);
       leaveStoryline(fake);
       if (view.pz) view.pz.destroy();
       root.remove();

@@ -379,54 +379,13 @@ export function renameBox(ctx, id, name) {
   afterWrite(ctx);
 }
 
-/** 一张卡现在在哪个框里（不在任何框里就回 null）。**只认手动框**——
- *  晶体框是算出来的，往它里面"加卡"没有意义（成员由文件夹决定）。 */
-export function boxOfPath(ctx, cardPath) {
-  const p = String(cardPath || "");
-  if (!p) return null;
-  for (const b of manualOf(ctx)) {
-    if ((b.paths || []).indexOf(p) >= 0) return String(b.id);
-  }
-  return null;
-}
-
-/**
- * 把一张卡加进某个手动框。**已经在别的框里就先挪出来**（用户拍的：一张卡只属于一个框）。
- *
- * ⚠️ 这里**不碰磁盘**：框是纯视图分组（用户 09-27 拍的 Q3=B）。
- */
-export function addCardToBox(ctx, boxId, cardPath) {
-  const v = ensure(ctx);
-  if (!v || !boxId || !cardPath) return;
-  const id = String(boxId);
-  const p = String(cardPath);
-  for (const b of v.boxes) {
-    const i = (b.paths || []).indexOf(p);
-    if (i >= 0 && String(b.id) !== id) b.paths.splice(i, 1);
-  }
-  const box = v.boxes.find((b) => String(b.id) === id);
-  if (!box) return;
-  if (!Array.isArray(box.paths)) box.paths = [];
-  if (box.paths.indexOf(p) < 0) box.paths.push(p);
-  afterWrite(ctx);
-}
-
-/** 把一张卡移出它所在的框。**只动分组**——卡本身一个字没动。 */
-export function removeCardFromBox(ctx, cardPath) {
-  const v = ensure(ctx);
-  if (!v || !cardPath) return false;
-  const p = String(cardPath);
-  let hit = false;
-  for (const b of v.boxes) {
-    const i = (b.paths || []).indexOf(p);
-    if (i >= 0) {
-      b.paths.splice(i, 1);
-      hit = true;
-    }
-  }
-  if (hit) afterWrite(ctx);
-  return hit;
-}
+// ⚠️ **3.0 刀 30 起，"一张卡进框 / 出框"只有一个入口：下面那个 `assignCards`。**
+//
+// 这里原来还有一对单张的（`addCardToBox` / `removeCardFromBox`）加一个查询（`boxOfPath`），
+// 是拖单张卡那条路用的。框选整批拖走接上来之后，单张那条路并进了 `assignCards`
+// （"批里只有一张"就是它的特例），**三张全都删了**——不是不礼貌，是留着必出事：
+// 两套写 `boxes[].paths` 的代码迟早会漂成两种归属判据，而用户看到的只是
+// 「有时候拖进去、有时候不进」。要单张行为，调 `assignCards(ctx, [path], …)`。
 
 /** 删掉一个框。**只删框，卡片一张不动**——这句话要写在按钮的 title 上。 */
 export function deleteBox(ctx, id) {
@@ -473,6 +432,62 @@ export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
     if (pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2) return b;
   }
   return null;
+}
+
+/**
+ * 3.0 刀 30：**一批卡**一起判归属（落框 / 移出）。框选之后整批拖走那条路走它。
+ *
+ * 为什么不是"逐个调 `addCardToBox` / `removeCardFromBox`"：那两个每调一次都会
+ * `afterWrite` → `flushViewState` + `refreshStoryline`，而结构窗的 refresh 是
+ * **整窗重画**。一次拖 8 张就是 8 次全量重建，屏幕上会一顿一顿地闪。
+ * 这里先把"每张卡该进哪个框"全算完，再**一次**改模型、**一次**落盘。
+ *
+ * ⚠️ 和单张那条路**判据必须一样**：`hitBoxAt` 认的是**卡片中心**落在框的矩形里。
+ * 两处各写一套的话，「拖一张进去」和「框选一批拖进去」会给出不同答案，
+ * 而用户看到的只是"有时候进去有时候不进"。
+ *
+ * @param {string[]} targets 要重新判归属的卡片路径
+ * @returns {boolean} 真的改了东西吗（决定要不要落盘）
+ */
+export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
+  const v = view(ctx);
+  if (!v || !Array.isArray(v.boxes) || !targets || !targets.length) return false;
+  // 先把结果全算出来。这一步**不碰模型**——算的过程中模型在变的话，
+  // 后面的 hitBoxAt 拿到的 geometry 和最终写进去的就对不上了。
+  const want = new Map();
+  for (const p of targets) {
+    const at = pos.get(p);
+    if (!at) continue;
+    const center = { x: at.x + NODE_W / 2, y: at.y + NODE_H / 2 };
+    const hit = hitBoxAt(boxes, pos, NODE_W, NODE_H, center);
+    want.set(p, hit ? String(hit.id) : null);
+  }
+  if (!want.size) return false;
+
+  let changed = false;
+  // 1) 先把这一批从**所有**框里摘干净（连它本来待着的那个也摘）。
+  //    过滤而不是 splice：一张卡只该出现一次，逐个 splice 要处理下标漂移。
+  for (const b of v.boxes) {
+    if (!Array.isArray(b.paths)) b.paths = [];
+    const keep = b.paths.filter((p) => !want.has(p) || want.get(p) === String(b.id));
+    if (keep.length !== b.paths.length) {
+      b.paths = keep;
+      changed = true;
+    }
+  }
+  // 2) 再把该进框的放进去。`want` 里值是 null 的（落在所有框外面）到此为止
+  //    ——那就是"拖出来 = 移出"，第 1 步已经做完了。
+  for (const [p, id] of want) {
+    if (!id) continue;
+    const box = v.boxes.find((b) => String(b.id) === id);
+    if (!box) continue;
+    if (box.paths.indexOf(p) < 0) {
+      box.paths.push(p);
+      changed = true;
+    }
+  }
+  if (changed) afterWrite(ctx);
+  return changed;
 }
 
 export function toggleBox(ctx, id) {

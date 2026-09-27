@@ -19,6 +19,7 @@ const DRAG_THRESHOLD = 4;
  *   @param {string} cfg.stage      只在哪一档里生效（"canvas" / "storyline"）
  *   @param {(ctx, key) => {x,y}} cfg.posOf  它此刻在哪（世界坐标）
  *   @param {(ctx, key, p) => void} cfg.writePos 落定
+ *   @param {(ctx, key) => void} [cfg.onStart] 按下、认出来是"拖这个东西"之后（还没过阈值）
  *   @param {(ctx, key) => void} [cfg.onDrop] 松手时（用来判归属之类）
  */
 export function bindItemDrag(ctx, cfg) {
@@ -54,6 +55,14 @@ export function bindItemDrag(ctx, cfg) {
       x: 0,
       y: 0,
     };
+    // 3.0 刀 30：告诉调用方"这一趟要拖的是谁"。**在阈值之前**，而且**可能拖不动**
+    // （用户只是点了一下）——所以这里只许记状态，不许改屏幕。
+    //
+    // 结构窗用它来拍一张「这一批现在都在哪」的快照：卡片是可以**整批一起拖**的
+    // （框选之后按住其中任意一张），而批量那条路需要一个不随每帧变的原点。
+    // 放在这里而不是 onMove 里，是因为 onMove 第一帧时指针已经走了一段，
+    // 拿那一帧当原点的话整批会**先跳一下**再跟着走。
+    if (cfg.onStart) cfg.onStart(ctx, key);
   });
 
   g.addEventListener("pointermove", (e) => {

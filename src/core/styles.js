@@ -1371,6 +1371,18 @@ const CANVAS = [
   "  z-index:120!important;transition:none;cursor:grabbing;",
   "  border-color:rgba(140,200,255,.75);box-shadow:0 8px 24px rgba(0,0,0,.5);",
   "}",
+  // 3.0 刀 30：框选中的卡片（卡档）。**这是整批拖动唯一的状态提示**——
+  // 不亮的话，用户框完一片、松手，屏幕上什么变化都没有，他没法知道
+  // 「按住其中一张就能整批走」这件事成不成立。
+  //
+  // 用青色的描边 + 外圈光晕，与 hover（更淡）、dragging（更亮）拉开层次：
+  // 三档同时可能出现在一张卡上（悬停在一张已选中的卡上、然后开始拖它），
+  // 颜色深浅要能读出"现在叠加了几层"。
+  ".kb-v13-snode.kb-v13-snode-picked{",
+  "  border-color:rgba(120,240,255,.9);background:rgba(14,40,72,.96);",
+  "  box-shadow:0 0 0 1px rgba(120,240,255,.45),0 4px 16px rgba(0,0,0,.42);",
+  "}",
+  ".kb-v13-snode.kb-v13-snode-picked:hover{border-color:rgba(150,250,255,.98);}",
 ];
 
 // ===== 3.0 刀 6：文献阅读器 =====
