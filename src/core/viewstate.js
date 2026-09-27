@@ -55,6 +55,15 @@ export function defaultViewState() {
     // 平的就够：路径在全库唯一，而且一张卡只属于一颗晶体，
     // 在哪扇窗里藏的，回到库的故事线就还藏着——不需要再拿晶体名当键。
     hiddenLinks: [],
+    // 3.0 刀 23「收纳方框」：把几张卡收进一个可以命名、可以收起的框里。
+    //
+    // ⚠️ **这里只存手动建的框。** 「一个子晶体一个框」那些是**算出来的**
+    // （storyline.js 的 boxesOf）——落盘的话文件夹一改名它们就对不上，
+    // 而那种错法没有任何东西会报出来，正是这一版要修的那一类。名字要能改，
+    // 所以另开一张 `boxNames` 按 id 覆盖。
+    boxes: [],
+    boxNames: {},
+    collapsedBoxes: [],
     openCrystal: null,
     selectedCrystal: null,
     selectedCard: null,
@@ -263,6 +272,73 @@ function sanitizeHiddenLinks(raw) {
   return out;
 }
 
+/**
+ * 「收纳方框」（3.0 刀 23）：一组卡片 + 一个名字 + 收起与否。
+ *
+ * ⚠️ **只有手动建的框存在这里**；「一个子晶体一个框」那些是**算出来的**
+ * （见 storyline.js 的 boxesOf），不落盘——落盘的话文件夹一改名它们就对不上了，
+ * 而那种错法没有任何东西会报出来（正是这一版要修的那一类）。
+ *
+ * 逐条过滤，任一项坏了只丢那一条，**绝不抛**。同 `sanitizeHiddenLinks` 那条：
+ * 成员路径**只认字符串**，绝不 toStr——把 42 转成 "42" 会造出一条永远匹配不上
+ * 任何卡片的垃圾成员，看着像数据。
+ */
+const MAX_BOXES = 200;
+const MAX_BOX_MEMBERS = 2000;
+function sanitizeBoxes(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seenIds = new Set();
+  for (const b of raw) {
+    if (out.length >= MAX_BOXES) break;
+    if (!isObj(b)) continue;
+    const id = typeof b.id === "string" ? b.id.trim() : "";
+    if (!id || seenIds.has(id)) continue;
+    const paths = [];
+    const seenP = new Set();
+    for (const p of Array.isArray(b.paths) ? b.paths : []) {
+      if (paths.length >= MAX_BOX_MEMBERS) break;
+      if (typeof p !== "string" || !p || seenP.has(p)) continue;
+      seenP.add(p);
+      paths.push(p);
+    }
+    seenIds.add(id);
+    out.push({ id, name: toStr(b.name).slice(0, 80), paths });
+  }
+  return out;
+}
+
+/**
+ * 框的显示名覆盖：`id -> 名字`。
+ *
+ * 晶体框的 id 是**算出来的**（`c:<晶体 key>`），没法把名字存在框自己身上，
+ * 所以要单独一张表。手动框也走它——一张表比分两处简单。
+ */
+function sanitizeBoxNames(raw) {
+  if (!isObj(raw)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const id = toStr(k);
+    const name = toStr(v).slice(0, 80);
+    if (id && name) out[id] = name;
+  }
+  return out;
+}
+
+/** 收起来的框（只剩一条标题栏）。同 `sanitizeHiddenLinks` 那套过滤。 */
+function sanitizeCollapsedBoxes(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const p of raw) {
+    if (out.length >= MAX_BOXES) break;
+    if (typeof p !== "string" || !p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
 function sanitizeCrystalPos(raw) {
   if (!isObj(raw)) return {};
   const out = {};
@@ -300,6 +376,9 @@ export function sanitizeViewState(raw) {
     cardLinks: sanitizeCardLinks(raw.cardLinks),
     linkSides: sanitizeLinkSides(raw.linkSides),
     hiddenLinks: sanitizeHiddenLinks(raw.hiddenLinks),
+    boxes: sanitizeBoxes(raw.boxes),
+    boxNames: sanitizeBoxNames(raw.boxNames),
+    collapsedBoxes: sanitizeCollapsedBoxes(raw.collapsedBoxes),
     openCrystal: nullableStr(raw.openCrystal),
     selectedCrystal: nullableStr(raw.selectedCrystal),
     selectedCard: nullableStr(raw.selectedCard),

@@ -10,6 +10,10 @@ import { EL, esc, svgEl, swallowNextClick } from "./dom.js";
 import { layoutOf, worldPosOf } from "./canvas.js";
 import { bindItemDrag } from "./itemdrag.js";
 import { runLayout, layeredLayout, NODE_W, NODE_H } from "./storylayout.js";
+// 3.0 刀 23「收纳方框」。整块逻辑在那个文件里，这里只开三个口子：
+// 渲染时算一次框、把它们画到卡片**后面**，画线时问一句「这条边是不是通进收起来的框」。
+import { boxesOf, memberIndexOf, collapsedSet, renderBoxes, bindBoxHover, toggleBox, renameBox } from "./storyboxes.js";
+import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
 const EDGE_PAD = 10;
@@ -212,14 +216,72 @@ export function renderStorylineStage(ctx, path) {
   // ReferenceError，连库都进不去——测试逮住了，别把它挪进 paintStoryLines。）
   const hidden = hiddenCardSet(ctx);
 
+  // 3.0 刀 23「收纳方框」（用户 09-27 第 2/3/4 条）。
+  //
+  // ⚠️ 顺序是硬的：**框先画**（DOM 在前 + CSS z-index 更低），卡片才压在它上面；
+  // 而成员表与收起表必须在这之前挂到 ctx 上——紧接着的 `paintStoryLines` 要靠
+  // 它们决定哪几根线不画。
+  const boxes = boxesOf(ctx, path);
+  ctx._boxMember = memberIndexOf(boxes);
+  ctx._boxCollapsed = collapsedSet(boxes);
+  ctx._boxEls = renderBoxes(ctx.canvas, boxes, pos, EL, NODE_W, NODE_H);
+  // 悬停委托**只挂一次**：卡片每帧重建，逐张挂监听会漏、也会越堆越多
+  // （同 itemdrag.js 那条「事件绑舞台」的教训）。元素表每次渲染换新的，
+  // 所以监听里读的是 `ctx._boxEls` 而不是某个快照。
+  if (!ctx.canvas._kbBoxHover) {
+    ctx.canvas._kbBoxHover = true;
+    bindBoxHover(ctx.canvas, () => ctx._boxEls);
+  }
+  // 框上那两颗东西也**只挂一次**（同上面那条）。收起/展开、就地改名。
+  // ⚠️ 用**捕获**阶段拦下，并且拦完就停：框的标题栏压在舞台上，
+  // 而舞台自己也有点击处理（点空白退出编辑态那一条），不拦就会两件事一起发生。
+  if (!ctx.canvas._kbBoxClick) {
+    ctx.canvas._kbBoxClick = true;
+    ctx.canvas.addEventListener(
+      "click",
+      (e) => {
+        const t = e.target;
+        if (!t || !t.closest) return;
+        const tg = t.closest("[data-box-toggle]");
+        if (tg) {
+          e.stopPropagation();
+          e.preventDefault();
+          toggleBox(ctx, tg.getAttribute("data-box-toggle"));
+          return;
+        }
+        const nm = t.closest("[data-box-name]");
+        if (nm) {
+          e.stopPropagation();
+          e.preventDefault();
+          const id = nm.getAttribute("data-box-name");
+          // 复用库里的就地改名（方框那句话的同一套）：中文输入法合成中不接手、
+          // Esc 还原、失焦提交——这些坑那边都踩过了，别再造一个。
+          beginInlineRename(nm, nm.textContent, (name) => renameBox(ctx, id, name));
+        }
+      },
+      true
+    );
+  }
+
   const svg = ensureLinkLayer(ctx);
   paintStoryLines(ctx, svg, cards, path, layout);
 
   for (const c of cards) {
+    // 收起来的框里的卡**不画**（用户第 4 条）。只是不画——数据一个字没动，
+    // 框一展开原样回来。
+    const bid = ctx._boxMember.get(c.path);
+    if (bid && ctx._boxCollapsed.has(bid)) continue;
     const p = pos.get(c.path);
     const el = EL("div", "kb-v13-snode");
     el.dataset.path = c.path;
     el.dataset.title = c.title;
+    // 3.0 刀 23：外面这张卡有蓝线连进某个收起来的框 → 点一个黄点（CSS 的 ::after）。
+    // 这是「线没丢，在那里面」的唯一线索：悬停这张卡，那几个框会绕边闪一圈。
+    const linked = ctx._boxLinked ? ctx._boxLinked.get(c.path) : null;
+    if (linked && linked.size) {
+      el.classList.add("kb-v13-snode-boxlink");
+      el.dataset.boxes = Array.from(linked).join(" ");
+    }
     // 3.0 刀 13：这张卡的入链出链被右键藏起来了。
     // **这不是装饰**——不标出来的话，用户看到的是一张一根线都没有、可他明明
     // 写了双链的卡，那读起来是「我的双链丢了」，不是「我把它藏了」。
@@ -308,6 +370,10 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
   const blueGeom = [];
   ctx._blueHit = blueGeom;
 
+  // 3.0 刀 23：**外面哪几张卡连着收起来的框**。每帧无条件重建（同 blueGeom 那条）
+  // ——攒着不重置的话，框展开之后黄点会留在卡上，而它连的东西明明已经画出来了。
+  ctx._boxLinked = new Map();
+
   // 连线画在节点**下面**：先建线，后建节点（DOM 顺序 + z-index 两条一起）。
   const drawLine = (e, cls) => {
     const a = pos.get(e.from);
@@ -316,6 +382,26 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
     // 这一头或那一头被藏了 → 这一根不画。**藏 = 不画，绝不动数据**：
     // hiddenCardSet 一清，线原样回来。
     if (hidden.has(e.from) || hidden.has(e.to)) return;
+    // 3.0 刀 23（用户 09-27 第 4 条）：这一头或那一头落在**收起来的框**里
+    // → 整根不画。但「那边还有东西」这件事不能丢，否则收起读起来就是「我的双链丢了」：
+    // 把**外面那一头**记下来，等下给那张卡点一个黄点；悬停它时靠这份记录让框闪。
+    //
+    // 两端都在收起来的框里（可能是两个不同的框）就没什么可点的——不记。
+    if (ctx._boxCollapsed && ctx._boxCollapsed.size && ctx._boxMember) {
+      const fa = ctx._boxMember.get(e.from);
+      const fb = ctx._boxMember.get(e.to);
+      const ca = !!(fa && ctx._boxCollapsed.has(fa));
+      const cb = !!(fb && ctx._boxCollapsed.has(fb));
+      if (ca || cb) {
+        if (ca !== cb && ctx._boxLinked) {
+          const outside = ca ? e.to : e.from;
+          const boxId = ca ? fa : fb;
+          if (!ctx._boxLinked.has(outside)) ctx._boxLinked.set(outside, new Set());
+          ctx._boxLinked.get(outside).add(boxId);
+        }
+        return;
+      }
+    }
     // 这一对被亲手连过就按记下的边接，没连过就走老规矩（看谁在左谁在右）
     const hint = hints.get(e.from + " " + e.to) || null;
     const { aSide, bSide } = linkSidesFor(a, b, hint);

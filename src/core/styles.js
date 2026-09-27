@@ -2116,6 +2116,51 @@ const READER_DOCK = [
   ".kb-v13-desk-dock:hover{background-color:rgba(255,255,255,.12)!important;color:var(--text-normal, #d7e8fa)!important;}",
 ];
 
+// ===== 收纳方框（3.0 刀 23）=====
+//
+// 故事线/结构窗里把几张卡收进一个可以命名、可以收起的框里。
+// 整块逻辑在 `storyboxes.js`，这里只负责长相。
+const STORY_BOXES = [
+  // ⚠️ **z-index:0 且 pointer-events:none**：框要压在卡片**下面**
+  // （DOM 里也确实排在卡片前面），所以它自己不能接事件——只有标题栏那一条
+  // 单独把 `pointer-events` 打开。不这么做的话，框会盖住卡片，点不着卡。
+  ".kb-v13-sbox{",
+  "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:0;pointer-events:none;",
+  "  border:1.5px dashed rgba(0,200,255,.4);background:rgba(0,120,200,.06);",
+  "}",
+  // 晶体框用暖色点线，和手动框分得开——「这个是文件夹自己长出来的」
+  ".kb-v13-sbox-crystal{border-style:dotted;border-color:rgba(255,196,120,.4);background:rgba(255,180,90,.05);}",
+  ".kb-v13-sbox-collapsed{border-style:solid;background:rgba(0,120,200,.16);}",
+  ".kb-v13-sbox-bar{",
+  "  display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;",
+  "  font-family:system-ui,sans-serif;font-size:11px;color:rgba(200,228,255,.88);",
+  "  pointer-events:auto;",
+  "}",
+  ".kb-v13-sbox-toggle{",
+  "  cursor:pointer;border:0;padding:0 2px;font-size:11px;line-height:1;",
+  "  color:rgba(200,228,255,.75)!important;background-color:transparent!important;",
+  "}",
+  ".kb-v13-sbox-name{",
+  "  cursor:pointer;padding:1px 5px;border-radius:4px;",
+  "  max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+  "}",
+  ".kb-v13-sbox-name:hover{background:rgba(255,255,255,.12);}",
+  ".kb-v13-sbox-count{opacity:.55;margin-left:auto;}",
+  // 悬停那张带黄点的卡时，和它有关联的、正收着的框**绕边闪一圈**（用户第 4 条）。
+  // 闪的是边框和一圈光晕，不是把框整个高亮——框可能很大，整块变色会喧宾夺主。
+  "@keyframes v13BoxFlash{",
+  "  0%,100%{border-color:rgba(255,210,80,.35);box-shadow:0 0 0 0 rgba(255,210,80,0);}",
+  "  50%{border-color:rgba(255,210,80,1);box-shadow:0 0 0 4px rgba(255,210,80,.3);}",
+  "}",
+  ".kb-v13-sbox-flash{animation:v13BoxFlash .9s ease-in-out 3;}",
+  // 黄点：**外面这张卡有蓝线连进某个收起来的框**。画在右上角，
+  // 不挡标题；用伪元素所以不用往卡片 DOM 里塞东西（那会被每帧重建冲掉）。
+  ".kb-v13-snode-boxlink::after{",
+  "  content:'';position:absolute;top:-5px;right:-5px;width:11px;height:11px;border-radius:50%;",
+  "  background:#ffd24f;box-shadow:0 0 0 1.5px rgba(20,30,45,.9);",
+  "}",
+];
+
 // ===== 减弱动态效果 =====
 // 库里原本全是无限循环动画（卡片波浪、粒子、轨道、扫描线），系统开了「减弱动态效果」
 // 也照跑不误。这里尊重该设置：停掉环境性/无限动画，保留一次性反馈。
@@ -2138,6 +2183,9 @@ const REDUCED_MOTION = [
   "  .kb-v13-mode-btn,.kb-v13-ifloat-mode-btn{transition:none!important;}",
   // 3.0 刀 18：收纳栏那几颗按钮的 hover，以及「边看边记」挤出挤进的那一段宽度。
   // 后者尤其要停——它本来就是为了让人看清"挤"的过程，而这个设置的意思正是别动。
+  // 3.0 刀 23：收纳方框的悬停闪烁。**这一条尤其要停**——它是纯粹的强调动画，
+  // 而这个设置的意思正是「别动」。框本身仍然画着，只是不闪。
+  "  .kb-v13-sbox-flash{animation:none!important;border-color:rgba(255,210,80,1)!important;}",
   "  .kb-v13-dock-name,.kb-v13-dock-drop,.kb-v13-dock-add,.kb-v13-dock-ok,.kb-v13-dock-cancel,",
   "  .kb-v13-desk-dock,.kb-v13-desk-open,.kb-v13-desk-webbtn,.kb-v13-reader-side{transition:none!important;}",
   "}",
@@ -2160,5 +2208,6 @@ export const CSS = BASE.concat(
   // 基础那条 `.kb-v13-reader-side` 同优先级，靠"后到的赢"把 `flex-basis` 压下去。
   // 挪到 READER 前面的话，收起会静默失效（屏幕上什么都不发生）。
   READER_DOCK,
+  STORY_BOXES,
   REDUCED_MOTION
 ).join("");
