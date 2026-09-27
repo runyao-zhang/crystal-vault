@@ -313,6 +313,9 @@ function sanitizeBoxes(raw) {
       paths,
       x: bx === null ? 40 : bx,
       y: by === null ? 40 : by,
+      // 手动框的大小是**用户自己定的**（拍板的 B），所以它和 x/y 一样必须活着。
+      w: num(b.w, 360),
+      h: num(b.h, 260),
     });
   }
   return out;

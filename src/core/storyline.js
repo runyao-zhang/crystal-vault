@@ -21,6 +21,7 @@ import {
   toggleBox,
   renameBox,
   deleteBox,
+  setBoxRect,
   boxOfPath,
   addCardToBox,
   removeCardFromBox,
@@ -296,6 +297,48 @@ export function renderStorylineStage(ctx, path) {
       if (!t || !t.closest) return;
       // 标题栏上那几颗按钮不是拖动起点（同 desk.js 那条 `closest("button")` 的规矩）
       if (t.closest("button")) return;
+      // 右下角那颗抓手**优先**：它不在标题栏上，不排前面就会被下面的
+      // 「拖动」当成一次整框拖动。
+      const gripEl = t.closest("[data-box-grip]");
+      if (gripEl) {
+        const gid = gripEl.getAttribute("data-box-grip");
+        const gnode = gripEl.closest(".kb-v13-sbox");
+        if (!gnode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          gnode.setPointerCapture(e.pointerId);
+        } catch (err) {
+          /* 合成事件拿不到捕获 */
+        }
+        const gw = parseFloat(gnode.style.width) || 360;
+        const gh = parseFloat(gnode.style.height) || 260;
+        const gx = e.clientX;
+        const gy = e.clientY;
+        let lw = gw;
+        let lh = gh;
+        const rmove = (ev) => {
+          // 下限与 storyboxes 的 MIN_BOX_W/H 对齐：拉不到更小，
+          // 免得一个框被拉成一条线之后再也抓不住那颗抓手。
+          lw = Math.max(260, gw + (ev.clientX - gx));
+          lh = Math.max(180, gh + (ev.clientY - gy));
+          gnode.style.width = lw + "px";
+          gnode.style.height = lh + "px";
+        };
+        const rup = () => {
+          ctx.canvas.removeEventListener("pointermove", rmove);
+          try {
+            gnode.releasePointerCapture(e.pointerId);
+          } catch (err) {
+            /* 上面就没捕获成功过 */
+          }
+          setBoxRect(ctx, gid, { w: lw, h: lh });
+        };
+        ctx.canvas.addEventListener("pointermove", rmove);
+        ctx.canvas.addEventListener("pointerup", rup, { once: true });
+        ctx.canvas.addEventListener("pointercancel", rup, { once: true });
+        return;
+      }
       const barEl = t.closest(".kb-v13-sbox-bar");
       const node = barEl && barEl.closest(".kb-v13-sbox");
       const id = node && node.getAttribute("data-box");
@@ -322,9 +365,14 @@ export function renderStorylineStage(ctx, path) {
       const bx = parseFloat(node.style.left) || 0;
       const by = parseFloat(node.style.top) || 0;
 
+      let lastDx = 0;
+      let lastDy = 0;
       const move = (ev) => {
         const dx = ev.clientX - sx;
         const dy = ev.clientY - sy;
+        lastDx = dx;
+        lastDy = dy;
+        // 卡片：晶体框和手动框都跟着走（用户 Q6 拍的是「框和里面的卡一起挪」）
         const l = layoutOf(ctx);
         if (!l.crystalPos) l.crystalPos = {};
         for (const [p, s] of start) l.crystalPos[p] = { x: s.x + dx, y: s.y + dy };
@@ -339,6 +387,11 @@ export function renderStorylineStage(ctx, path) {
           node.releasePointerCapture(e.pointerId);
         } catch (err) {
           /* 上面就没捕获成功过 */
+        }
+        // 手动框的**位置是它自己记的**（用户拍板的 B：框是你画的），得写回去——
+        // 不写的话，重开一次它就跳回建框时的位置。晶体框不用：它的位置是算出来的。
+        if (String(id).indexOf("m:") === 0 && (lastDx || lastDy)) {
+          setBoxRect(ctx, id, { x: bx + lastDx, y: by + lastDy });
         }
         // 落定：立刻写盘，并让顶栏那个「未保存」小点跟上（同 itemdrag 的 end 那条）
         if (ctx.flushViewState) ctx.flushViewState();

@@ -25,6 +25,15 @@ const BOX_PAD = 22;
 const BAR_H = 26;
 /** 收起态的宽度：够写下一个名字。 */
 const COLLAPSED_W = 220;
+/** 手动框的默认尺寸与下限。**框是你画的**，所以它得有个一开始就够大的身子
+ *  ——第一版拿"一张卡那么大"当空框，落点小得几乎拖不进去。 */
+const MIN_BOX_W = 260;
+const MIN_BOX_H = 180;
+const DEFAULT_BOX_W = 360;
+const DEFAULT_BOX_H = 260;
+/** 新框落座的起点。用手动框的个数错开，免得连建两个叠在一起。 */
+const NEW_BOX_X = 60;
+const NEW_BOX_Y = 60;
 
 /** 晶体的 key 用 `c:` 前缀，手动框用 `m:`——两套 id 同一个空间，不会撞。 */
 export const crystalBoxId = (key) => "c:" + key;
@@ -131,9 +140,12 @@ export function boxesOf(ctx, path) {
       paths,
       collapsed: collapsed.has(String(b.id)),
       crystal: false,
-      // 空框没有成员可算包围盒，靠它自己记的坐标落座（建框时写下的）。
-      x: Number.isFinite(bx) ? bx : 60,
-      y: Number.isFinite(by) ? by : 60,
+      // 手动框的几何**全是它自己记的**（用户 09-27 拍板的 B：框是你画的，
+      // 卡片只是归属，框不为迁就它们变形）。没记过就用默认值。
+      x: Number.isFinite(bx) ? bx : NEW_BOX_X,
+      y: Number.isFinite(by) ? by : NEW_BOX_Y,
+      w: Math.max(MIN_BOX_W, Number(b.w) || DEFAULT_BOX_W),
+      h: Math.max(MIN_BOX_H, Number(b.h) || DEFAULT_BOX_H),
     });
   }
   return out;
@@ -180,36 +192,49 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
   const made = new Map();
   if (!boxes.length) return made;
   for (const b of boxes) {
-    const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-    // ⚠️ **空的手动框不能跳过**：看不见它就拖不进去——用户 09-27 报的
-    // 「点 ＋ 框 一点反应都没有」就是这个 `continue` 干的。
-    // 没有成员就算不出包围盒，拿它自己记的坐标造一个假位置顶上，
-    // 尺寸自然就是"一张卡那么大"，正好够当落点。
-    if (!at.length) {
-      if (b.crystal) continue; // 晶体框没成员 = 没那颗子晶体，不画是对的
-      at.push({ x: b.x, y: b.y });
+    // 两种框的几何**来路完全不同**（用户 09-27 拍板的 B）：
+    //   · **手动框** = 你自己画的一个框。位置和大小全由你定（存在框自己身上），
+    //     卡片只是"归属"——**框不会为了迁就它们而变形**。空框和有卡一个样。
+    //   · **晶体框** = 算出来的外壳，跟着里面卡片的包围盒走。它是文件夹长出来的，
+    //     不是谁画的，所以没有"你自己定的大小"这回事。
+    let geo;
+    if (b.crystal) {
+      const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
+      if (!at.length) continue; // 没卡的子晶体 = 没那颗，不画是对的
+      const minX = Math.min(...at.map((p) => p.x));
+      const minY = Math.min(...at.map((p) => p.y));
+      const maxX = Math.max(...at.map((p) => p.x)) + NODE_W;
+      const maxY = Math.max(...at.map((p) => p.y)) + NODE_H;
+      geo = {
+        x: minX - BOX_PAD,
+        y: minY - BOX_PAD - BAR_H,
+        w: maxX - minX + BOX_PAD * 2,
+        h: maxY - minY + BOX_PAD * 2 + BAR_H,
+        cx: (minX + maxX) / 2,
+        cy: (minY + maxY) / 2,
+      };
+    } else {
+      const w = Math.max(MIN_BOX_W, Number(b.w) || MIN_BOX_W);
+      const h = Math.max(MIN_BOX_H, Number(b.h) || MIN_BOX_H);
+      const x = Number.isFinite(Number(b.x)) ? Number(b.x) : MIN_X;
+      const y = Number.isFinite(Number(b.y)) ? Number(b.y) : MIN_Y;
+      geo = { x, y, w, h, cx: x + w / 2, cy: y + BAR_H / 2 + 8 };
     }
-    const minX = Math.min(...at.map((p) => p.x));
-    const minY = Math.min(...at.map((p) => p.y));
-    const maxX = Math.max(...at.map((p) => p.x)) + NODE_W;
-    const maxY = Math.max(...at.map((p) => p.y)) + NODE_H;
 
     const node = el("div", "kb-v13-sbox" + (b.crystal ? " kb-v13-sbox-crystal" : "") + (b.collapsed ? " kb-v13-sbox-collapsed" : ""));
     node.dataset.box = b.id;
     if (b.collapsed) {
-      // 收起：只剩一条标题栏，摆在成员的重心附近——**不摆在包围盒左上角**，
-      // 因为包围盒的尺寸是按展开时的卡算的，收起后那个位置会离得很远。
-      const cx = at.reduce((s, p) => s + p.x, 0) / at.length;
-      const cy = at.reduce((s, p) => s + p.y, 0) / at.length;
-      node.style.left = Math.round(cx) + "px";
-      node.style.top = Math.round(cy) + "px";
+      // 收起：只剩一条标题栏，摆在自己的重心附近——**不摆在矩形左上角**，
+      // 因为矩形可能是按展开时的大小定的，收起后那个位置会离得很远。
+      node.style.left = Math.round(geo.cx) + "px";
+      node.style.top = Math.round(geo.cy) + "px";
       node.style.width = COLLAPSED_W + "px";
       node.style.height = BAR_H + "px";
     } else {
-      node.style.left = minX - BOX_PAD + "px";
-      node.style.top = minY - BOX_PAD - BAR_H + "px";
-      node.style.width = maxX - minX + BOX_PAD * 2 + "px";
-      node.style.height = maxY - minY + BOX_PAD * 2 + BAR_H + "px";
+      node.style.left = geo.x + "px";
+      node.style.top = geo.y + "px";
+      node.style.width = geo.w + "px";
+      node.style.height = geo.h + "px";
     }
 
     const bar = el("div", "kb-v13-sbox-bar");
@@ -236,6 +261,14 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
       bar.appendChild(del);
     }
     node.appendChild(bar);
+    // 手动框右下角那颗抓手：**框是你画的**，所以大小得能自己定（用户拍板的 B）。
+    // 晶体框不给抓手——它的形状是算出来的，拉它没有意义。
+    if (!b.crystal && !b.collapsed) {
+      const grip = el("div", "kb-v13-sbox-grip");
+      grip.setAttribute("data-box-grip", b.id);
+      grip.title = "拖这里改这个框的大小";
+      node.appendChild(grip);
+    }
     host.appendChild(node);
     made.set(b.id, node);
   }
@@ -310,11 +343,31 @@ export function createBox(ctx, paths) {
     id,
     name: "方框 " + (max + 1),
     paths: (paths || []).slice(),
-    x: 40 + (n % 6) * 44,
-    y: 40 + (n % 6) * 44,
+    x: NEW_BOX_X + (n % 6) * 44,
+    y: NEW_BOX_Y + (n % 6) * 44,
+    w: DEFAULT_BOX_W,
+    h: DEFAULT_BOX_H,
   });
   afterWrite(ctx);
   return id;
+}
+
+/**
+ * 改一个**手动框**的位置/大小。**只动框自己**——卡片一张不挪
+ * （用户 09-27 拍板的 B：框是你画的框，卡片只是归属）。
+ */
+export function setBoxRect(ctx, id, rect) {
+  const v = ensure(ctx);
+  if (!v || !id) return;
+  const b = v.boxes.find((x) => String(x.id) === String(id));
+  if (!b) return;
+  if (rect && Number.isFinite(Number(rect.x))) b.x = Number(rect.x);
+  if (rect && Number.isFinite(Number(rect.y))) b.y = Number(rect.y);
+  if (rect && Number.isFinite(Number(rect.w))) b.w = Math.max(MIN_BOX_W, Number(rect.w));
+  if (rect && Number.isFinite(Number(rect.h))) b.h = Math.max(MIN_BOX_H, Number(rect.h));
+  // 拖动过程中**不重画**（那一块可能正拿着指针捕获），所以这里只落盘，
+  // 由调用方自己改 DOM。同 storyline 里那段框拖动。
+  if (ctx.flushViewState) ctx.flushViewState();
 }
 
 export function renameBox(ctx, id, name) {
@@ -399,16 +452,24 @@ export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
   for (let i = boxes.length - 1; i >= 0; i--) {
     const b = boxes[i];
     if (b.collapsed) continue;
-    const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-    // 空框也要能接住拖进来的卡——同 renderBoxes 那条，别在这儿 continue。
-    if (!at.length) {
-      if (b.crystal) continue;
-      at.push({ x: b.x, y: b.y });
+    // 几何**必须和 renderBoxes 用同一套**：那边怎么摆的，这边就怎么判。
+    // 手动框用自己记的矩形（用户 09-27 拍板的 B），晶体框用成员包围盒。
+    let x1, y1, x2, y2;
+    if (b.crystal) {
+      const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
+      if (!at.length) continue;
+      x1 = Math.min(...at.map((p) => p.x)) - BOX_PAD;
+      y1 = Math.min(...at.map((p) => p.y)) - BOX_PAD - BAR_H;
+      x2 = Math.max(...at.map((p) => p.x)) + NODE_W + BOX_PAD;
+      y2 = Math.max(...at.map((p) => p.y)) + NODE_H + BOX_PAD;
+    } else {
+      const w = Math.max(MIN_BOX_W, Number(b.w) || DEFAULT_BOX_W);
+      const h = Math.max(MIN_BOX_H, Number(b.h) || DEFAULT_BOX_H);
+      x1 = b.x;
+      y1 = b.y;
+      x2 = b.x + w;
+      y2 = b.y + h;
     }
-    const x1 = Math.min(...at.map((p) => p.x)) - BOX_PAD;
-    const y1 = Math.min(...at.map((p) => p.y)) - BOX_PAD - BAR_H;
-    const x2 = Math.max(...at.map((p) => p.x)) + NODE_W + BOX_PAD;
-    const y2 = Math.max(...at.map((p) => p.y)) + NODE_H + BOX_PAD;
     if (pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2) return b;
   }
   return null;

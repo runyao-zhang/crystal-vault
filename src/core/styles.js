@@ -2155,6 +2155,14 @@ const STORY_BOXES = [
   "  color:rgba(255,175,165,.85)!important;background-color:transparent!important;",
   "}",
   ".kb-v13-sbox-del:hover{color:#ff8a7a!important;}",
+  // 手动框右下角的抓手（用户 09-27 拍板 B：框是你画的，大小得能自己定）。
+  // ⚠️ **必须 pointer-events:auto**——框整体是 `none`，只有标题栏和这一颗能接事件。
+  ".kb-v13-sbox-grip{",
+  "  position:absolute;right:0;bottom:0;width:18px;height:18px;",
+  "  cursor:nwse-resize;pointer-events:auto;z-index:2;",
+  "  background:linear-gradient(135deg,transparent 46%,rgba(0,210,255,.9) 46%);",
+  "  border-bottom-right-radius:14px;",
+  "}",
   // 悬停那张带黄点的卡时，和它有关联的、正收着的框**绕边闪一圈**（用户第 4 条）。
   // 闪的是边框和一圈光晕，不是把框整个高亮——框可能很大，整块变色会喧宾夺主。
   "@keyframes v13BoxFlash{",
