@@ -79,6 +79,13 @@ export function beginDraft(ctx) {
     // 两处都不报错，只是东西没了。
     linkSides: JSON.parse(JSON.stringify(v.linkSides || {})),
     hiddenLinks: (v.hiddenLinks || []).slice(),
+    // 3.0 刀 23「收纳方框」——**同上两条，而且这一组更险**：
+    // `commitDraft` 今天写的是 `{ ...state.view, ...draft }`（展开），漏掉的键
+    // 会被原样带过去、看不出问题；哪天有人把它改成 `state.view = { ...draft }`，
+    // 用户建的每一个框**当场静默消失**。补进来才是真安全。
+    boxes: (v.boxes || []).map((b) => ({ ...b, paths: (b.paths || []).slice() })),
+    boxNames: { ...(v.boxNames || {}) },
+    collapsedBoxes: (v.collapsedBoxes || []).slice(),
   };
 }
 
@@ -98,6 +105,11 @@ export function isDraftDirty(ctx) {
     // 3.0 刀 13 同理：蓝线的接法和藏起来的卡也是"我刚摆的东西"。
     s: o.linkSides || {},
     h: o.hiddenLinks || [],
+    // 3.0 刀 23：建框 / 改名 / 收起也是「我刚摆的东西」——不算上的话，
+    // 屏幕右下角那个「未保存」小点会说假话。
+    x: o.boxes || [],
+    xn: o.boxNames || {},
+    xc: o.collapsedBoxes || [],
   });
   return JSON.stringify(pick(a)) !== JSON.stringify(pick(b));
 }

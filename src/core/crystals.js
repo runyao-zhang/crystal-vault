@@ -159,6 +159,11 @@ export function clearStoryLayers(ctx) {
   stage.querySelectorAll(".kb-v13-snode").forEach((el) => el.remove());
   stage.querySelectorAll(".kb-v13-slinks").forEach((el) => el.remove());
   stage.querySelectorAll(".kb-v13-shandles").forEach((el) => el.remove());
+  // 3.0 刀 23 的**收纳方框**。上面那段说的就是这个形状：故事线节点直接挂在
+  // 世界层上、没人清就堆着——**框是同一类东西，必须一起清**。
+  // 漏了它的表现是「每重画一次，方框就多叠一层」，而同一次重画里卡片是正常的，
+  // 所以特别难往这上面想。
+  stage.querySelectorAll(".kb-v13-sbox").forEach((el) => el.remove());
   // 连线层的引用也一起作废：元素没了，引用还留着的话下一帧会往一棵摘下来的树上挂
   ctx._sLink = null;
   ctx._sHandle = null;

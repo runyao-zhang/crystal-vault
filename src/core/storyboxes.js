@@ -52,7 +52,16 @@ function cardsUnderPath(ctx, path) {
 
 /** 视图状态里那张名字表。收起表和框表同理——**读防御，写前先确保形状**。 */
 function view(ctx) {
-  const v = ctx && ctx.state ? ctx.state.view : null;
+  const st = ctx && ctx.state ? ctx.state : null;
+  if (!st) return null;
+  // ⚠️ **走草稿，不走 state.view** —— 和 `cardLinks` / `crystalPos` / `linkSides`
+  // 那些布局状态同一条规矩（`canvas.js` 的 `layoutOf` 就是 `draft || view`）。
+  //
+  // 为什么这条是硬的：进故事线（含阅读器里那扇结构窗）就是进相机档，那一刻
+  // `beginDraft` 会开一份草稿；关库时 `commitDraft` 把草稿铺回 `state.view`。
+  // 建框只写 `state.view` 的话，提交那一刻会被**草稿里那份旧快照盖掉**——
+  // 表现是「在故事线里建的框，一关库就没了」，而且不报错。
+  const v = st.draft || st.view;
   return v && typeof v === "object" ? v : null;
 }
 

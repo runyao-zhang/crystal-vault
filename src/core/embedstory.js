@@ -460,7 +460,9 @@ export function createEmbedStory(ctx, opts = {}) {
     // 在 crystals.js 的 clearStoryLayers——那是给晶体库那一屏用的，它清的是
     // `ctx.stage`。这里必须自己清，否则每换一次晶体，节点就在上一次的基础上
     // 再叠一层，屏幕上看着像「卡片翻倍」。
-    for (const sel of [".kb-v13-snode", ".kb-v13-slinks", ".kb-v13-shandles"]) {
+    // ⚠️ **每加一种画在舞台上的东西，这里就要多一条**（3.0 刀 23 的收纳方框
+    // 就是漏在这儿，画面上是「方框越画越多」）。
+    for (const sel of [".kb-v13-snode", ".kb-v13-slinks", ".kb-v13-shandles", ".kb-v13-sbox"]) {
       stage.querySelectorAll(sel).forEach((el) => el.remove());
     }
     fake._sLink = null;
