@@ -25,6 +25,14 @@ The reader has two layouts. **Grid** spreads N pages across one screen (for scan
 
 - **The right-hand column tucks away too.** The same button squeezes the notes column out of the way when you want to read wider.
 
+### ＋ 页: Markdown documents are paginated by line
+
+Each press of 「**＋ 页**」 (Add page) puts the **next slice** of the document on the desk. For a Markdown document a "slice" is a **range of lines** — it picks up at the last window's ending line and runs 40 lines further.
+
+To change which lines a given window shows, edit the two boxes in its title bar — 「**起始行**」 (start line) and 「**结束行**」 (end line) — and **press Enter when you are done**. The 「共 N 行」 label next to them is the file's current total line count; use it as your ruler when picking a range.
+
+> The same rule applies to the PDF / image windows: their title-bar box is a **page number**, and it is **also Enter-to-commit**.
+
 ## The Structure window: build structure while you read
 
 This is the half that pairs with the desk.
