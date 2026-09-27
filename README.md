@@ -74,6 +74,17 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 > One detail: the **card right-click is opened by 写 mode**. In 看 mode, right-clicking a card still does the old thing (enters link mode). But **once a card is hidden, right-clicking it works in either mode** — otherwise switching back to 看 would leave the hidden state reachable only from the top-bar button.
 
+### Boxes: tidy a region away without pretending the links are gone
+
+The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically**, named after its folder; a box can be **renamed** (click the name) and **collapsed** (click the little triangle on its left).
+
+Collapsing puts the cards inside away together with the lines running to them — **but "there is still something in there" is never lost**:
+
+- any outside card that still has a blue line into a collapsed box gets a **yellow filled dot** in its corner;
+- hover that card and the collapsed boxes it relates to **flash around their edge**.
+
+Without that, collapsing would read as *"my links are gone"* when you never deleted anything. While a box is open, the cards inside link outward with blue lines as usual — **across levels included**.
+
 ## Read-and-jot: turn what you read into a card on the spot
 
 The column on the right of the reader. Fill in **name / concept / source / body** and you have a card — without leaving the page.
