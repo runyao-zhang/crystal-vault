@@ -2126,15 +2126,18 @@ const STORY_BOXES = [
   // 单独把 `pointer-events` 打开。不这么做的话，框会盖住卡片，点不着卡。
   ".kb-v13-sbox{",
   "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:0;pointer-events:none;",
-  "  border:1.5px dashed rgba(0,200,255,.4);background:rgba(0,120,200,.06);",
+  // ⚠️ 用户 09-27：「颜色太浅」。第一版是 .4 透明度的细虚线，在库自绘的深底上
+  // 几乎看不见。**深色底上要看清，靠的是"亮 + 粗"，不是"淡 + 细"**——
+  // 透明度提到 .85、线宽到 2px，底色也抬一档，让它一眼是一块地方而不是一道痕。
+  "  border:2px dashed rgba(0,210,255,.85);background:rgba(0,140,220,.1);",
   "}",
   // 晶体框用暖色点线，和手动框分得开——「这个是文件夹自己长出来的」
-  ".kb-v13-sbox-crystal{border-style:dotted;border-color:rgba(255,196,120,.4);background:rgba(255,180,90,.05);}",
-  ".kb-v13-sbox-collapsed{border-style:solid;background:rgba(0,120,200,.16);}",
+  ".kb-v13-sbox-crystal{border-style:dotted;border-color:rgba(255,190,110,.85);background:rgba(255,170,80,.09);}",
+  ".kb-v13-sbox-collapsed{border-style:solid;background:rgba(0,140,220,.22);}",
   ".kb-v13-sbox-bar{",
   "  display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;",
-  "  font-family:system-ui,sans-serif;font-size:11px;color:rgba(200,228,255,.88);",
-  "  pointer-events:auto;",
+  "  font-family:system-ui,sans-serif;font-size:11px;color:rgba(224,240,255,.96);",
+  "  font-weight:600;pointer-events:auto;",
   "}",
   ".kb-v13-sbox-toggle{",
   "  cursor:pointer;border:0;padding:0 2px;font-size:11px;line-height:1;",
