@@ -283,6 +283,73 @@ export function renderStorylineStage(ctx, path) {
     );
   }
 
+  // 3.0 刀 25（用户 09-27 拍的 Q6=能）：**拖框的标题栏 = 整组一起挪**。
+  //
+  // ⚠️ 拖动过程中**绝不能重画框**：那一块正拿着指针捕获，一换掉拖动当场断在半路
+  //    （同 `paintStoryLines` 顶上那条「绝不能在这里重建节点」）。所以框自己挪自己，
+  //    卡片走 `applyStorylinePositions`（**它只改 left/top，不动 DOM 结构**）。
+  if (!ctx.canvas._kbBoxDrag) {
+    ctx.canvas._kbBoxDrag = true;
+    ctx.canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const t = e.target;
+      if (!t || !t.closest) return;
+      // 标题栏上那几颗按钮不是拖动起点（同 desk.js 那条 `closest("button")` 的规矩）
+      if (t.closest("button")) return;
+      const barEl = t.closest(".kb-v13-sbox-bar");
+      const node = barEl && barEl.closest(".kb-v13-sbox");
+      const id = node && node.getAttribute("data-box");
+      if (!id) return;
+      const cp = ctx.state.crystalPath || [];
+      const box = boxesOf(ctx, cp).find((b) => String(b.id) === String(id));
+      if (!box || !box.paths.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        node.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* 合成事件拿不到捕获，退化成普通监听也能用 */
+      }
+
+      const layout = layoutFor(ctx, cp);
+      const now = new Map();
+      for (const c of cardsUnder(ctx, cp)) now.set(c.path, nodePosOf(ctx, c, layout));
+      const start = new Map();
+      for (const p of box.paths) start.set(p, { ...(now.get(p) || { x: 0, y: 0 }) });
+
+      const sx = e.clientX;
+      const sy = e.clientY;
+      const bx = parseFloat(node.style.left) || 0;
+      const by = parseFloat(node.style.top) || 0;
+
+      const move = (ev) => {
+        const dx = ev.clientX - sx;
+        const dy = ev.clientY - sy;
+        const l = layoutOf(ctx);
+        if (!l.crystalPos) l.crystalPos = {};
+        for (const [p, s] of start) l.crystalPos[p] = { x: s.x + dx, y: s.y + dy };
+        node.style.left = bx + dx + "px";
+        node.style.top = by + dy + "px";
+        applyStorylinePositions(ctx, cp);
+        redrawStoryLines(ctx);
+      };
+      const up = () => {
+        ctx.canvas.removeEventListener("pointermove", move);
+        try {
+          node.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          /* 上面就没捕获成功过 */
+        }
+        // 落定：立刻写盘，并让顶栏那个「未保存」小点跟上（同 itemdrag 的 end 那条）
+        if (ctx.flushViewState) ctx.flushViewState();
+        if (ctx.refreshStageUi) ctx.refreshStageUi();
+      };
+      ctx.canvas.addEventListener("pointermove", move);
+      ctx.canvas.addEventListener("pointerup", up, { once: true });
+      ctx.canvas.addEventListener("pointercancel", up, { once: true });
+    });
+  }
+
   const svg = ensureLinkLayer(ctx);
   paintStoryLines(ctx, svg, cards, path, layout);
 
