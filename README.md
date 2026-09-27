@@ -2,8 +2,15 @@
 
 Turn a folder of Markdown cards into a **living crystal vault** — a place where you can see the structure of what you know, follow the links between ideas, and test yourself on what you wrote.
 
-<img width="1917" height="1016" alt="image" src="https://github.com/user-attachments/assets/54550694-81b4-418f-a394-efd485701c1a" />
-
+<!-- ⚠️ **Do not put a `height` attribute on this image.**
+     GitHub's web editor always inserts both `width="…" height="…"` when you drag
+     an image in. With both present the browser treats them as the *display* size,
+     and Obsidian's plugin detail pane only clamps the width (`max-width:100%`) —
+     nothing resets the height — so the height stays pinned at 1016px while the
+     width shrinks and the picture comes out **squashed**.
+     Width alone: the browser derives the height from the intrinsic ratio, so it
+     scales cleanly at any container size. -->
+<img width="1917" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/54550694-81b4-418f-a394-efd485701c1a" />
 
 Its real home, though, is the **literature reader**: read PDFs, images and Markdown on one side, and build the structure out of what you read on the other. Finish a chapter and the chapter's structure is already there. The reader's **desk** lays it out as draggable, resizable windows; the **Structure window** keeps the vault's structure beside the page you are reading, so you never have to leave it.
 

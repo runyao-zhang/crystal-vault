@@ -1,8 +1,16 @@
 # Crystal Vault（晶体库）
 
 把一文件夹的 Markdown 卡片变成一座**能看的知识晶体库**。
+
 截图预览：
-<img width="1917" height="1016" alt="image" src="https://github.com/user-attachments/assets/0a4f224e-f3fc-4a80-8a1e-ea524075750f" />
+
+<!-- ⚠️ **不要给这张图写 `height` 属性。**
+     GitHub 的网页编辑器拖图进来时会自动塞上 `width="…" height="…"` 两个；
+     两个都给的话，浏览器把它们当成**显示尺寸**，而 Obsidian 的插件详情页只用
+     `max-width:100%` 压宽度、没有任何规则去动 height——于是高度死守原值
+     （1016px）、宽度被压窄，图当场被**压扁**。
+     只给 width：高度由浏览器按原图比例算出来，容器怎么窄都不变形。 -->
+<img width="1917" alt="晶体库概览" src="https://github.com/user-attachments/assets/0a4f224e-f3fc-4a80-8a1e-ea524075750f" />
 
 而它真正的战场是**文献模式**：一边读 PDF / 图片 / Markdown，一边把读到的东西当场立成结构——
 读完一章，那一章的结构也就搭好了。**桌面**把这些摆成一桌能拖能缩的窗，
