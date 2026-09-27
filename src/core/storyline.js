@@ -360,16 +360,35 @@ export function renderStorylineStage(ctx, path) {
       const start = new Map();
       for (const p of box.paths) start.set(p, { ...(now.get(p) || { x: 0, y: 0 }) });
 
-      const sx = e.clientX;
-      const sy = e.clientY;
+      // ⚠️ **屏幕位移必须换算成世界位移。** 卡片那条路走 `itemdrag`，它做的
+      // 就是这件事；这里第一版直接拿 `ev.clientX - sx`（屏幕像素）当世界坐标用，
+      // 于是相机只要不是 1:1，**框和卡片就会走不同的距离**——用户 09-27 报的
+      // 「鼠标拖相同距离，框比卡片走得短」正是这个。量两次相减，与卡片那条路对齐。
+      const toWorld = (x, y) => {
+        const pz = ctx._panzoom;
+        if (pz && typeof pz.clientToWorld === "function") {
+          try {
+            return pz.clientToWorld(x, y);
+          } catch (err) {
+            /* 拿不到就当 1:1，退化成旧行为，别让拖动整个哑掉 */
+          }
+        }
+        return { x, y };
+      };
+      const w0 = toWorld(e.clientX, e.clientY);
+      // 框**模型里**的位置（不是 DOM 的 left/top）——收起态那个条摆在重心上，
+      // 拿它当原点是错的，见 up 里那段。
+      const mx = Number(box.x);
+      const my = Number(box.y);
       const bx = parseFloat(node.style.left) || 0;
       const by = parseFloat(node.style.top) || 0;
 
       let lastDx = 0;
       let lastDy = 0;
       const move = (ev) => {
-        const dx = ev.clientX - sx;
-        const dy = ev.clientY - sy;
+        const w1 = toWorld(ev.clientX, ev.clientY);
+        const dx = w1.x - w0.x;
+        const dy = w1.y - w0.y;
         lastDx = dx;
         lastDy = dy;
         // 卡片：晶体框和手动框都跟着走（用户 Q6 拍的是「框和里面的卡一起挪」）
@@ -390,8 +409,12 @@ export function renderStorylineStage(ctx, path) {
         }
         // 手动框的**位置是它自己记的**（用户拍板的 B：框是你画的），得写回去——
         // 不写的话，重开一次它就跳回建框时的位置。晶体框不用：它的位置是算出来的。
-        if (String(id).indexOf("m:") === 0 && (lastDx || lastDy)) {
-          setBoxRect(ctx, id, { x: bx + lastDx, y: by + lastDy });
+        // ⚠️ 写回的是 **模型里的 x/y + 位移**，不是 DOM 的 `left/top` + 位移。
+        // 收起态的条摆在**重心**上，拿它当原点的话：框的矩形会跳到一个完全不同的
+        // 位置，而卡片只挪了 delta——**展开一看，卡片全跑到框外面**。
+        // 用户 09-27 报的就是这个。
+        if (String(id).indexOf("m:") === 0 && (lastDx || lastDy) && Number.isFinite(mx)) {
+          setBoxRect(ctx, id, { x: mx + lastDx, y: (Number.isFinite(my) ? my : 0) + lastDy });
         }
         // 落定：立刻写盘，并让顶栏那个「未保存」小点跟上（同 itemdrag 的 end 那条）
         if (ctx.flushViewState) ctx.flushViewState();
