@@ -204,6 +204,17 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
     const count = el("span", "kb-v13-sbox-count");
     count.textContent = b.paths.length + " 张";
     bar.append(toggle, name, count);
+    // 只有**手动框**给一颗 ✕。晶体框删不掉——它是文件夹长出来的，
+    // 要"删"得去删那个文件夹，而那是「删除晶体」，另一件事、另一个按钮。
+    if (!b.crystal) {
+      const del = el("button", "kb-v13-sbox-del", "✕");
+      del.type = "button";
+      // ⚠️ 这句话必须写出来。用户按这颗之前最怕的就是「这一下会不会把我的卡弄没」——
+      // 而答案是**不会**：框只是个分组，卡片一张都不动。
+      del.title = "删掉这个框。卡片一张都不会动——框只是个分组。";
+      del.setAttribute("data-box-del", b.id);
+      bar.appendChild(del);
+    }
     node.appendChild(bar);
     host.appendChild(node);
     made.set(b.id, node);
@@ -284,6 +295,90 @@ export function renameBox(ctx, id, name) {
   if (!n) return;
   v.boxNames[String(id)] = n;
   afterWrite(ctx);
+}
+
+/** 一张卡现在在哪个框里（不在任何框里就回 null）。**只认手动框**——
+ *  晶体框是算出来的，往它里面"加卡"没有意义（成员由文件夹决定）。 */
+export function boxOfPath(ctx, cardPath) {
+  const p = String(cardPath || "");
+  if (!p) return null;
+  for (const b of manualOf(ctx)) {
+    if ((b.paths || []).indexOf(p) >= 0) return String(b.id);
+  }
+  return null;
+}
+
+/**
+ * 把一张卡加进某个手动框。**已经在别的框里就先挪出来**（用户拍的：一张卡只属于一个框）。
+ *
+ * ⚠️ 这里**不碰磁盘**：框是纯视图分组（用户 09-27 拍的 Q3=B）。
+ */
+export function addCardToBox(ctx, boxId, cardPath) {
+  const v = ensure(ctx);
+  if (!v || !boxId || !cardPath) return;
+  const id = String(boxId);
+  const p = String(cardPath);
+  for (const b of v.boxes) {
+    const i = (b.paths || []).indexOf(p);
+    if (i >= 0 && String(b.id) !== id) b.paths.splice(i, 1);
+  }
+  const box = v.boxes.find((b) => String(b.id) === id);
+  if (!box) return;
+  if (!Array.isArray(box.paths)) box.paths = [];
+  if (box.paths.indexOf(p) < 0) box.paths.push(p);
+  afterWrite(ctx);
+}
+
+/** 把一张卡移出它所在的框。**只动分组**——卡本身一个字没动。 */
+export function removeCardFromBox(ctx, cardPath) {
+  const v = ensure(ctx);
+  if (!v || !cardPath) return false;
+  const p = String(cardPath);
+  let hit = false;
+  for (const b of v.boxes) {
+    const i = (b.paths || []).indexOf(p);
+    if (i >= 0) {
+      b.paths.splice(i, 1);
+      hit = true;
+    }
+  }
+  if (hit) afterWrite(ctx);
+  return hit;
+}
+
+/** 删掉一个框。**只删框，卡片一张不动**——这句话要写在按钮的 title 上。 */
+export function deleteBox(ctx, id) {
+  const v = ensure(ctx);
+  if (!v || !id) return;
+  const s = String(id);
+  v.boxes = v.boxes.filter((b) => String(b.id) !== s);
+  delete v.boxNames[s];
+  const i = v.collapsedBoxes.indexOf(s);
+  if (i >= 0) v.collapsedBoxes.splice(i, 1);
+  afterWrite(ctx);
+}
+
+/**
+ * 世界坐标上有没有落在某个框里。`hitBoxAt` 用**框的矩形**判，不用 DOM 的
+ * `elementFromPoint`——框是 `pointer-events:none`，命中测试永远轮不到它。
+ *
+ * @param {Array} boxes 同 renderBoxes 用的那一份（里面有算好的几何吗？没有——
+ *   所以这里按 `pos` + NODE_W/NODE_H 重算一次，与 renderBoxes 同一套算法）。
+ */
+export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
+  if (!pt) return null;
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const b = boxes[i];
+    if (b.collapsed) continue;
+    const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
+    if (!at.length) continue;
+    const x1 = Math.min(...at.map((p) => p.x)) - BOX_PAD;
+    const y1 = Math.min(...at.map((p) => p.y)) - BOX_PAD - BAR_H;
+    const x2 = Math.max(...at.map((p) => p.x)) + NODE_W + BOX_PAD;
+    const y2 = Math.max(...at.map((p) => p.y)) + NODE_H + BOX_PAD;
+    if (pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2) return b;
+  }
+  return null;
 }
 
 export function toggleBox(ctx, id) {

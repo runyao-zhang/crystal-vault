@@ -2146,6 +2146,12 @@ const STORY_BOXES = [
   "}",
   ".kb-v13-sbox-name:hover{background:rgba(255,255,255,.12);}",
   ".kb-v13-sbox-count{opacity:.55;margin-left:auto;}",
+  // 手动框那颗 ✕。**只删框，不碰卡片**——title 里写着，别去掉。
+  ".kb-v13-sbox-del{",
+  "  cursor:pointer;border:0;padding:0 3px;font-size:10px;line-height:1;",
+  "  color:rgba(255,175,165,.85)!important;background-color:transparent!important;",
+  "}",
+  ".kb-v13-sbox-del:hover{color:#ff8a7a!important;}",
   // 悬停那张带黄点的卡时，和它有关联的、正收着的框**绕边闪一圈**（用户第 4 条）。
   // 闪的是边框和一圈光晕，不是把框整个高亮——框可能很大，整块变色会喧宾夺主。
   "@keyframes v13BoxFlash{",

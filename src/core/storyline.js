@@ -12,7 +12,20 @@ import { bindItemDrag } from "./itemdrag.js";
 import { runLayout, layeredLayout, NODE_W, NODE_H } from "./storylayout.js";
 // 3.0 刀 23「收纳方框」。整块逻辑在那个文件里，这里只开三个口子：
 // 渲染时算一次框、把它们画到卡片**后面**，画线时问一句「这条边是不是通进收起来的框」。
-import { boxesOf, memberIndexOf, collapsedSet, renderBoxes, bindBoxHover, toggleBox, renameBox } from "./storyboxes.js";
+import {
+  boxesOf,
+  memberIndexOf,
+  collapsedSet,
+  renderBoxes,
+  bindBoxHover,
+  toggleBox,
+  renameBox,
+  deleteBox,
+  boxOfPath,
+  addCardToBox,
+  removeCardFromBox,
+  hitBoxAt,
+} from "./storyboxes.js";
 import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
@@ -247,6 +260,13 @@ export function renderStorylineStage(ctx, path) {
           e.stopPropagation();
           e.preventDefault();
           toggleBox(ctx, tg.getAttribute("data-box-toggle"));
+          return;
+        }
+        const dl = t.closest("[data-box-del]");
+        if (dl) {
+          e.stopPropagation();
+          e.preventDefault();
+          deleteBox(ctx, dl.getAttribute("data-box-del"));
           return;
         }
         const nm = t.closest("[data-box-name]");
@@ -594,6 +614,35 @@ export function bindStorylineDrag(ctx) {
       const l = layoutOf(c);
       if (l.crystalPos) l.crystalPos[path] = p;
       redrawStoryLines(c);
+    },
+    // 3.0 刀 24：松手那一刻判一次归属——**拖进框 / 拖出框都走这一下**
+    // （用户 09-27 拍的：拖进去 = 加入，拖到框外 = 移出）。
+    //
+    // ⚠️ `onDrop` 拿到的是 `(ctx, key)`，**没有坐标**；但它在 `writePos` **之后**
+    // 才跑，所以位置已经落定了，回头从 `layoutOf().crystalPos` 读就行
+    // （`modules.js` 的 `dropCrystal` 就是这条现成的路子）。
+    //
+    // 判的是**卡片中心**而不是左上角：`crystalPos` 存的是左上角，
+    // 而用户眼里"这张卡在不在框里"看的是整张卡。
+    onDrop: (c, path) => {
+      const cp = c.state.crystalPath || [];
+      const boxes = boxesOf(c, cp);
+      if (!boxes.length) return;
+      const layout = layoutFor(c, cp);
+      const pos = new Map();
+      for (const card of cardsUnder(c, cp)) pos.set(card.path, nodePosOf(c, card, layout));
+      const at = pos.get(path);
+      if (!at) return;
+      const center = { x: at.x + NODE_W / 2, y: at.y + NODE_H / 2 };
+      const hit = hitBoxAt(boxes, pos, NODE_W, NODE_H, center);
+      const cur = boxOfPath(c, path);
+      if (hit) {
+        // 落进某个框：已经在**这个**框里就什么都不做（免得每次拖都写一次盘）
+        if (String(hit.id) !== String(cur)) addCardToBox(c, hit.id, path);
+        return;
+      }
+      // 落在所有框外面：原本在框里的话，就是"拖出来 = 移出"
+      if (cur) removeCardFromBox(c, path);
     },
   });
 }

@@ -8,6 +8,8 @@ import { sanitizeViewState, collectViewState, defaultViewState, forgetScreen } f
 import { sanitizePrefs, collectPrefs } from "./prefs.js";
 import { EL, toStr } from "./dom.js";
 import { beginInlineRename } from "./inlinerename.js";
+// 3.0 刀 24：手动收纳方框的建 / 改名。渲染那一半在 storyline.js 里，这里只要这两颗。
+import { createBox, renameBox } from "./storyboxes.js";
 import { CSS } from "./styles.js";
 import { createMetrics } from "./layout.js";
 import { createModel, applyCardFields } from "./model.js";
@@ -613,6 +615,10 @@ function refreshStageUi(ctx) {
     const hiddenN = hiddenCardSet(ctx).size;
     ctx.showAllBtn.style.display = stage === "storyline" && hiddenN > 0 ? "" : "none";
   }
+  // ⚠️ 「＋ 框」与上面那颗**恰好相反**：只要在故事线里就一直摆着。
+  // 它不能在"已经有框"的时候才出现——否则用户永远建不出第一个框，而这一条
+  // 用户 09-27 是原话问出来的（「如果这个结构窗没有收纳方框怎么办，+框到底在哪」）。
+  if (ctx.addBoxBtn) ctx.addBoxBtn.style.display = stage === "storyline" ? "" : "none";
 
   // 3.0 刀 9-C「文献」那颗。挂起中（人刚从它切去看故事线）换个说法再说一遍——
   // 只说「文献」的话，用户没法知道点下去是「新开一份」还是「回到刚才那份」，
@@ -798,6 +804,13 @@ export async function mount({
     // 与上面那颗同一条规矩：只在真有东西可显的时候才出场。
     '<button type="button" class="kb-v13-hidelinks-btn" id="kb-fs-showall" style="display:none"' +
     ' title="把右键藏起来的那些卡片的入链出链全部显示回来。">显示全部</button>' +
+    // 3.0 刀 24：「＋ 框」——建一个手动收纳方框。
+    // ⚠️ 与上面那颗**恰好相反**：那颗是"真有东西可显才出场"，这颗**必须一直在**。
+    // 用户原话：「如果这个结构窗没有收纳方框怎么办，+框到底在哪」——入口在需要它
+    // 的那一刻不可见，就是 09-20 那次「右键只有金色线」的同一个错。
+    '<button type="button" class="kb-v13-hidelinks-btn" id="kb-fs-addbox" style="display:none"' +
+    ' title="建一个收纳方框：把几张卡归到一起，可以改名、可以收起。' +
+    '建完之后把卡片拖进去就归它了；拖到框外就移出来。框只是分组——删框、移出，都不会动你的卡片。">＋ 框</button>' +
     // 3.0 刀 17：**故事线的看 / 写两档**。与结构窗那颗「画线：看 / 写」同义同款。
     //
     // 默认「看」——写模式下拖一根线就是一次**真写盘**，而这一屏上满是卡片，
@@ -1019,6 +1032,18 @@ export async function mount({
   });
   // 3.0 刀 13。不用再手动重画——showAllHidden 内部走 ctx.refreshStoryline
   // （= renderCrystals）整屏重画，卡片上那个「线已藏」角标才会跟着掉。
+  // 3.0 刀 24：建一个手动收纳方框。建完**立刻进改名态**——和「+ 方框」那颗
+  // 同一条规矩（刚建出来的东西停在一个能改的名字上，用户才不用再找一次怎么改）。
+  fs.querySelector("#kb-fs-addbox").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const id = createBox(ctx, []);
+    if (!id) return;
+    const nameEl = ctx.canvas.querySelector(
+      '.kb-v13-sbox[data-box="' + id + '"] .kb-v13-sbox-name'
+    );
+    if (nameEl) beginInlineRename(nameEl, nameEl.textContent, (name) => renameBox(ctx, id, name));
+  });
+
   fs.querySelector("#kb-fs-showall").addEventListener("click", (e) => {
     e.stopPropagation();
     showAllHidden(ctx);
@@ -1169,6 +1194,7 @@ export async function mount({
     addModBtn: fs.querySelector("#kb-fs-addmod"),
     hideLinksBtn: fs.querySelector("#kb-fs-hidelinks"),
     showAllBtn: fs.querySelector("#kb-fs-showall"),
+    addBoxBtn: fs.querySelector("#kb-fs-addbox"),
     linkWriteBtn: fs.querySelector("#kb-fs-linkwrite"),
     undoBtn: fs.querySelector("#kb-fs-undo"),
     statusEl: fs.querySelector("#kb-fs-status"),

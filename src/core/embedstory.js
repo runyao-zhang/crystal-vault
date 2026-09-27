@@ -33,6 +33,7 @@
 // 在哪儿拖都一样。所以结构窗里的改动会同步出现在晶体库那一屏。
 
 import { EL } from "./dom.js";
+import { createBox } from "./storyboxes.js";
 import { bindPanZoom } from "./panzoom.js";
 import { createStoryWrite } from "./storywrite.js";
 import {
@@ -248,7 +249,21 @@ export function createEmbedStory(ctx, opts = {}) {
   showAllBtn.addEventListener("click", () => showAllHidden(fake));
 
   const hint = EL("span", "kb-v13-embedhint");
-  bar.append(crystalBtn, modeBtn, marqueeBtn, delBtn, showAllBtn, hint);
+  // 3.0 刀 24（用户 09-27）：「＋ 框」——建一个**手动收纳方框**。
+  //
+  // ⚠️ **它不能"有框的时候才出现"**。用户的原话就是「如果这个结构窗没有收纳方框
+  // 怎么办，+框到底在哪」——入口在需要它的那一刻恰好不可见，是 09-20 那次
+  // 「右键只有金色线」的同一个错。所以只要在故事线里，它就一直摆着。
+  const addBoxBtn = EL("button", "kb-v13-embedact");
+  addBoxBtn.type = "button";
+  addBoxBtn.textContent = "＋ 框";
+  addBoxBtn.title =
+    "建一个收纳方框：把几张卡归到一起，可以改名、可以收起。\n" +
+    "建完之后**把卡片拖进去**就归它了；拖到框外就移出来。\n" +
+    "框只是分组——删框、移出，都**不会动你的卡片**。";
+  addBoxBtn.addEventListener("click", () => createBox(fake, []));
+
+  bar.append(crystalBtn, modeBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, hint);
   stage.appendChild(world);
   root.append(stage, bar);
 
