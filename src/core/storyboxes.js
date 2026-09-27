@@ -113,14 +113,27 @@ export function boxesOf(ctx, path) {
   const live = new Set();
   for (const c of cardsUnderPath(ctx, path)) live.add(c.path);
   for (const b of manualOf(ctx)) {
+    // ⚠️ **空框照样要画**（`paths` 是空数组也放行）。
+    //
+    // 这一条是踩出来的，而且它把整条路堵死了：建完框要能把卡**拖进去**，
+    // 而拖进去的前提是屏幕上**看得见那个框**。第一版这里写的是
+    // `if (!paths.length) continue;`（理由是"一个空框是个没有解释的方印"），
+    // 于是「点 ＋ 框 一点反应都没有」——用户 09-27 报的正是这个。
+    //
+    // 晶体框不一样：它是算出来的，没卡就等于没那颗子晶体，跳过是对的
+    // （上面那个 `continue` 留着）。
     const paths = (Array.isArray(b.paths) ? b.paths : []).filter((p) => live.has(p));
-    if (!paths.length) continue;
+    const bx = Number(b.x);
+    const by = Number(b.y);
     out.push({
       id: String(b.id),
       name: names[b.id] || String(b.name || "方框"),
       paths,
       collapsed: collapsed.has(String(b.id)),
       crystal: false,
+      // 空框没有成员可算包围盒，靠它自己记的坐标落座（建框时写下的）。
+      x: Number.isFinite(bx) ? bx : 60,
+      y: Number.isFinite(by) ? by : 60,
     });
   }
   return out;
@@ -168,7 +181,14 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
   if (!boxes.length) return made;
   for (const b of boxes) {
     const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-    if (!at.length) continue;
+    // ⚠️ **空的手动框不能跳过**：看不见它就拖不进去——用户 09-27 报的
+    // 「点 ＋ 框 一点反应都没有」就是这个 `continue` 干的。
+    // 没有成员就算不出包围盒，拿它自己记的坐标造一个假位置顶上，
+    // 尺寸自然就是"一张卡那么大"，正好够当落点。
+    if (!at.length) {
+      if (b.crystal) continue; // 晶体框没成员 = 没那颗子晶体，不画是对的
+      at.push({ x: b.x, y: b.y });
+    }
     const minX = Math.min(...at.map((p) => p.x));
     const minY = Math.min(...at.map((p) => p.y));
     const maxX = Math.max(...at.map((p) => p.x)) + NODE_W;
@@ -283,7 +303,16 @@ export function createBox(ctx, paths) {
     if (m) max = Math.max(max, Number(m[1]));
   }
   const id = "m:" + (max + 1);
-  v.boxes.push({ id, name: "方框 " + (max + 1), paths: (paths || []).slice() });
+  // ⚠️ **空框也要有落脚点**：它没有成员，包围盒算不出来，而"看得见"正是
+  // 把卡拖进去的前提。按已有的框数错开摆，免得连建两个叠在同一个位置上。
+  const n = v.boxes.length;
+  v.boxes.push({
+    id,
+    name: "方框 " + (max + 1),
+    paths: (paths || []).slice(),
+    x: 40 + (n % 6) * 44,
+    y: 40 + (n % 6) * 44,
+  });
   afterWrite(ctx);
   return id;
 }
@@ -371,7 +400,11 @@ export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
     const b = boxes[i];
     if (b.collapsed) continue;
     const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-    if (!at.length) continue;
+    // 空框也要能接住拖进来的卡——同 renderBoxes 那条，别在这儿 continue。
+    if (!at.length) {
+      if (b.crystal) continue;
+      at.push({ x: b.x, y: b.y });
+    }
     const x1 = Math.min(...at.map((p) => p.x)) - BOX_PAD;
     const y1 = Math.min(...at.map((p) => p.y)) - BOX_PAD - BAR_H;
     const x2 = Math.max(...at.map((p) => p.x)) + NODE_W + BOX_PAD;

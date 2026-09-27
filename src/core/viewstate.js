@@ -303,7 +303,17 @@ function sanitizeBoxes(raw) {
       paths.push(p);
     }
     seenIds.add(id);
-    out.push({ id, name: toStr(b.name).slice(0, 80), paths });
+    // ⚠️ `x` / `y` 是**空框的落脚点**（有成员时用不上，包围盒是算出来的）。
+    // 丢掉它的话，一个还没放卡的框重开之后会跳回默认位置。
+    const bx = num(b.x, null);
+    const by = num(b.y, null);
+    out.push({
+      id,
+      name: toStr(b.name).slice(0, 80),
+      paths,
+      x: bx === null ? 40 : bx,
+      y: by === null ? 40 : by,
+    });
   }
   return out;
 }
