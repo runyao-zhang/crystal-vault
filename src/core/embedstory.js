@@ -299,7 +299,12 @@ export function createEmbedStory(ctx, opts = {}) {
     "建一个收纳方框：把几张卡归到一起，可以改名、可以收起。\n" +
     "建完之后**把卡片拖进去**就归它了；拖到框外就移出来。\n" +
     "框只是分组——删框、移出，都**不会动你的卡片**。";
-  addBoxBtn.addEventListener("click", () => createBox(fake, []));
+  addBoxBtn.addEventListener("click", () => {
+    // `createBox` 在"还没挑晶体"时会回 null（那会儿没有"这一层"可归，
+    // 建出来是个谁也看不见、也删不掉的框）。**必须说一句**——
+    // 不说的话这颗按钮就成了"点了没反应"，而那正是这一族按钮最忌讳的。
+    if (!createBox(fake, [])) say("先挑一颗晶体（顶栏那颗「晶体：…」），框才有地方放。", false);
+  });
 
   // 3.0 刀 31（用户 09-27）：「从别的晶体引一张卡进来」。
   //

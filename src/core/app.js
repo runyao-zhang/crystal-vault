@@ -4,7 +4,13 @@
 // 这个文件以及 core/ 下其它文件都不引用 Obsidian / Dataview。
 
 import { assertAdapter } from "../adapter.js";
-import { sanitizeViewState, collectViewState, defaultViewState, forgetScreen } from "./viewstate.js";
+import {
+  sanitizeViewState,
+  collectViewState,
+  defaultViewState,
+  forgetScreen,
+  LEGACY_BOX_KEY,
+} from "./viewstate.js";
 import { sanitizePrefs, collectPrefs } from "./prefs.js";
 import { EL, toStr } from "./dom.js";
 import { beginInlineRename } from "./inlinerename.js";
@@ -157,10 +163,115 @@ const RESET_ARM_MS = 4000;
  */
 function readViewState(ctx) {
   try {
-    return sanitizeViewState(ctx.adapter.loadViewState());
+    const v = sanitizeViewState(ctx.adapter.loadViewState());
+    adoptLegacyBoxes(ctx, v);
+    return v;
   } catch (e) {
     return defaultViewState();
   }
+}
+
+/**
+ * 一条框属于哪一层：**顺着它的成员卡反推**。
+ *
+ * 这是精确的，不是猜——卡片有 `crystal` 字段（它所在晶体），把它过一遍
+ * `resolveChain` 就得到和 `boxesOf` / `storyimports` 完全同一把层键。
+ *
+ * 成员卡一个都查不到（框是空的、或者那些卡已经被删/移走）就回 null，
+ * 交给调用方兜底。
+ */
+function boxOwnerKey(ctx, box, imported) {
+  const model = ctx.model;
+  const byPath = model && model.byPath;
+  if (!byPath || !model.resolveChain) return null;
+  const chains = [];
+  for (const p of (box && box.paths) || []) {
+    // ⚠️ **外来卡不参与投票。** 它的 `card.crystal` 指向的是**别的晶体**
+    // （「导入卡片」引过来的，卡本身还住在原来那个文件夹里），拿它当依据
+    // 会把整个框迁到一颗毫不相干的晶体下面去。
+    if (imported && imported.has(p)) continue;
+    const card = byPath.get(p);
+    if (!card || !card.crystal) continue;
+    const chain = model.resolveChain(card.crystal);
+    if (Array.isArray(chain) && chain.length) chains.push(chain);
+  }
+  if (!chains.length) return null;
+  // 归属层 = **所有成员链的最长公共前缀**。
+  //
+  // 为什么不是"第一张查得到的卡"：`boxesOf` 判成员用的是 `cardsUnderPath`，
+  // 那是**递归**的——画在 L 层上的框，成员本来就可以是 `L/子` 里的卡。
+  // 取第一张的话，一个混了子晶体卡的框会被迁到**子晶体**那一层；
+  // 到了那边它剩下的成员会被 `live` 过滤掉，于是框还在、卡少了一半。
+  // 公共前缀正好落在"能罩住全部成员的最浅那一层"，那才是它当初画在哪。
+  const first = chains[0];
+  let n = first.length;
+  for (const c of chains) {
+    let i = 0;
+    while (i < n && i < c.length && c[i] === first[i]) i++;
+    n = i;
+    if (!n) break;
+  }
+  // 一张共同前缀都没有（成员真的来自两颗不相干的晶体）→ 回去吃兜底，
+  // 别硬挑一个——挑错就是把框藏到一个用户想不到的地方。
+  return n ? first.slice(0, n).join(" ") : null;
+}
+
+/** 一个晶体 key 对应的层键（`resolveChain` 的 join，与上面同一套）。 */
+function layerKeyOf(ctx, crystalKey) {
+  const model = ctx.model;
+  if (!model || !model.resolveChain) return null;
+  const chain = model.resolveChain(crystalKey);
+  return Array.isArray(chain) && chain.length ? chain.join(" ") : null;
+}
+
+/**
+ * 3.0 刀 33：**把老存档里那批"没有归属"的收纳方框认领到各自的晶体名下。**
+ *
+ * 用户 09-28 报的第 1 条：手动框原来存在一个扁平数组里，换一个文件夹看，
+ * 别的层画的框还在原地摆着。改成按层分表之后，老存档里那批框**没有任何
+ * 归属信息**——直接丢掉就是"用户画的框整批消失"。
+ *
+ * 所以 `sanitizeViewState` 先把它们收在一把哨兵键下面（`LEGACY_BOX_KEY`），
+ * 到这里再分发：**拿方框的成员卡反推**（见 `boxOwnerKey`）。
+ *
+ * 认不出来的（空框、成员卡已不在）落到**上次看的那颗晶体**名下——
+ * 两个来源按可靠度排：结构窗固定看的那颗（用户建框基本都在那儿）、
+ * 然后才是库里钻进去的那颗。都拿不到就真的只有丢掉。
+ */
+function adoptLegacyBoxes(ctx, v) {
+  const t = v && v.boxes;
+  if (!t || typeof t !== "object") return;
+  const legacy = t[LEGACY_BOX_KEY];
+  if (!Array.isArray(legacy) || !legacy.length) return;
+  delete t[LEGACY_BOX_KEY];
+  const prefs = ctx.state.prefs || {};
+  // ⚠️ 第二顺位读的是**刚读回来的这一份**（`v.openCrystal`），不是 `ctx.state.view`
+  // ——调用方 `openFullscreen` 那行是 `ctx.state.view = readViewState(ctx)`，
+  // 也就是说**这函数跑的时候 `ctx.state.view` 还是上一份**（首次打开时是出厂默认，
+  // openCrystal 为 null）。读它等于把兜底整个废掉。
+  const fallback = layerKeyOf(ctx, prefs.readerStoryCrystal) || layerKeyOf(ctx, v.openCrystal);
+  // 外来卡（刀 31 引进来的）的 path 集合——投票时要排除掉，见 `boxOwnerKey`。
+  const imported = new Set();
+  const im = v.imports;
+  if (im && typeof im === "object") {
+    for (const list of Object.values(im)) {
+      if (Array.isArray(list)) for (const p of list) imported.add(p);
+    }
+  }
+  const left = [];
+  for (const b of legacy) {
+    const key = boxOwnerKey(ctx, b, imported) || fallback;
+    // 归不进去的**留在原地**，不丢。它下次打开还会再试一遍
+    // （哨兵桶非空 → `sanitizeBoxes` 会原样带过去）。
+    // 丢一条用户的框是**不可逆**的，而留着的代价只是存档里多几十个字节。
+    if (!key) {
+      left.push(b);
+      continue;
+    }
+    if (!Array.isArray(t[key])) t[key] = [];
+    t[key].push(b);
+  }
+  if (left.length) t[LEGACY_BOX_KEY] = left;
 }
 
 function clearPersistTimer(ctx) {
@@ -1070,7 +1181,13 @@ export async function mount({
   fs.querySelector("#kb-fs-addbox").addEventListener("click", (e) => {
     e.stopPropagation();
     const id = createBox(ctx, []);
-    if (!id) return;
+    // 没有"这一层"时 `createBox` 回 null（见那边）。库里这颗按钮只在故事线出现、
+    // 而故事线只在钻进了晶体之后才有，正常到不了这儿——但真到了就得说一句，
+    // 静默返回就是"点了没反应"。
+    if (!id) {
+      sayStatus(ctx, "先钻进一颗晶体，框才有地方放。", false);
+      return;
+    }
     const nameEl = ctx.canvas.querySelector(
       '.kb-v13-sbox[data-box="' + id + '"] .kb-v13-sbox-name'
     );

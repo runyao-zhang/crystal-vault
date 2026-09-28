@@ -61,7 +61,10 @@ export function defaultViewState() {
     // （storyline.js 的 boxesOf）——落盘的话文件夹一改名它们就对不上，
     // 而那种错法没有任何东西会报出来，正是这一版要修的那一类。名字要能改，
     // 所以另开一张 `boxNames` 按 id 覆盖。
-    boxes: [],
+    // 3.0 刀 33：**按晶体分层**。形状与 `cardLinks` / `imports` 一样
+    // —— `{ "<晶体路径>": [框, ...] }`。原来是个**扁平数组**，于是换一个
+    // 文件夹看，别的层画的框还在原地摆着（用户 09-28 报的第 1 条）。
+    boxes: {},
     boxNames: {},
     collapsedBoxes: [],
     // 3.0 刀 31：从**别的晶体**引进来、摆在这一层上的卡。
@@ -291,40 +294,80 @@ const MAX_BOX_MEMBERS = 2000;
 /** 一层最多引进来多少张卡。和 `MAX_BOX_MEMBERS` 一样是**不可信输入的上限**，
  *  不是产品上的建议值——一个坏存档不该能把每一帧的渲染拖死。 */
 const MAX_IMPORTS = 500;
-function sanitizeBoxes(raw) {
-  if (!Array.isArray(raw)) return [];
-  const out = [];
-  const seenIds = new Set();
-  for (const b of raw) {
-    if (out.length >= MAX_BOXES) break;
-    if (!isObj(b)) continue;
-    const id = typeof b.id === "string" ? b.id.trim() : "";
-    if (!id || seenIds.has(id)) continue;
-    const paths = [];
-    const seenP = new Set();
-    for (const p of Array.isArray(b.paths) ? b.paths : []) {
-      if (paths.length >= MAX_BOX_MEMBERS) break;
-      if (typeof p !== "string" || !p || seenP.has(p)) continue;
-      seenP.add(p);
-      paths.push(p);
-    }
-    seenIds.add(id);
-    // ⚠️ `x` / `y` 是**空框的落脚点**（有成员时用不上，包围盒是算出来的）。
-    // 丢掉它的话，一个还没放卡的框重开之后会跳回默认位置。
-    const bx = num(b.x, null);
-    const by = num(b.y, null);
-    out.push({
-      id,
-      name: toStr(b.name).slice(0, 80),
-      paths,
-      x: bx === null ? 40 : bx,
-      y: by === null ? 40 : by,
-      // 手动框的大小是**用户自己定的**（拍板的 B），所以它和 x/y 一样必须活着。
-      w: num(b.w, 360),
-      h: num(b.h, 260),
-    });
+/**
+ * 3.0 刀 33（用户 09-28 第 1 条）：**老存档里那个扁平数组的临时落脚点。**
+ *
+ * 老形状是 `boxes: [框, ...]`，一个字节的"这个框是哪一层的"都没有。丢了就是
+ * 用户画过的框**整批消失**——所以先原样收在这把哨兵键下面，等运行时那边
+ * **拿方框的成员卡反推出它属于哪颗晶体**，再分发出去（见 app.js 的
+ * `adoptLegacyBoxes`）。
+ *
+ * ⚠️ 层键是 `crystalPath.join(" ")`，里面不可能有 NUL（用的是排布缓存同一种
+ * 分隔符），所以这把键**永远撞不上一个真的层**，只会存在到认领那一刻为止。
+ */
+export const LEGACY_BOX_KEY = " legacy";
+
+/** 把一条框洗干净。**新旧两种形状共用**（老数组里的、新表里的）。 */
+function sanitizeOneBox(b, seenIds, out) {
+  if (!isObj(b)) return;
+  const id = typeof b.id === "string" ? b.id.trim() : "";
+  if (!id || seenIds.has(id)) return;
+  const paths = [];
+  const seenP = new Set();
+  for (const p of Array.isArray(b.paths) ? b.paths : []) {
+    if (paths.length >= MAX_BOX_MEMBERS) break;
+    if (typeof p !== "string" || !p || seenP.has(p)) continue;
+    seenP.add(p);
+    paths.push(p);
   }
-  return out;
+  seenIds.add(id);
+  // ⚠️ `x` / `y` 是**空框的落脚点**（有成员时用不上，包围盒是算出来的）。
+  // 丢掉它的话，一个还没放卡的框重开之后会跳回默认位置。
+  const bx = num(b.x, null);
+  const by = num(b.y, null);
+  out.push({
+    id,
+    name: toStr(b.name).slice(0, 80),
+    paths,
+    x: bx === null ? 40 : bx,
+    y: by === null ? 40 : by,
+    // 手动框的大小是**用户自己定的**（拍板的 B），所以它和 x/y 一样必须活着。
+    w: num(b.w, 360),
+    h: num(b.h, 260),
+  });
+}
+
+function sanitizeBoxes(raw) {
+  // ① **老形状**（扁平数组）：整批收进哨兵桶，等运行时认领。
+  if (Array.isArray(raw)) {
+    const out = [];
+    const seenIds = new Set();
+    for (const b of raw) {
+      if (out.length >= MAX_BOXES) break;
+      sanitizeOneBox(b, seenIds, out);
+    }
+    return out.length ? { [LEGACY_BOX_KEY]: out } : {};
+  }
+  // ② 新形状：两层表。**逐层过滤**——某一层坏掉不该把别的层一起冲掉
+  //    （同 `sanitizeViewState` 顶上那条「逐字段退化」的纪律）。
+  if (!isObj(raw)) return {};
+  const result = {};
+  // ⚠️ **`seenIds` 是跨层共用的一个。** 每一层各一个的话，同一份存档里
+  // 两条 id 相同的框（不同的层）会双双活下来——而 `boxNames` / `collapsedBoxes`
+  // 是**按 id 索引的两张全局表**（`storyboxes.js` 里"id 全局唯一"是写死的硬前提）：
+  // 于是改一个框的名字、收一个框，会连另一层那个"同号"的一起改。
+  // 按构造不可能出现这种存档，但那正是"不可信输入"的意思——由不得它。
+  const seenIds = new Set();
+  for (const [key, list] of Object.entries(raw)) {
+    if (!key || !Array.isArray(list)) continue;
+    const out = [];
+    for (const b of list) {
+      if (out.length >= MAX_BOXES) break;
+      sanitizeOneBox(b, seenIds, out);
+    }
+    if (out.length) result[key] = out;
+  }
+  return result;
 }
 
 /**

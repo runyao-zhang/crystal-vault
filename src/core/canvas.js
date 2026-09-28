@@ -83,7 +83,10 @@ export function beginDraft(ctx) {
     // `commitDraft` 今天写的是 `{ ...state.view, ...draft }`（展开），漏掉的键
     // 会被原样带过去、看不出问题；哪天有人把它改成 `state.view = { ...draft }`，
     // 用户建的每一个框**当场静默消失**。补进来才是真安全。
-    boxes: (v.boxes || []).map((b) => ({ ...b, paths: (b.paths || []).slice() })),
+    // ⚠️ 3.0 刀 33：`boxes` 是**两层表**了（按晶体分层）。深拷必须**两层都拷**
+    // ——只拷外层的话，草稿里每一层的数组还是存档那一个，在草稿里建一个框，
+    // 存档那一份当场跟着变（「恢复默认」就再也回不去了）。
+    boxes: JSON.parse(JSON.stringify(v.boxes || {})),
     boxNames: { ...(v.boxNames || {}) },
     collapsedBoxes: (v.collapsedBoxes || []).slice(),
     // 3.0 刀 31「引进来的卡」。**理由同上一条，而且更直白**：引进来的那张卡
@@ -115,7 +118,7 @@ export function isDraftDirty(ctx) {
     h: o.hiddenLinks || [],
     // 3.0 刀 23：建框 / 改名 / 收起也是「我刚摆的东西」——不算上的话，
     // 屏幕右下角那个「未保存」小点会说假话。
-    x: o.boxes || [],
+    x: o.boxes || {},
     xn: o.boxNames || {},
     xc: o.collapsedBoxes || [],
     // 3.0 刀 31：引进来哪几张卡也是「我刚摆的东西」——不算上的话，

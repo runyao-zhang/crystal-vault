@@ -78,6 +78,8 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically**, named after its folder; a box can be **renamed** (click the name) and **collapsed** (click the little triangle on its left).
 
+> **A box you drew belongs to the layer you drew it on.** Make one inside 「Python/数据分析」 and it is not there when you switch to 「Python/爬虫」 — go back and it is exactly as you left it. It did not used to work that way: boxes were global, so switching folders left the other layer's boxes sitting on screen.
+
 Collapsing puts the cards inside away together with the lines running to them — **but "there is still something in there" is never lost**:
 
 - any outside card that still has a blue line into a collapsed box gets a **yellow filled dot** in its corner;

@@ -87,9 +87,58 @@ function collapsedOf(ctx) {
   return v && Array.isArray(v.collapsedBoxes) ? v.collapsedBoxes : [];
 }
 
-function manualOf(ctx) {
+/**
+ * 3.0 刀 33：这一层是哪一层。与 `cardLinks` / `imports` 用的是同一把钥匙
+ * ——`crystalPath` 是**链**（`resolveChain(key)`，如 `["Python","Python/数据分析"]`）。
+ *
+ * ⚠️ 一把钥匙写两遍迟早会漂（一处写成 key、一处写成链），所以这一层的
+ * 每个函数都走它，不再就地 `join`。
+ */
+const keyOf = (path) => (path || []).join(" ");
+
+/**
+ * 读某一层的框表。**只读，一个字节都不改。**
+ *
+ * ⚠️ 这一条是硬的：`assignCards`（每拖一次卡就跑）要靠它判"这一层有没有框"，
+ * 而它要是顺手 `v.boxes[k] = []`，`isDraftDirty` 的 `x: o.boxes` 就会当场
+ * 和存档那份对不上——**屏幕右下角那个「未保存」小点会无缘无故亮起来**，
+ * 而用户什么都没动。一个永远亮着的标记等于没有标记。
+ */
+function readBucket(ctx, path) {
   const v = view(ctx);
-  return v && Array.isArray(v.boxes) ? v.boxes : [];
+  const t = v && v.boxes;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return null;
+  const list = t[keyOf(path)];
+  return Array.isArray(list) ? list : null;
+}
+
+/** 某一层的手动框（没有就当空的）。**每帧都会调，所以走只读那条。** */
+function manualOf(ctx, path) {
+  return readBucket(ctx, path) || [];
+}
+
+/** 所有层的手动框（按 id 找框、分配新 id 要跨层看）。 */
+function allBoxes(ctx) {
+  const v = view(ctx);
+  const t = v && v.boxes;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return [];
+  const out = [];
+  for (const list of Object.values(t)) if (Array.isArray(list)) out.push(...list);
+  return out;
+}
+
+/**
+ * 按 id 找一个框，**跨层找**。
+ *
+ * 能跨层是因为 **id 是全局唯一的**（`createBox` 分配新号时会扫所有层，
+ * 见那边）。这样 `boxNames` / `collapsedBoxes` 那两张按 id 索引的表
+ * 一个字都不用改——它们的键本来就要求全局唯一。
+ */
+function findBox(ctx, id) {
+  const s = String(id || "");
+  if (!s) return null;
+  for (const b of allBoxes(ctx)) if (String(b.id) === s) return b;
+  return null;
 }
 
 /**
@@ -129,7 +178,7 @@ export function boxesOf(ctx, path) {
   // 框里明明摆着那张卡，框却不认它——展开收起时它跟着消失又出现，
   // 或者干脆被当成"框外"的卡。而这一切都不报错。
   for (const p of importsUnder(ctx, path)) live.add(p);
-  for (const b of manualOf(ctx)) {
+  for (const b of manualOf(ctx, path)) {
     // ⚠️ **空框照样要画**（`paths` 是空数组也放行）。
     //
     // 这一条是踩出来的，而且它把整条路堵死了：建完框要能把卡**拖进去**，
@@ -328,14 +377,27 @@ export function bindBoxHover(host, getEls) {
 
 // ---- 改视图状态的小动作（渲染之外的三件事：建、改名、收起） ----
 
-/** `ctx.state.view` 上那三张表先确保形状，再动其中一格。**不整体重建**。 */
+/** `ctx.state.view` 上那几张表先确保形状，再动其中一格。**不整体重建**。 */
 function ensure(ctx) {
   const v = view(ctx);
   if (!v) return null;
-  if (!Array.isArray(v.boxes)) v.boxes = [];
+  // ⚠️ 3.0 刀 33 起 `boxes` 是**两层表**。这里把**老的扁平数组**也一并吃掉
+  // （`Array.isArray` → 换成空表）：正常情况下 `sanitizeBoxes` 已经转换过了，
+  // 但视图状态还有别的来路（`resetLayout`、测试、别处的适配层），
+  // 漏一个就会出现"往数组上挂键"的写法——**不报错，只是框全不见了**。
+  if (!v.boxes || typeof v.boxes !== "object" || Array.isArray(v.boxes)) v.boxes = {};
   if (!v.boxNames || typeof v.boxNames !== "object" || Array.isArray(v.boxNames)) v.boxNames = {};
   if (!Array.isArray(v.collapsedBoxes)) v.collapsedBoxes = [];
   return v;
+}
+
+/** 写之前把形状摆正，再把**这一层**的框表拿出来（没有就建）。 */
+function writeBucket(ctx, path) {
+  const v = ensure(ctx);
+  if (!v) return null;
+  const k = keyOf(path);
+  if (!Array.isArray(v.boxes[k])) v.boxes[k] = [];
+  return v.boxes[k];
 }
 
 function afterWrite(ctx) {
@@ -343,20 +405,33 @@ function afterWrite(ctx) {
   if (ctx.refreshStoryline) ctx.refreshStoryline();
 }
 
-/** 建一个手动框，收下这几张卡。id 用「现有 m: 里最大的号 +1」——确定性、不用随机数。 */
+/**
+ * 建一个手动框，收下这几张卡。id 用「现有 m: 里最大的号 +1」——确定性、不用随机数。
+ *
+ * ⚠️ **号是跨层扫出来的**，所以 id 全局唯一。这不是洁癖：`boxNames` 和
+ * `collapsedBoxes` 是**按 id 索引**的两张独立表，id 一旦在某两层里撞上，
+ * 改一个框的名字会连着把另一层的同名框一起改了。
+ */
 export function createBox(ctx, paths) {
-  const v = ensure(ctx);
-  if (!v) return null;
+  // ⚠️ **没有"这一层"就不建。** 结构窗那颗「＋ 框」是**一直摆着**的
+  // （刀 24 有意如此），包括"还没挑晶体"的时候——那会儿 `crystalPath` 是空的，
+  // 建出来的框会落进 `""` 那个桶里。而晶体库只在有路径时才画故事线，
+  // 于是**没有任何一屏会渲染它**：用户看不见它、也点不到它那颗 ✕，
+  // 它会永久占着一个 id 跟着存档走。宁可当时就说一句。
+  const path = ctx.state.crystalPath;
+  if (!Array.isArray(path) || !path.length) return null;
+  const list = writeBucket(ctx, path);
+  if (!list) return null;
   let max = 0;
-  for (const b of v.boxes) {
+  for (const b of allBoxes(ctx)) {
     const m = /^m:(\d+)$/.exec(String(b && b.id));
     if (m) max = Math.max(max, Number(m[1]));
   }
   const id = "m:" + (max + 1);
   // ⚠️ **空框也要有落脚点**：它没有成员，包围盒算不出来，而"看得见"正是
-  // 把卡拖进去的前提。按已有的框数错开摆，免得连建两个叠在同一个位置上。
-  const n = v.boxes.length;
-  v.boxes.push({
+  // 把卡拖进去的前提。按本层已有的框数错开摆，免得连建两个叠在同一个位置上。
+  const n = list.length;
+  list.push({
     id,
     name: "方框 " + (max + 1),
     paths: (paths || []).slice(),
@@ -374,9 +449,7 @@ export function createBox(ctx, paths) {
  * （用户 09-27 拍板的 B：框是你画的框，卡片只是归属）。
  */
 export function setBoxRect(ctx, id, rect) {
-  const v = ensure(ctx);
-  if (!v || !id) return;
-  const b = v.boxes.find((x) => String(x.id) === String(id));
+  const b = findBox(ctx, id);
   if (!b) return;
   if (rect && Number.isFinite(Number(rect.x))) b.x = Number(rect.x);
   if (rect && Number.isFinite(Number(rect.y))) b.y = Number(rect.y);
@@ -388,6 +461,8 @@ export function setBoxRect(ctx, id, rect) {
 }
 
 export function renameBox(ctx, id, name) {
+  // 名字表是**按 id 索引的一张独立表**，id 全局唯一（见 createBox），
+  // 所以这里不需要知道它在哪一层。
   const v = ensure(ctx);
   if (!v || !id) return;
   const n = String(name || "").trim().slice(0, 80);
@@ -409,7 +484,17 @@ export function deleteBox(ctx, id) {
   const v = ensure(ctx);
   if (!v || !id) return;
   const s = String(id);
-  v.boxes = v.boxes.filter((b) => String(b.id) !== s);
+  // 跨层找它住哪一格，**只从那一格里 splice**（不整表 filter：
+  // 那会把别的层的框一起重建成新数组，引用一换，正拿着它的调用方就失联了）。
+  for (const [k, list] of Object.entries(v.boxes)) {
+    if (!Array.isArray(list)) continue;
+    const i = list.findIndex((b) => String(b.id) === s);
+    if (i < 0) continue;
+    list.splice(i, 1);
+    // 空了就把这一格删掉，别在存档里留一串空数组（同 `unimportCard` 那条）。
+    if (!list.length) delete v.boxes[k];
+    break;
+  }
   delete v.boxNames[s];
   const i = v.collapsedBoxes.indexOf(s);
   if (i >= 0) v.collapsedBoxes.splice(i, 1);
@@ -470,9 +555,7 @@ export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
  */
 export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
   const v = view(ctx);
-  if (!v || !Array.isArray(v.boxes) || !targets || !targets.length) {
-    return { changed: false, crystalHit: null };
-  }
+  if (!v || !targets || !targets.length) return { changed: false, crystalHit: null };
   // 先把结果全算出来。这一步**不碰模型**——算的过程中模型在变的话，
   // 后面的 hitBoxAt 拿到的 geometry 和最终写进去的就对不上了。
   const want = new Map();
@@ -496,10 +579,26 @@ export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
   }
   if (!want.size) return { changed: false, crystalHit };
 
+  // 3.0 刀 33：**只在当前这一层里改。** 卡片是拖在这一屏上的，它该进的框
+  // 也只会是这一屏上画着的那些——别的层的框根本不在 `boxes` 里，
+  // 更不该被这一下顺手改掉。
+  // （`boxesOf(ctx, path)` 与这里用的是同一把 `crystalPath` 钥匙，
+  // 两边对得上，所以界面上看到的框和这里能改到的框是同一批。）
+  //
+  // **这一层一个手动框都没有 → 归属无从改起，收工。** 走只读的 `readBucket`
+  // 而不是会建桶的那个：建一张空表会白白把草稿弄"脏"（见 `readBucket` 那条）。
+  //
+  // ⚠️ **这一句必须排在 `crystalHit` 算完之后。** 它原来在函数开头，于是
+  // "这一层只有子晶体框、还没建过手动框"（**这个功能的默认状态**）时提前返回，
+  // `crystalHit` 恒为 null —— 刀 31 那条「子晶体框装不进外来卡，用 ＋框 建个
+  // 手动框」的提示**永远不响**。表现正是那条注释自己最忌讳的"点了没反应"。
+  const list = readBucket(ctx, ctx.state.crystalPath);
+  if (!list) return { changed: false, crystalHit };
+
   let changed = false;
   // 1) 先把这一批从**所有**框里摘干净（连它本来待着的那个也摘）。
   //    过滤而不是 splice：一张卡只该出现一次，逐个 splice 要处理下标漂移。
-  for (const b of v.boxes) {
+  for (const b of list) {
     if (!Array.isArray(b.paths)) b.paths = [];
     const keep = b.paths.filter((p) => !want.has(p) || want.get(p) === String(b.id));
     if (keep.length !== b.paths.length) {
@@ -511,7 +610,7 @@ export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
   //    ——那就是"拖出来 = 移出"，第 1 步已经做完了。
   for (const [p, id] of want) {
     if (!id) continue;
-    const box = v.boxes.find((b) => String(b.id) === id);
+    const box = list.find((b) => String(b.id) === id);
     if (!box) continue;
     if (box.paths.indexOf(p) < 0) {
       box.paths.push(p);
