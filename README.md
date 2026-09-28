@@ -106,6 +106,26 @@ Without this, filing a dozen cards into one box meant dragging them **one at a t
 > - **There is no "delete" in card mode**: the 「删除实线 / 删除蓝线」 button hides itself. Boxing cards only moves them around — it **does not touch a single word of your notes**.
 > - To un-highlight them, **click empty space** or press **Esc**.
 
+### Placing things by the square: the grid and the arrow keys
+
+On top of the world coordinates, the structure window and the storyline have a **grid**. Every card and every box you drew yourself sits on it, anchored at the **bottom-left corner** — so two cards side by side line up along their **bottom edge**.
+
+| Key | One step |
+| --- | --- |
+| **← →** | **42px** (twice the minimum unit — five steps is exactly one card wide) |
+| **↑ ↓** | **21px** (the minimum unit) |
+
+**The minimum unit is a tenth of a card's width: 21px.** That is where it comes from — every card is the same size, so using it as the ruler makes the whole picture line up.
+
+Two ways to place things:
+
+- **Drag** — drag it around; wherever you let go, it settles onto the nearest grid point.
+- **Arrow keys** — select something first, then step it one square at a time. Cards: box them in with 「**框：卡**」. Boxes: **click the box's title bar** (a selected box turns into a bright solid outline; click again to deselect).
+
+> - **Gold boxes (the ones grown from folders) do not take part.** Their position and size are **computed** from the cards inside, so they have no position of their own to nudge. Coordinates apply to **cards** and to the **manual boxes you drew**.
+> - **Positions you already arranged are never mass-moved.** The grid only takes effect the next time you drag that thing or press an arrow key — otherwise it would be a change nobody pressed a button for. The cost: a card you have never touched may sit off-grid until you move it once.
+> - Resizing a manual box is stepped too: drag the bottom-right grip and its right and bottom edges settle onto the grid — a bottom-left corner on the grid only pins the left and bottom edges, so this is what squares up the other two.
+
 ### Import a card: borrow one from another crystal
 
 A crystal only ever draws the cards **in its own folder**. But you often want a card in crystal A to link to a card in crystal B — so hit 「**导入卡片**」 (Import card) in the structure window's top bar and pick one:

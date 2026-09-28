@@ -21,6 +21,7 @@
 //    `importPos` 就等于同一条规则写两遍，而拖过一张卡之后两边会不一致。
 
 import { NODE_W, NODE_H } from "./storylayout.js";
+import { snapPos } from "./storygrid.js";
 
 /** 这一层是哪一层。与 `cardLinks` / `manualLinks` 用的是同一把钥匙。 */
 const keyOf = (ctx) => (ctx.state.crystalPath || []).join(" ");
@@ -165,10 +166,10 @@ export function importCard(ctx, cardPath, base) {
   // 而屏幕上看起来仍然只有一张——用户会以为导入没生效。
   const spot = centerSpot(ctx);
   const n = list.length - 1;
-  v.crystalPos[p] = {
-    x: Math.round(spot.x + (n % 6) * 30),
-    y: Math.round(spot.y + (n % 6) * 30),
-  };
+  // 3.0 刀 32：**落座也走格点。** 这是 `crystalPos` 除拖动 / 方向键之外唯一的
+  // 第三个写入点——不吸的话，刚引进来的卡一上来就停在格外，
+  // 而用户第一次按方向键时它会先"跳"到格上再走一格，看着像多走了一下。
+  v.crystalPos[p] = snapPos(spot.x + (n % 6) * 30, spot.y + (n % 6) * 30, NODE_H);
   return true;
 }
 

@@ -94,6 +94,9 @@ import {
   isCardMarquee,
   setCardMarquee,
   cardSel,
+  // 3.0 刀 32：框的选中（点标题栏选的）与"取消一切选中"。
+  hasNudgeSel,
+  clearPicked,
   hiddenCardSet,
   showAllHidden,
 } from "./storyline.js";
@@ -1308,6 +1311,10 @@ export async function mount({
       // **不落盘**（同 linking / lineEdit / marqueeArm）：一次操作中途的状态。
       marqueeCard: false,
       cardSel: [],
+      // 3.0 刀 32：选中的**框**（点标题栏选的，方向键挪的就是它）。与 cardSel
+      // 分开两张表：卡片是"框选"出来的（一片），框是"点"出来的（一个），
+      // 两种手势两种粒度。**不落盘**——同上面几条，一次操作中途的状态。
+      boxSel: [],
       // 3.0 刀 2 显示模式（"ring" / "canvas" / "grid" / "storyline"）。
       // ⚠️ 与 `ctx.stage`（舞台那个 DOM 节点）同名但完全无关，读的时候看上下文。
       // 它是**推导出来的缓存**：真正的源头是 openCrystal + prefs 里那两档，
@@ -1852,6 +1859,18 @@ export async function mount({
       if (ctx.state.linking) {
         setLinking(ctx, false);
         e.stopImmediatePropagation();
+        return;
+      }
+      // 3.0 刀 32：**选中了框（但没在编辑模式）时，Esc 先取消选中。**
+      //
+      // 框是"点标题栏"选中的，那条路不经过编辑模式——没有这一支的话，
+      // 用户想取消选中按 Esc，会一路掉到下面的「退一层 / 关掉整个晶体库」，
+      // 一下把库关了。结构窗那边是同一条规矩（见 embedstory 的 onEsc）。
+      if (!ctx.state.lineEdit && hasNudgeSel(ctx)) {
+        clearPicked(ctx);
+        if (ctx.refreshStoryline) ctx.refreshStoryline();
+        e.stopImmediatePropagation();
+        e.preventDefault();
         return;
       }
       if (!overlay.classList.contains("open")) {

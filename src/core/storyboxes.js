@@ -196,7 +196,7 @@ export function edgeHidden(memberOf, collapsed, aPath, bPath) {
  * @param {Function} el  createElement 助手
  * @returns {Map<string, HTMLElement>} 框 id -> 元素（悬停闪烁要用）
  */
-export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
+export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H, sel) {
   const made = new Map();
   if (!boxes.length) return made;
   for (const b of boxes) {
@@ -224,13 +224,22 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
     } else {
       const w = Math.max(MIN_BOX_W, Number(b.w) || MIN_BOX_W);
       const h = Math.max(MIN_BOX_H, Number(b.h) || MIN_BOX_H);
-      const x = Number.isFinite(Number(b.x)) ? Number(b.x) : MIN_X;
-      const y = Number.isFinite(Number(b.y)) ? Number(b.y) : MIN_Y;
+      // ⚠️ 兜底用的是 `NEW_BOX_X/Y`（建框时那个落座点）。这里原来写的是
+      // `MIN_X` / `MIN_Y` ——**那两个常量在这个仓里根本不存在**。今天走不到
+      // （`boxesOf` 给手动框的 x/y 一定填了有限数），但它是颗哑弹：
+      // 哪天有人从别处构造一个没有坐标的框，等着的是一次 ReferenceError，
+      // 而渲染里抛错是一整屏白掉，不是"少画一个框"。
+      const x = Number.isFinite(Number(b.x)) ? Number(b.x) : NEW_BOX_X;
+      const y = Number.isFinite(Number(b.y)) ? Number(b.y) : NEW_BOX_Y;
       geo = { x, y, w, h, cx: x + w / 2, cy: y + BAR_H / 2 + 8 };
     }
 
     const node = el("div", "kb-v13-sbox" + (b.crystal ? " kb-v13-sbox-crystal" : "") + (b.collapsed ? " kb-v13-sbox-collapsed" : ""));
     node.dataset.box = b.id;
+    // 3.0 刀 32：这个框被选中了（点标题栏选的，方向键挪的就是它）。
+    // **只有手动框会被选中**——晶体框没有自己存的位置（用户 09-28 拍的），
+    // 挪它等于挪成员，而"挪哪些成员"要先把成员挑出来，是另一件事。
+    if (sel && sel.has(b.id)) node.classList.add("kb-v13-sbox-sel");
     if (b.collapsed) {
       // 收起：只剩一条标题栏，摆在自己的重心附近——**不摆在矩形左上角**，
       // 因为矩形可能是按展开时的大小定的，收起后那个位置会离得很远。

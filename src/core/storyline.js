@@ -32,6 +32,8 @@ import {
 // 这里只负责**把引来的那张算进每一处几何里**——漏掉任何一处，
 // 表现都是「卡片画出来了，但拖不动 / 连不上 / 框不住」。
 import { importsOf, importedCards, unimportCard, afterImport } from "./storyimports.js";
+// 3.0 刀 32「格点」。单位怎么算出来的、坐标以哪个角为准，全写在那份文件头上。
+import { UNIT, STEP_X, STEP_Y, snapX, snapY, snapPos } from "./storygrid.js";
 import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
@@ -284,7 +286,10 @@ export function renderStorylineStage(ctx, path) {
   const boxes = boxesOf(ctx, path);
   ctx._boxMember = memberIndexOf(boxes);
   ctx._boxCollapsed = collapsedSet(boxes);
-  ctx._boxEls = renderBoxes(ctx.canvas, boxes, pos, EL, NODE_W, NODE_H);
+  // 3.0 刀 32：选中的框（方向键挪它）。**手动框才在表里**——晶体框没有坐标，
+  // 用户 09-28 拍板它保持"跟着成员算出来"，所以它进不了这张表。
+  ctx._boxSel = new Set(boxSel(ctx));
+  ctx._boxEls = renderBoxes(ctx.canvas, boxes, pos, EL, NODE_W, NODE_H, ctx._boxSel);
   // 悬停委托**只挂一次**：卡片每帧重建，逐张挂监听会漏、也会越堆越多
   // （同 itemdrag.js 那条「事件绑舞台」的教训）。元素表每次渲染换新的，
   // 所以监听里读的是 `ctx._boxEls` 而不是某个快照。
@@ -313,7 +318,16 @@ export function renderStorylineStage(ctx, path) {
         if (dl) {
           e.stopPropagation();
           e.preventDefault();
-          deleteBox(ctx, dl.getAttribute("data-box-del"));
+          const gone = dl.getAttribute("data-box-del");
+          // 3.0 刀 32：**先把选中表里那条摘掉，再删框。**
+          // 这条处理器是**捕获**阶段 + `stopPropagation`，于是"点空白清选中"
+          // 那条路整个被掐掉——不摘的话，删掉的正是一个选中的框时，
+          // `boxSel` 里会永远留着一个指不到人的 id（见 `hasNudgeSel` 那段：
+          // 后果是方向键被永久认领、库里按 Esc 直接关掉整个晶体库）。
+          const sel = ctx.state.boxSel;
+          if (Array.isArray(sel)) ctx.state.boxSel = sel.filter((x) => String(x) !== String(gone));
+          deleteBox(ctx, gone);
+          refreshLineHint(ctx);
           return;
         }
         const nm = t.closest("[data-box-name]");
@@ -324,6 +338,23 @@ export function renderStorylineStage(ctx, path) {
           // 复用库里的就地改名（方框那句话的同一套）：中文输入法合成中不接手、
           // Esc 还原、失焦提交——这些坑那边都踩过了，别再造一个。
           beginInlineRename(nm, nm.textContent, (name) => renameBox(ctx, id, name));
+          return;
+        }
+        // 3.0 刀 32：**点标题栏的空白处 = 选中这个框**（方向键挪的就是它）。
+        //
+        // 和"拖它 = 整组一起挪"不冲突：`_kbBoxDrag` 那条 pointerdown 只在**真的
+        // 移动过**之后才算一次拖动，没动的话照旧会冒出一个 click，落到这里。
+        // 所以「点一下选中、按住拖走」是同一根标题栏上的两个动作，各归各的。
+        //
+        // ⚠️ 排在后面：上面那三颗按钮（收起 / 名字 / 删除）都住在标题栏里，
+        // 慢一步就会被这一条当成"点空白"，于是点名子不给改名、点三角不收起。
+        const barEl = t.closest(".kb-v13-sbox-bar");
+        const boxEl = barEl && barEl.closest(".kb-v13-sbox");
+        const bid = boxEl && boxEl.getAttribute("data-box");
+        if (bid) {
+          e.stopPropagation();
+          e.preventDefault();
+          selectBox(ctx, bid);
         }
       },
       true
@@ -363,11 +394,37 @@ export function renderStorylineStage(ctx, path) {
         const gy = e.clientY;
         let lw = gw;
         let lh = gh;
+        // 3.0 刀 32：**宽高也吸附成一格一格的。**
+        //
+        // 为什么大小也要管：用户要的坐标是**左下角**，而左下角落在格点上只保证了
+        // 左边和底边两条线；右边的位置 = 左边 + 宽、顶边 = 底边 − 高，
+        // 宽高不是整数格的话，那两条边照样是斜的。
+        //
+        // ⚠️ **要按"右边 / 底边落在格点上"来吸，不是"宽高取整数倍"。**
+        // 这两件事只有当左边 / 顶边本身就在格点上时才等价，而它们通常不是
+        // （格点判的是**左下角**，顶边 = 左下角的 y − 高，天然差一个高度）。
+        // 拿"宽高取整"吸的话：一个 y=55、高 260（底边 315 在格点上）的框，
+        // 拉一下变高 252，底边跑到 307——**下一次按方向键会走 29px 而不是一格 21px**
+        // （`snapY` 按底边倒推，误差全从这儿来）。所以这里直接对边吸。
+        //
+        // 抓手在右下角：左边和顶边不动，右边和底边走。于是
+        //   新宽 = snap(左边 + 拉出来的宽) − 左边
+        //   新高 = snap(顶边 + 拉出来的高) − 顶边
+        const cp0 = ctx.state.crystalPath || [];
+        const gbox = boxesOf(ctx, cp0).find((b) => String(b.id) === String(gid));
+        const gx0 = gbox && Number.isFinite(Number(gbox.x)) ? Number(gbox.x) : null;
+        const gy0 = gbox && Number.isFinite(Number(gbox.y)) ? Number(gbox.y) : null;
+        // 下限照着 storyboxes 的 MIN_BOX_W/H **往上取到整数格**：拉不到更小
+        // （免得一个框被拉成一条线之后再也抓不住那颗抓手），而且不能比那个下限还小。
+        // ⚠️ 夹到下限那一下会**脱离格点**（下限是硬约束，比对齐要紧）——
+        // 无所谓：下一次拖动或方向键按的是左下角，自己就归位了。
+        const MINW = Math.ceil(260 / UNIT) * UNIT;
+        const MINH = Math.ceil(180 / UNIT) * UNIT;
         const rmove = (ev) => {
-          // 下限与 storyboxes 的 MIN_BOX_W/H 对齐：拉不到更小，
-          // 免得一个框被拉成一条线之后再也抓不住那颗抓手。
-          lw = Math.max(260, gw + (ev.clientX - gx));
-          lh = Math.max(180, gh + (ev.clientY - gy));
+          const rawW = gw + (ev.clientX - gx);
+          const rawH = gh + (ev.clientY - gy);
+          lw = Math.max(MINW, gx0 === null ? Math.round(rawW / UNIT) * UNIT : snapX(gx0 + rawW) - gx0);
+          lh = Math.max(MINH, gy0 === null ? Math.round(rawH / UNIT) * UNIT : snapY(gy0 + rawH, 0) - gy0);
           gnode.style.width = lw + "px";
           gnode.style.height = lh + "px";
         };
@@ -436,14 +493,33 @@ export function renderStorylineStage(ctx, path) {
         const w1 = toWorld(ev.clientX, ev.clientY);
         const dx = w1.x - w0.x;
         const dy = w1.y - w0.y;
-        lastDx = dx;
-        lastDy = dy;
+        // 3.0 刀 32：吸附。**两种框的吸法不一样，因为它们有没有"自己的位置"不一样**：
+        //   · **手动框**有位置（`box.x/y`）：把**它自己**吸到格点上，位移再从它倒推
+        //     ——这样连一个原本停在格点外的老框，拖一下也就归位了。
+        //   · **晶体框**没有位置（它是成员的包围盒，用户 09-28 拍板保持算出来的）：
+        //     没有绝对参照可以吸，只能吸**位移本身**。成员本来就在格点上的话，
+        //     走整数格之后还在格点上。
+        let sdx = dx;
+        let sdy = dy;
+        if (Number.isFinite(mx)) {
+          const nb = snapPos(mx + dx, (Number.isFinite(my) ? my : 0) + dy, box.h);
+          sdx = nb.x - mx;
+          sdy = nb.y - (Number.isFinite(my) ? my : 0);
+        } else {
+          sdx = Math.round(dx / UNIT) * UNIT;
+          sdy = Math.round(dy / UNIT) * UNIT;
+        }
+        lastDx = sdx;
+        lastDy = sdy;
         // 卡片：晶体框和手动框都跟着走（用户 Q6 拍的是「框和里面的卡一起挪」）
         const l = layoutOf(ctx);
         if (!l.crystalPos) l.crystalPos = {};
-        for (const [p, s] of start) l.crystalPos[p] = { x: s.x + dx, y: s.y + dy };
-        node.style.left = bx + dx + "px";
-        node.style.top = by + dy + "px";
+        for (const [p, s] of start) l.crystalPos[p] = { x: s.x + sdx, y: s.y + sdy };
+        // ⚠️ DOM 写的是 **DOM 的位置 + 吸附位移**，不是模型的位置。
+        // 收起态的条摆在重心上（见 renderBoxes），拿模型的 x/y 当原点的话，
+        // 框会在按下的那一瞬间跳到一个完全不同的地方——用户 09-27 报的就是这个。
+        node.style.left = bx + sdx + "px";
+        node.style.top = by + sdy + "px";
         applyStorylinePositions(ctx, cp);
         redrawStoryLines(ctx);
       };
@@ -825,14 +901,19 @@ export function applyStorylinePositions(ctx, path) {
   // 外来卡**留在原地不动**，而它明明在框里（框走了、卡没走，一眼就看得出来）。
   const cards = viewCards(ctx, path);
   const layout = layoutFor(ctx, path);
+  // ⚠️ **先建表再铺，不要在每个节点里 `cards.find(...)`。**
+  // 3.0 刀 32 之前这个函数只在"拖整框""拖一批"时跑，慢一点无所谓；
+  // 现在**拖单张卡的每一帧**也要走它（吸附之后要拿模型重铺 DOM，见 bindStorylineDrag
+  // 的 onMove），于是那句 `find` 变成了每帧 O(n²)——一百张卡就是一帧一万次比较。
+  const at = new Map();
+  for (const c of cards) at.set(c.path, nodePosOf(ctx, c, layout));
   for (const el of ctx.canvas.querySelectorAll(".kb-v13-snode")) {
     const p = el.dataset.path;
-    if (!p) continue;
-    const card = cards.find((c) => c.path === p);
-    if (!card) continue;
-    const at = nodePosOf(ctx, card, layout);
-    el.style.left = at.x + "px";
-    el.style.top = at.y + "px";
+    if (!p) continue; // 幽灵节点没有路径，本来就不该被铺
+    const a = at.get(p);
+    if (!a) continue;
+    el.style.left = a.x + "px";
+    el.style.top = a.y + "px";
   }
 }
 
@@ -870,7 +951,10 @@ export function bindStorylineDrag(ctx) {
     },
     writePos: (c, path, p) => {
       const l = layoutOf(c);
-      if (l.crystalPos) l.crystalPos[path] = p;
+      // ⚠️ **这里也要吸附一次。** `itemdrag` 松手时拿的是 `drag.x/drag.y`
+      // （那几个值是**没吸附过**的），它会把 `onMove` 刚写进去的吸附结果盖掉。
+      // 只在 onMove 里吸附的话，表现是"拖的时候一格一格、一松手又滑走了"。
+      if (l.crystalPos) l.crystalPos[path] = snapPos(p.x, p.y, NODE_H);
     },
     // 按下那一下拍快照。**按住的这张在选中集里**才整批走——
     // 框选完之后顺手去拖一张**没选中**的卡，意思显然是"我要挪这一张"，
@@ -893,19 +977,29 @@ export function bindStorylineDrag(ctx) {
       if (!l.crystalPos) l.crystalPos = {};
       const base = groupStart ? groupStart.get(path) : null;
       const many = group && group.length > 1;
+      // 3.0 刀 32：吸附。**算的是"主拖那张"该落在哪个格点**，位移再从它倒推。
+      const at = snapPos(p.x, p.y, NODE_H);
       if (many && base) {
         // 整批：**从按下时那个原点整体平移同样的世界位移**。
         // 逐张累加是错的——那样第一张走 10px、第二张就变成 20px 了。
-        const dx = p.x - base.x;
-        const dy = p.y - base.y;
+        //
+        // ⚠️ 吸附**只对主拖那一张做，位移再原样发给其余几张**。逐张各自吸附的话，
+        // 组里本来错开半格的两张会被吸到同一个格点上**叠在一起**——
+        // 一次拖动把用户的排布揉平了，而且不可逆。
+        // 代价是：整批的位置由"你抓住的是哪一张"决定，这是对的（那一张才是你对着的）。
+        const dx = at.x - base.x;
+        const dy = at.y - base.y;
         for (const [gp, s] of groupStart) l.crystalPos[gp] = { x: s.x + dx, y: s.y + dy };
-        // ⚠️ 剩下那几张走 `applyStorylinePositions`——它**只改 left/top，不重建 DOM**。
-        // 重建的话，被按住那一张正拿着的指针捕获当场没掉，拖动断在半路
-        // （同方框拖动那一段的警告）。
-        applyStorylinePositions(c, c.state.crystalPath || []);
       } else {
-        l.crystalPos[path] = p;
+        l.crystalPos[path] = at;
       }
+      // ⚠️ 卡片这条走 `applyStorylinePositions`，**不是**只写被拖那张的 left/top：
+      //   · 整批时那几张本来就要跟着走；
+      //   · 单张时，`itemdrag` 在上面刚把**没吸附**的 x/y 写进了 DOM，
+      //     覆盖成吸附后的值只能靠它（它按模型重铺全部 left/top）。
+      // 它**只改 left/top，不重建 DOM**——重建的话被按住那一张正拿着的
+      // 指针捕获当场没掉，拖动断在半路（同方框拖动那一段的警告）。
+      applyStorylinePositions(c, c.state.crystalPath || []);
       redrawStoryLines(c);
       // 列表只在框选时刷新过一次，而这一趟可能重画过节点（相机、方框收起…），
       // 高亮得补回来。它只改类名，每帧跑不心疼。
@@ -1813,8 +1907,23 @@ export function setLineEdit(ctx, on) {
 export function refreshLineHint(ctx) {
   const el = ctx.lineHint;
   if (!el) return;
-  if (!isLineEdit(ctx) || ctx.state.stage !== "storyline") {
+  if (ctx.state.stage !== "storyline") {
     el.style.display = "none";
+    return;
+  }
+  // 3.0 刀 32：**不在编辑模式、但有东西被选中时也要说一句。**
+  // 框是"点标题栏"选中的，那条路根本不经过编辑模式——而"方向键能挪它"
+  // 这件事屏幕上没有任何别的地方会讲。不说的话，这个功能等于不存在。
+  const nudgeN = cardSel(ctx).length + boxSel(ctx).length;
+  if (!isLineEdit(ctx)) {
+    if (!nudgeN) {
+      el.style.display = "none";
+      return;
+    }
+    el.textContent =
+      "已选中 " + nudgeN + " 样 · 方向键一格一格挪（左右 " + STEP_X + "px，上下 " + STEP_Y + "px）· 再点一下框的标题栏取消";
+    el.classList.toggle("kb-v13-linehint-hit", true);
+    el.style.display = "block";
     return;
   }
   const kind = marqueeKind(ctx);
@@ -1832,7 +1941,7 @@ export function refreshLineHint(ctx) {
   // **默认会发生的事**——用户不知道下一步是"拖其中一张"的话，框选就白做了。
   el.textContent = n
     ? card
-      ? "已选中 " + n + " 张卡 · 按住其中任意一张拖走，整批一起动（拖进/拖出方框也一样）· Esc 退出"
+      ? "已选中 " + n + " 张卡 · 按住其中任意一张拖走，整批一起动（拖进/拖出方框也一样）· 方向键一格一格挪 · Esc 退出"
       : blue
         ? "已选中 " + n + " 根蓝色线 · 点「删除蓝线」或按 D（会从笔记里删掉）· Esc 退出"
         : "已选中 " + n + " 根金色线 · 点「删除实线」或按 D · Esc 退出"
@@ -1875,6 +1984,106 @@ export function cardSel(ctx) {
  * 而它**只碰 SVG**（见它顶上那条「绝不能重建节点」——被拖的那个元素一换掉，
  * 指针捕获就没了）。所以选中高亮得另有一条只改类名的路。
  */
+/**
+ * 3.0 刀 32：选中的**框**（存框 id）。方向键一格一格挪的就是它 + `cardSel`。
+ *
+ * 为什么要单独一张表：卡片的选中是**框选**出来的（一次一片），框的选中是**点出来**的
+ * （一次一个）。两种手势、两种粒度，硬合成一张表的话，框选完卡片再点个框，
+ * 那一片卡片就悄悄不选了——用户下一次按方向键会以为坏了。
+ */
+export function boxSel(ctx) {
+  return Array.isArray(ctx.state.boxSel) ? ctx.state.boxSel : [];
+}
+
+/**
+ * 点标题栏选中一个框。**独占**：再点别的框就换人（不做多选）。
+ *
+ * ⚠️ **晶体框不给选。** 它没有自己存的位置（用户 09-28 拍板保持"跟着成员算出来"），
+ * 选中它却没东西可挪，等于给了个亮着却按不动的选中态——那比不亮更糟。
+ * 拦在这里而不是拦在 `nudgeSelection` 里：高亮那一下也得一起拦掉。
+ */
+export function selectBox(ctx, id) {
+  const s = String(id || "");
+  if (!s) return false;
+  const target = boxesOf(ctx, ctx.state.crystalPath).find((b) => String(b.id) === s);
+  if (!target || target.crystal) return false;
+  const cur = boxSel(ctx);
+  const only = cur.length === 1 && cur[0] === s;
+  ctx.state.boxSel = only ? [] : [s];
+  applyBoxSel(ctx);
+  refreshLineHint(ctx);
+  return true;
+}
+
+/** 把"选中了哪个框"刷到现成的元素上（不重建 DOM，同 `applyCardPicked`）。 */
+export function applyBoxSel(ctx) {
+  const sel = new Set(boxSel(ctx));
+  const els = ctx._boxEls;
+  if (!els || !els.forEach) return;
+  for (const [id, node] of els) node.classList.toggle("kb-v13-sbox-sel", sel.has(String(id)));
+}
+
+/**
+ * 方向键一格一格挪（3.0 刀 32，用户 09-28 拍板「两个都要」）。
+ *
+ * 挪的是**此刻选中的东西**：框选中的卡片 + 点标题栏选中的那个框。
+ *
+ * @param {number} dx 像素。调用方给的是 `±STEP_X` / `±STEP_Y`（单位怎么算的见 storygrid）
+ */
+export function nudgeSelection(ctx, dx, dy) {
+  const cards = cardSel(ctx);
+  const boxes = boxSel(ctx);
+  if (!cards.length && !boxes.length) return false;
+  const l = layoutOf(ctx);
+  if (!l.crystalPos) l.crystalPos = {};
+  // 卡片：**每张各自吸到格点上**。整批拖走时不能各自吸（会把错开半格的两张揉到
+  // 一起），但**方向键是另一回事**——按一下的意图就是"都给我对上格"，
+  // 而且一次只走一格，各自归位正是他要的。
+  for (const p of cards) {
+    const card = ctx.model.byPath.get(p);
+    if (!card) continue;
+    const at = nodePosOf(ctx, card, layoutFor(ctx, ctx.state.crystalPath));
+    l.crystalPos[p] = snapPos(at.x + dx, at.y + dy, NODE_H);
+  }
+  // 框：手动框才在 boxSel 里（晶体框没有自己存的位置）。
+  for (const id of boxes) {
+    const b = boxesOf(ctx, ctx.state.crystalPath).find((x) => String(x.id) === String(id));
+    if (!b || b.crystal) continue;
+    const at = snapPos(Number(b.x) + dx, Number(b.y) + dy, b.h);
+    setBoxRect(ctx, id, at);
+  }
+  if (cards.length) applyStorylinePositions(ctx, ctx.state.crystalPath || []);
+  if (ctx.refreshStoryline) ctx.refreshStoryline();
+  else {
+    applyBoxSel(ctx);
+    applyCardPicked(ctx);
+  }
+  if (ctx.refreshStageUi) ctx.refreshStageUi();
+  return true;
+}
+
+/**
+ * 此刻有东西可以被方向键挪吗（决定那四个键归不归我们）。
+ *
+ * ⚠️ **不能只看两张表非空**——表里可能只剩"已经不在了的东西"。选中一个框、再点它的
+ * ✕ 删掉它，表里那条 `m:1` 还在（那条删除走的是捕获阶段的 click 处理器，
+ * `stopPropagation` 把"点空白清选中"那条路整个掐掉了）；卡片被删 / 改名也一样。
+ *
+ * 后果不是"挪不动"这么轻——**这四个键会被永远认领**：结构窗里方向键从此翻不了页
+ * （一声不响），库里按 Esc 想取消选中会一路掉到「退一层 / 关掉整个晶体库」，
+ * 而说明条还在教他"再点一下框的标题栏取消"，那个框早没了。
+ *
+ * 所以这里**逐个验真身**：卡片问 `byPath`，框问上一帧渲染出来的元素表
+ * （`_boxEls` 是 O(1) 的，而且它反映的正是屏幕上还有哪些框）。
+ */
+export function hasNudgeSel(ctx) {
+  const byPath = ctx.model && ctx.model.byPath;
+  if (byPath) for (const p of cardSel(ctx)) if (byPath.get(p)) return true;
+  const els = ctx._boxEls;
+  if (els && els.has) for (const id of boxSel(ctx)) if (els.has(String(id))) return true;
+  return false;
+}
+
 export function applyCardPicked(ctx) {
   const sel = new Set(cardSel(ctx));
   const host = ctx.canvas;
@@ -1967,12 +2176,17 @@ export function clearPicked(ctx) {
   // 3.0 刀 30：卡档的选中。**这一条最容易漏**——漏了的话，切回线档之后
   // 上一轮选中的那几张卡还亮着边，而点「删除实线」删的是线。
   ctx.state.cardSel = [];
+  // 3.0 刀 32：选中的框同一条命——**点空白 / Esc 退出时它要跟着没**，
+  // 不然方向键会去挪一个用户早就忘了自己选过的框。
+  ctx.state.boxSel = [];
   ctx.state.marqueeRect = null;
   // ⚠️ **顺带把屏幕上的高亮也擦掉。** 卡片的选中标记长在节点元素的类名上，
   // 而这条路有四个调用点，其中两个**完全不会重画节点**（`setLineEdit(false)`
   // 只重画线；框选起手那一下也是只重画线）。少这一句的表现是：退出编辑模式之后
   // 那几张卡还亮着边，而此刻点它们已经没有任何特殊含义了——用户会以为还选着。
   applyCardPicked(ctx);
+  // 框那份也要擦——它长在框元素的类名上，而这条路同样有几个调用点不重画框。
+  applyBoxSel(ctx);
 }
 
 /**
@@ -2369,7 +2583,23 @@ export function bindLineEdit(ctx) {
       // 它就当场起了一个框选；松手时 `ateClick` 立起来，紧接着那一下 click
       // 被吃掉 —— **✕ 一声不响地没发生**，屏幕上只闪了个框。纯点击（一像素不动）
       // 反而是好的，所以这是"手抖才现形"那一类。
-      if (e.target && e.target.closest && e.target.closest(".kb-v13-sbend,.kb-v13-snode-unimport")) return;
+      // 3.0 刀 32：**框的标题栏和抓手也一起放行。**
+      //
+      // 这一条修的是一个一直存在的洞：框的拖动那两下（`_kbBoxDrag`）绑在 `canvas`
+      // 上，而这里是绑在 `stage` 上的**捕获**阶段 + `stopImmediatePropagation`
+      // ——事件根本到不了 canvas。于是「选框」开着的时候，框既拖不动
+      // （老问题），点标题栏也选不中（新的那条路）。而"刚框选完一片卡片"
+      // 恰恰是用户最可能顺手去点一个框的时刻。
+      //
+      // 标题栏和抓手是**控件**，不是"空白画布"——从这里起手框选本来就没什么意义
+      // （那一条只有 20px 高），放行不会让谁少了什么。
+      if (
+        e.target &&
+        e.target.closest &&
+        e.target.closest(".kb-v13-sbend,.kb-v13-snode-unimport,.kb-v13-sbox-bar,.kb-v13-sbox-grip")
+      ) {
+        return;
+      }
       if (e.button !== 0) return;
       // **「选框」开着**才框选。关着的时候拖动仍然是平移画面——
       // 编辑模式里最常做的事还是挪卡片、推画面，不能把拖动整个占掉。
@@ -2448,6 +2678,64 @@ export function bindLineEdit(ctx) {
   };
   g.addEventListener("pointerup", end);
   g.addEventListener("pointercancel", end);
+
+  // 3.0 刀 32：**方向键 = 一格一格挪**（用户 09-28 拍的「两个都要」）。
+  //
+  // ⚠️ **必须用捕获阶段，而且必须排在阅读器那条前面。** 结构窗开在阅读器里，
+  // 阅读器自己的 keydown（← → / PageUp / PageDown 翻页）绑在 doc 的**冒泡**阶段，
+  // 而且**注册得比这扇窗早**——同元素同阶段按注册顺序跑，轮不到我们，
+  // 页已经翻过去了。捕获阶段永远先于冒泡，这条才抢得到。
+  //
+  // ⚠️ 只在**真的有东西被选中**时才认领：没选中时方向键该干嘛干嘛
+  // （在结构窗里就是翻文献），不然窗一开，读者就再也没法用方向键翻页了。
+  doc.addEventListener(
+    "keydown",
+    (e) => {
+      // 只要在故事线这一屏、**有东西被选中**就归我们。不要求处在编辑模式：
+      // 框是"点标题栏"选中的，那件事跟编辑模式无关（卡片的选中才来自框选，
+      // 而框选本来就在编辑模式里）。
+      if (ctx.state.stage !== "storyline") return;
+      const step =
+        e.key === "ArrowLeft" ? [-STEP_X, 0]
+        : e.key === "ArrowRight" ? [STEP_X, 0]
+        : e.key === "ArrowUp" ? [0, -STEP_Y]
+        : e.key === "ArrowDown" ? [0, STEP_Y]
+        : null;
+      if (!step) return;
+      if (!hasNudgeSel(ctx)) return;
+      if (!keysAreOurs(ctx)) return;
+      // ⚠️ 窗口收进收纳栏 / 被挂起时尺寸是 0×0（同 `fit()` 那条判据）——
+      // 那会儿按方向键的人找的是别的东西，认领了等于让它在别处静默失效。
+      // （库那一屏没有"窗口"这回事，`getBoundingClientRect` 照样有值。）
+      //
+      // 这一条**顺带挡住一个更隐蔽的情形**：这条监听挂在共享的 `doc` 上，
+      // 而结构窗是可以关掉再开的（`destroy` 只摘了 Esc 那条，没摘这条，
+      // 同 `bindLineEdit` 里 D 键那条的老毛病）。关掉的那扇窗，它的舞台
+      // 已经从 DOM 上摘走——量出来正是 0×0，于是那个"死监听"每次都提前返回，
+      // 不会替一个用户看不见的窗口去认领按键。
+      const r = g.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      // ⚠️ **光标在输入框里时不认领。** 这条比看上去细，两个形态判的**不是同一件事**：
+      //
+      //   · **`INPUT` / `TEXTAREA` / `SELECT`：两个形态都排除。** 这是"真的有个输入
+      //     控件在等着收字"——库那一屏也有，方框就地改名那颗
+      //     （`inlinerename.js` 的 `.kb-v13-rename-input`）**不在** `.kb-v13-editform`
+      //     里，`keysAreOurs` 拦不到它。不排除的话：改名时按 ← 光标不动，
+      //     反而把选中的卡片挪了。
+      //   · **`contentEditable`：只有结构窗排除。** 库那一屏压根没有可聚焦的元素，
+      //     `activeElement` **永远**是背后那篇笔记的 contenteditable（见 `keysAreOurs`
+      //     那条）——拿它当判据的话，库里的方向键**永远**不生效。
+      //     而结构窗里出现 contenteditable，就是阅读器右边「边看边记」的正文框。
+      const a = ctx.doc && ctx.doc.activeElement;
+      const tag = a && a.tagName ? String(a.tagName).toUpperCase() : "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (ctx.__embedView && a && a.isContentEditable) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      nudgeSelection(ctx, step[0], step[1]);
+    },
+    true
+  );
 
   // 点空白退出编辑模式。点卡片不算——那一下是"打开这张卡"，不该顺手把模式收了。
   g.addEventListener("click", (e) => {

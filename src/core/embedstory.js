@@ -58,6 +58,8 @@ import {
   hiddenCardSet,
   showAllHidden,
   storylineCards,
+  hasNudgeSel,
+  clearPicked,
 } from "./storyline.js";
 import { importCard } from "./storyimports.js";
 
@@ -162,6 +164,10 @@ function makeFacade(ctx, view) {
   // （路径是同一个库里的路径，真的对得上），而库里根本没有卡档这个概念。
   st.marqueeCard = false;
   st.cardSel = [];
+  // 3.0 刀 32：选中的框。**同一条理由**——透到真 state 的话，在结构窗里点中一个框，
+  // 切回库那一屏按方向键会把库里那个同 id 的框挪走（id 是 `m:1` 这种全局编号，
+  // 两边的框本来就撞号）。
+  st.boxSel = [];
   st.hideLinks = false;
   fake.state = st;
   fake.fs = view.root; // 模式类名（kb-v13-linking 等）挂在这一扇窗自己的根上
@@ -183,6 +189,11 @@ function makeFacade(ctx, view) {
   // 会把**库那一屏**的卡片几何当成本窗的用，而两屏看的多半不是同一颗晶体，
   // 于是"框住五张、选中三张"，或者拖走一批屏幕上没碰过的卡。
   fake._cardHit = null;
+  // 3.0 刀 32：框 id → 元素那张表。**同上一条**——这一扇窗要是从没画过故事线
+  // （比如还没挑晶体，`render` 半路就返回了），`_boxEls` 就会顺着原型链读到
+  // **库那一屏**那张表，于是 `applyBoxSel` 去给库的框加/去选中类。
+  // 画面上是"库那屏有个框莫名其妙亮着"，不报错。
+  fake._boxEls = null;
   fake._rubber = null;
   fake._rubberSide = null;
   fake.lineHint = null;
@@ -368,14 +379,19 @@ export function createEmbedStory(ctx, opts = {}) {
     // 要找的是别的东西——吞掉它等于让 Esc 在别处静默失效。
     const rect = root.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    if (!fake.state.lineEdit) return;
+    // 3.0 刀 32：**选中了框但没在编辑模式**时，Esc 也该管用——框是"点标题栏"
+    // 选中的，那条路不经过编辑模式，而那会儿没有别的东西能取消它
+    // （只有"再点一下同一个框"）。有东西被选中时按 Esc，人的意思一定是取消选中。
+    const nudge = hasNudgeSel(fake);
+    if (!fake.state.lineEdit && !nudge) return;
     // 正在我们自己的编辑表单里打字时不认领——那一下的意思是「从输入框里出来」，
     // 归 reader.js 的 typingNow 那条管，这里抢了就把人锁在框里了。
     const a = doc.activeElement;
     if (a && a.closest && a.closest(".kb-v13-editform")) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    setLineEdit(fake, false);
+    if (fake.state.lineEdit) setLineEdit(fake, false);
+    else clearPicked(fake);
   };
   doc.addEventListener("keydown", onEsc, true);
 
