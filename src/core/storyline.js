@@ -45,10 +45,11 @@ import { gridToPixel, queueCardPos } from "./cardpos.js";
 // 3.0 刀 34：收纳方框不走格点了（用户 09-29），所以 `UNIT` / `snapX` / `snapY`
 // 从这里不再需要——**格点现在只管卡片**，用的是 `snapPos` 和那两步长。
 import { STEP_X, STEP_Y, snapPos } from "./storygrid.js";
-// 3.0 刀 34/38：新建的东西落在**你正看着的地方**。
-// ⚠️ 这一层现在直接问 `ctx.viewRect()`（它要的是**整个矩形**——新卡按用户定的
-// 公式落在"右边留 5%"上，不是正中），所以 `viewportCenter` 在这里不再需要。
-// 它还在给 `storyimports`（引进来的卡）和收纳方框用。
+// 3.0 刀 34/38/39：新建的东西落在**你正看着的地方**。
+// ⚠️ 用的是 `viewportPoint`（**带相机换算**，屏幕上的比例 → 世界坐标），
+// 不是 `ctx.viewRect()` 那几个数——那是**屏幕**矩形，当世界坐标用会落到
+// 一个和当前视口无关的地方。见 `placeNewCard` 里那段。
+import { viewportPoint } from "./storyspot.js";
 import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
@@ -226,24 +227,28 @@ export function placeNewCard(ctx, path) {
   const chain = ctx.model.resolveChain ? ctx.model.resolveChain(card.crystal) : null;
   if (!Array.isArray(chain) || chain.length < viewed.length) return false;
   for (let i = 0; i < viewed.length; i++) if (viewed[i] !== chain[i]) return false;
-  // ---- 落点：**按当前视口算出来的**（用户 09-29 定的公式）----
+  // ---- 落点：按**当前视口**算（用户 09-29 定的公式）----
   //
   // 「根据当前视口，建立在**视口右侧 5%** 的位置」：
   //   · 横向：贴右边，离视口右边缘留 5% 宽 —— 也就是卡片的**右边缘**落在
-  //     `视口右边 − 5%` 上（不是左边缘落在 95% 上：那样子卡会几乎全在屏幕外）；
+  //     "右边留 5%" 那一点上（不是左边缘落在 95% 上：那样子卡会几乎全在屏幕外）；
   //   · 纵向：**居中**（用户只说了横向）。
+  //
+  // ⚠️⚠️ **必须走 `viewportPoint`（它会用相机把"屏幕上的哪一点"换算成世界坐标），
+  // 不能直接拿 `ctx.viewRect()` 的数当世界坐标用。** 我第一版就是这么错的：
+  // `viewRect()` 给的是**这一层在屏幕上的矩形**（全屏时是 `0,0,窗口宽高`），
+  // 而 `crystalPos` 存的是**世界坐标**——两者只在"相机停在原点、缩放 1"时重合。
+  // 于是新卡永远落在一个**和用户推到哪儿毫无关系**的固定地方，
+  // 表现就是用户报的「还是默认坐标，不在我打开的这个视口里」。
+  // 用户把这句话说得很准：「当前视口是指**当前正在打开**的那个视口，
+  // 不是原始视口——原始视口是最初默认打开的位置」。
   //
   // ⚠️ 这里**不吸附到格点**（别处拖卡片是吸附的）。用户给的是一个**具体公式**，
   //    对不上他会以为又没生效；而"离右边 5%"本来就多半不在格点上，硬吸会差半格。
   //    他拖一下它自己就归位了。
-  const r = typeof ctx.viewRect === "function" ? ctx.viewRect() : null;
-  if (!r || !(r.w > 0)) return false;
-  const left = r.left + r.w * 0.95 - NODE_W;
-  const at = {
-    // 视口比卡片还窄时别把它推到屏幕外——退到左边贴边。
-    x: Math.max(r.left, left),
-    y: r.top + r.h / 2 - NODE_H / 2,
-  };
+  const p = viewportPoint(ctx, 0.95, 0.5);
+  if (!p) return false;
+  const at = { x: p.x - NODE_W, y: p.y - NODE_H / 2 };
   const l = layoutOf(ctx);
   if (!l.crystalPos) l.crystalPos = {};
   l.crystalPos[card.path] = at;

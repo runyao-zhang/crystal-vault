@@ -22,14 +22,39 @@
  * 所以这个函数必须吃"当前那一屏的 ctx"，不能拿全局那个。
  */
 export function viewportCenter(ctx) {
+  return viewportPoint(ctx, 0.5, 0.5);
+}
+
+/**
+ * 3.0 刀 39：**"这一层上某个位置，对应世界坐标的哪儿"**。
+ *
+ * `fx` / `fy` 是**画面里的比例**：`(0,0)` 是左上角、`(1,1)` 是右下角、
+ * `(0.95, 0.5)` 是"右边留 5%、上下居中"。
+ *
+ * ⚠️⚠️ **这个函数存在的全部意义就是那次换算。** 用户 09-29 报的
+ * 「新卡还是建在默认坐标，不在我打开的这个视口里」，根因就是有人（我）
+ * 把 `ctx.viewRect()` 的结果**当世界坐标用了**——而它给的是**这一层在屏幕上的矩形**
+ * （全屏时就是 `0,0,窗口宽高`）。屏幕坐标和世界坐标只有在"相机停在原点、缩放 1"
+ * 时才重合，所以那个位置跟用户推到哪儿**毫无关系**。
+ *
+ * 用户原话把这件事说得比我清楚：「**当前视口是指当前正在打开的那个视口，
+ * 不是原始视口——原始视口是最初默认打开的位置**」。`clientToWorld` 读的正是
+ * **相机此刻**的位置，所以它天然就是"当前视口"。
+ *
+ * ⚠️ 量不到就**回 null**，调用方各自退到默认落点。量不到的场合是真的
+ * （还没进相机档、窗口收进收纳栏、舞台尺寸 0×0）。
+ */
+export function viewportPoint(ctx, fx, fy) {
   const pz = ctx && ctx._panzoom;
   const st = ctx && ctx.stage;
   if (!pz || !st || typeof pz.clientToWorld !== "function") return null;
   const r = st.getBoundingClientRect ? st.getBoundingClientRect() : null;
   // 0×0 = 这一屏此刻不在屏幕上（收进收纳栏 / 被挂起 / 还没量过）。
   if (!r || r.width < 2 || r.height < 2) return null;
+  const ax = Number.isFinite(fx) ? Math.min(Math.max(fx, 0), 1) : 0.5;
+  const ay = Number.isFinite(fy) ? Math.min(Math.max(fy, 0), 1) : 0.5;
   try {
-    const w = pz.clientToWorld(r.left + r.width / 2, r.top + r.height / 2);
+    const w = pz.clientToWorld(r.left + r.width * ax, r.top + r.height * ay);
     if (Number.isFinite(w.x) && Number.isFinite(w.y)) return { x: w.x, y: w.y };
   } catch (e) {
     /* 相机半路被拆了——回 null，让调用方用默认落点 */
