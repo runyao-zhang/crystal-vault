@@ -942,9 +942,24 @@ export async function mount({
   // 于是退化成从前的行为——只有有卡的才上环。
   const folders = adapter.listFolders ? await adapter.listFolders() : [];
   const model = createModel(cards, adapter, folders);
+  // ---- 3.0 刀 36：这一层界面在屏幕上的位置和大小 ----
+  //
+  // ⚠️ **这两个 `let` 必须声明在下面 `createMetrics` 那一行之前。** 第一版把它们
+  // 和 `paintViewBox` 一起放在"全屏暗场"那段旁边（更贴近用到它们的地方，读着顺），
+  // 结果 `createMetrics` 里引用 `viewBox` 时它还在 TDZ 里——**真机上打开晶体库直接
+  // 报 `Cannot access 'j' before initialization`**，一整块都进不去。
+  // 这个报错在生产包里被压成了一个字母，从堆栈上完全看不出是谁。
+  // **以后再往这附近加东西，先问一句"它用到谁、谁先声明"。**
+  let viewBox = windowed
+    ? clampViewBox(
+        validBox(windowBox) ? windowBox : defaultViewBox(win.innerWidth, win.innerHeight),
+        win.innerWidth,
+        win.innerHeight
+      )
+    : null;
+  let viewGrip = null;
+
   // 3.0 刀 36：按**这一层界面**的尺寸算，不是视口（浮窗模式下两者不一样）。
-  // ⚠️ 这里**不能调 `viewRect()`**：下面那段（定义 viewBox / viewRect 的）还没执行到，
-  // 那是一对 `const`，提前引用会 TDZ 抛错。就地写同一件事的两种情形。
   const metrics = createMetrics(
     viewBox ? { w: viewBox.w, h: viewBox.h } : { w: win.innerWidth, h: win.innerHeight }
   );
@@ -1014,10 +1029,8 @@ export async function mount({
   // 夹取、环形排布的缩放基准、卫星 viewBox）全都**假设"这一层铺满视口"**。
   // 界面一旦只占屏幕的一块，那个假设就不成立了，而失效的表现是
   // "面板飘到窗口外面去了"——不报错，只是东西跑到你看不见的地方。
-  let viewBox = windowed
-    ? clampViewBox(validBox(windowBox) ? windowBox : defaultViewBox(win.innerWidth, win.innerHeight), win.innerWidth, win.innerHeight)
-    : null;
-  let viewGrip = null;
+  // ⚠️ `viewBox` / `viewGrip` 的**声明在上面的 `createMetrics` 之前**（见那一行
+  // 附近的注释）——这里只放函数。**别再往这段前面加用到它们的东西**。
   const viewRect = () =>
     viewBox
       ? { left: viewBox.x, top: viewBox.y, w: viewBox.w, h: viewBox.h }

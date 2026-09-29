@@ -262,6 +262,8 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.71** · Fixes a fatal bug in 1.3.70: **the vault would not open at all** (`Cannot access 'j' before initialization`). I had declared `viewBox` *after* the line that reads it — a temporal-dead-zone error — and in the production bundle the variable is minified to a single letter, so the message names nothing recognisable. The declaration now comes first.
+
 **1.3.70** · **Windowed mode**: the vault no longer has to fill the screen — it can shrink to a draggable, resizable rectangle floating over your note, so you can read and use the vault at the same time. Pick the default in the plugin settings, or flip it any time with the button in the vault's top bar. (The version jumps from 1.3.60 because this is an architectural change: the vault gained a notion of *how much screen it occupies*, and every piece of coordinate maths that assumed "the viewport" now asks "this layer" instead.)
 
 **1.3.60** · Boxes are written to disk: one `.crystal-boxes.json` per crystal (dot-prefixed, so Obsidian never shows it), holding each box's name, size, collapsed state and members. Positions that only ever lived on this machine are moved in automatically the first time you open the vault after upgrading.
