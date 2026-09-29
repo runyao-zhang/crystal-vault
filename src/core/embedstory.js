@@ -50,6 +50,9 @@ import {
   setMarqueeArm,
   marqueeSel,
   blueSel,
+  // 3.0 刀 41：卡档也要能删（用户 09-29）。
+  cardSel,
+  clearPicked,
   marqueeKind,
   isCardMarquee,
   setCardMarquee,
@@ -98,7 +101,15 @@ export const EMBED_CSS =
   // 背后挂上"删掉笔记里的 [[链接]]"这种动作之后，「选框正开着」必须在屏幕上
   // 看得见。用与库里 `.kb-v13-marquee-btn` 同一支红：红 = 破坏性动作。
   ".kb-v13-embedact.on{background:rgba(165,70,60,.62);" +
-  "  border-color:rgba(255,150,140,.6);color:rgba(255,225,215,.98);}";
+  "  border-color:rgba(255,150,140,.6);color:rgba(255,225,215,.98);}" +
+  // 3.0 刀 41：「删除卡片」。**它一出现就是红的**，而不是像 `.on` 那样按下去才红——
+  // `.on` 说的是"这个开关现在开着"，可以有开有关；这一颗从露面那一刻起就挂着一个
+  // **删文件**的动作，没有"没打开"的状态。同一支红，与 `.kb-v13-embedact.on`、
+  // 库里那几颗删除按钮同一条约定：**红 = 破坏性**。
+  ".kb-v13-embeddanger{border-color:rgba(255,150,140,.45);" +
+  "  color:rgba(255,205,195,.92);}" +
+  ".kb-v13-embeddanger:hover{background:rgba(165,70,60,.45);" +
+  "  border-color:rgba(255,150,140,.78);color:rgba(255,238,232,1);}";
   // 3.0 刀 16：`.kb-v13-embedgo` / `.kb-v13-embedreason` 两条样式跟着那个
   // 「为什么连过去？」输入框一起删了（用户 09-21）。
 
@@ -198,6 +209,12 @@ function makeFacade(ctx, view) {
   fake.lineHint = null;
   // 结构窗就是「阅读器之上那一层」，不是被它盖住的那一层——见上面那条警告。
   fake.__embedView = view;
+  // 3.0 刀 41：**这一屏有「删除卡片」**（用户 09-29）。
+  //
+  // `refreshLineHint` 是库和结构窗**共用**的一份，它的卡档文案里要不要提这颗按钮
+  // 只能在这儿问一句能力——库里卡档仍然只有移动，照搬过去那句说明就会指着一颗
+  // 不存在的按钮（同 adapter.js 那条：一个能力问句 + 一个兜底）。
+  fake.cardDelete = true;
   return fake;
 }
 
@@ -260,6 +277,23 @@ export function createEmbedStory(ctx, opts = {}) {
   delBtn.style.display = "none";
   marqueeBtn.addEventListener("click", () => setMarqueeArm(fake, !fake.state.marqueeArm));
   delBtn.addEventListener("click", () => deletePickedFor(fake));
+
+  // 3.0 刀 41（用户 09-29）：「删除卡片」——框住几张卡，一键连文件一起丢回收站。
+  //
+  // ⚠️ **和 `delBtn` 是两颗按钮，不合成一颗。**
+  //   它们删的东西根本不是一类：一颗删的是**线**（金线/蓝线，蓝线还会动笔记正文里
+  //   那条 `[[链接]]`），另一颗删的是**卡片文件本身**。而且两颗永不同时出现
+  //   （`delBtn` 在卡档下 `n` 恒为 0，这颗只在卡档有事可做时才出来），所以并排
+  //   也不占地方。合成一颗轮着切的话，"按下去会删掉什么"没法从屏幕上读出来——
+  //   09-20 那次「右键只有金色线」栽的就是这一类。
+  //
+  // ⚠️ **不加确认弹窗**，守这扇窗既有的规矩（用户 09-20 明确不要）：
+  //   「说明条就是仅有的告知」。所以代价写在三处，一处都不能省——
+  //   按钮上的张数、悬停那句话、以及底下的说明条（见 syncBar / refreshLineHint）。
+  const delCardBtn = EL("button", "kb-v13-embedact kb-v13-embeddanger");
+  delCardBtn.type = "button";
+  delCardBtn.style.display = "none";
+  delCardBtn.addEventListener("click", () => deletePickedCards());
 
   // 「晶体：X」——换一颗看。**这是用户 09-19 要的「自己选」**：窗里固定看哪颗
   // 是他挑的，不是跟着他在库里逛到哪儿算哪儿（头一版走 `state.openCrystal`，
@@ -327,7 +361,20 @@ export function createEmbedStory(ctx, opts = {}) {
     if (opts.onPickCard) opts.onPickCard();
   });
 
-  bar.append(crystalBtn, modeBtn, kindBtn, marqueeBtn, delBtn, showAllBtn, addBoxBtn, importBtn, hint);
+  // `delCardBtn` 紧挨着 `delBtn`：两颗永不同时出现（一个管线、一个管卡），
+  // 占的是同一个视觉位置——"框住之后能删什么"就在这一处。
+  bar.append(
+    crystalBtn,
+    modeBtn,
+    kindBtn,
+    marqueeBtn,
+    delBtn,
+    delCardBtn,
+    showAllBtn,
+    addBoxBtn,
+    importBtn,
+    hint
+  );
   stage.appendChild(world);
   root.append(stage, bar);
 
@@ -436,6 +483,76 @@ export function createEmbedStory(ctx, opts = {}) {
   modeBtn.addEventListener("click", () => setWriteMode(!fake.state.linkWrite));
 
   /**
+   * 「删除卡片」（3.0 刀 41，用户 09-29）：把框选中的那几张卡**连文件一起**丢回收站。
+   *
+   * ---- 为什么卡档现在有「删除」了 ----
+   *
+   * 卡档原来写死"没有删除这回事"（`syncBar` 里那个 `card ? 0 : …` 就是为它设的），
+   * 理由是卡片只有移动。用户 09-29 要的是**在这儿也能删**：框住一批、一键清掉，
+   * 而不是切回库里一张张走「删除卡片」。
+   *
+   * ---- 四条纪律 ----
+   *
+   *   1. **走 `trashFile`（回收站），不做 unlink。** 与库里的「删除卡片」同一个口子，
+   *      用户在宿主/系统回收站里捡得回来。这是**文件**，不是正文里的一行字——
+   *      删错了没有"再打一遍"这条路，所以回收站这一步不能省。
+   *   2. **一张失败不影响其余**（同 `cardpos.js` 的 flushBatch）。删到一半撞上一个
+   *      被别的程序占住的文件，剩下的还得删完——半途而废留下的是"我也不知道删了
+   *      几张"的状态。
+   *   3. **先清选中再开删。** 清早了这一批就定了（中途用户再框也混不进来）；不清的话
+   *      删完按钮上还写着「删除卡片（3）」而其中几张已经不在了，下一次点下去删的是
+   *      别的东西。
+   *   4. **`removeCard`（摘一张）不是 `removeFolder`（摘一棵子树）。** 这两个在这份
+   *      代码里长得像，用错就是把整颗晶体连带删掉（reader.js 的 doTrashCard 专门
+   *      为这一条写过警告）。
+   */
+  async function deletePickedCards() {
+    const paths = cardSel(fake).slice();
+    if (!paths.length) return;
+    const api = ctx.adapter;
+    if (!api || typeof api.trashFile !== "function") {
+      say("这个宿主不给删文件的口子，删不了。", false);
+      return;
+    }
+    clearPicked(fake); // 纪律 3
+    let ok = 0;
+    const failed = [];
+    for (const p of paths) {
+      let res = null;
+      try {
+        res = await api.trashFile(p);
+      } catch (e) {
+        res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
+      }
+      if (res && res.ok) {
+        if (ctx.model && ctx.model.removeCard) ctx.model.removeCard(p);
+        ok++;
+      } else {
+        failed.push(p);
+      }
+    }
+    // 顺序与库那一侧一致（reader.js 的 doTrashCard）：模型先改对，再重画。
+    // `removeCard` 内部已经 rebuildGroups + rebuildRelations，所以这里不用再调
+    // refreshRelations。
+    if (ctx.renderCrystals) ctx.renderCrystals();
+    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+    if (ctx.refreshOrphans) ctx.refreshOrphans();
+    if (ctx.refreshFolders) ctx.refreshFolders();
+    if (ctx.flushViewState) ctx.flushViewState();
+    // 这一扇窗自己重画（换晶体、卡片被改，都走它）。
+    render(view.path, { keepCamera: true });
+    // ⚠️ 重画**不会**顺手刷这一条工具栏（它俩是两条路），所以按钮的显隐和底下那句
+    //    说明条要自己收尾——不收的话，删完之后「删除卡片（3）」还亮在那儿。
+    syncBar();
+    say(
+      failed.length
+        ? "删掉 " + ok + " 张，有 " + failed.length + " 张没删成（多半是被占住了），它们还在。"
+        : "删掉 " + ok + " 张卡——进了回收站，能捡回来。",
+      failed.length === 0
+    );
+  }
+
+  /**
    * 这一条工具栏跟着模式走。
    *
    * ⚠️ **`refreshStageUi` 必须覆盖掉**：`setLineEdit` / `setMarqueeArm` /
@@ -449,10 +566,16 @@ export function createEmbedStory(ctx, opts = {}) {
     const blue = kind === "blue";
     const editing = !!fake.state.lineEdit;
     const armed = !!fake.state.marqueeArm;
-    // 卡档下**必须是 0**，于是「删除实线 / 删除蓝线」那颗自己收起来：卡档里没有
-    // "删除"这回事（卡片只有移动）。写成 0 而不是"另外判一次 card"，
-    // 是因为下面那句 `n > 0` 同时管着显隐和文案——一个数管一处，不会对不上。
+    // 卡档下**必须是 0**，于是「删除实线 / 删除蓝线」那颗自己收起来——它删的是
+    // **线**，卡档里没有线可删。写成 0 而不是"另外判一次 card"，是因为下面那句
+    // `n > 0` 同时管着显隐和文案——一个数管一处，不会对不上。
+    //
+    // ⚠️ 3.0 刀 41：卡档**现在有它自己的删除**了，但那是**另一颗按钮**
+    // （`delCardBtn` / `nCard`）。所以这一行的 `card ? 0` **不要动**——
+    // 它管的是"线那颗按钮"，不是"卡这张不能删"。
     const n = card ? 0 : (blue ? blueSel(fake) : marqueeSel(fake)).length;
+    // 卡档选中的张数。单独一个数、单独一颗按钮，理由见 delCardBtn 那段。
+    const nCard = card ? cardSel(fake).length : 0;
     // 换档那颗：编辑模式里一直摆着（**不能"有卡才出现"**——没有可见入口的
     // 手势就是 09-20 那颗"右键只有金色线"的同一种死法）。
     kindBtn.style.display = editing ? "" : "none";
@@ -461,9 +584,9 @@ export function createEmbedStory(ctx, opts = {}) {
     kindBtn.title = card
       ? "现在是「框选卡片」：拖出方框把几张卡一起框住，然后按住其中任意一张\n" +
         "整批一起拖走——拖进收纳方框就归它，拖到框外就移出来。点一下换回框线。\n" +
-        "（框选卡片不会删任何东西——卡档里没有「删除」这回事。）"
+        "（框住之后也可以点「删除卡片」把它们删掉——那张卡连文件一起进回收站。）"
       : "现在是「框选线」：拖出方框把几根线一起框住，再点「删除实线 / 删除蓝线」删掉。\n" +
-        "点一下换成框选卡片——那档是用来**整批挪卡片**的。";
+        "点一下换成框选卡片——那档用来**整批挪卡片**，也用来**整批删卡片**。";
     marqueeBtn.style.display = editing ? "" : "none";
     marqueeBtn.textContent = armed ? "退出选框" : "选框";
     marqueeBtn.classList.toggle("on", armed);
@@ -479,6 +602,17 @@ export function createEmbedStory(ctx, opts = {}) {
     delBtn.title = blue
       ? "把框中的蓝线删掉——笔记正文里对应的 [[链接]] 会一起删掉（可撤销一次）。"
       : "删掉框选中的那几根金线。";
+    // 「删除卡片」（3.0 刀 41）：**只在真有卡被框住的时候出现**——与上面那颗同一条
+    // 规矩（摆一颗点了没反应的按钮比不摆更糟）。
+    //
+    // ⚠️ 三处都要说清代价，一处都不能省：这张数（按钮上）、悬停那句话、底下说明条
+    //    （refreshLineHint 的卡档文案）。这扇窗**没有确认弹窗**，这三处就是全部的告知。
+    delCardBtn.style.display = editing && nCard > 0 ? "" : "none";
+    delCardBtn.textContent = "删除卡片（" + nCard + "）";
+    delCardBtn.title =
+      "把框中的这 " + nCard + " 张卡删掉。\n" +
+      "**连笔记文件一起删**（不是解绑、不是隐藏）——进宿主回收站，能捡回来。\n" +
+      "卡片所在的晶体不动。";
     // 3.0 刀 13：同上——有东西可显才出场
     showAllBtn.style.display = hiddenCardSet(fake).size ? "" : "none";
     // 3.0 刀 16：**这一句原来漏了**（库里 app.js 的 refreshStageUi 结尾有）。

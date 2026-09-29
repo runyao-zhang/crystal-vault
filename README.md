@@ -102,12 +102,16 @@ The default is 「选框：线」: right-click to enter link-edit mode, drag a b
 
 1. box in a few cards and they **light up with a cyan edge**;
 2. **drag any one of them and the whole batch moves**;
-3. on release the whole batch is re-checked for membership: **drop it inside a box and it joins; drop it outside and it leaves**.
+3. on release the whole batch is re-checked for membership: **drop it inside a box and it joins; drop it outside and it leaves**;
+4. to get rid of them, hit the **red-outlined 「删除卡片 (n)」** in the top bar — they **go to the recycle bin along with their note files**.
 
-Without this, filing a dozen cards into one box meant dragging them **one at a time**.
+Without this, filing a dozen cards into one box meant dragging them **one at a time** — and
+clearing a batch meant going back to the vault and deleting them one at a time.
 
 > - Press on a card that is **not** in the selection and only that card moves — after boxing an area, reaching for a different card clearly means "move *this* one", not "and those five as well".
-> - **There is no "delete" in card mode**: the 「删除实线 / 删除蓝线」 button hides itself. Boxing cards only moves them around — it **does not touch a single word of your notes**.
+> - **「删除卡片」 removes the card files themselves** — not an unlink, not a hide. The note goes to the **recycle bin** with it and can be recovered, and the **crystal it belonged to is untouched**. The button only appears when cards are actually boxed, and the count is written on it: this window has **no confirmation dialog**, so the count on the button, the tooltip, and the hint line below are the whole warning.
+> - **The D key does not delete cards here**: one bare keystroke putting several files in the recycle bin is far too easy to trigger — especially with your hand on the arrow keys nudging cards. Deleting goes through that button.
+> - The boxing itself **does not touch a single word of your notes** — the 「删除实线 / 删除蓝线」 button hides itself in card mode, because there are no lines to delete there.
 > - To un-highlight them, **click empty space** or press **Esc**.
 
 ### Card positions travel with your notes
@@ -266,6 +270,11 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.82** · New: **the structure window can now delete a whole batch of cards at once**. Once you have boxed some cards (「框：卡」 + 「选框」 in the top bar), a **red-outlined 「删除卡片 (n)」** appears — one click sends those cards to the **recycle bin together with their note files** (recoverable), leaving the **crystal they belonged to untouched**.
+What it deletes is a **file**, so the cost is stated in three places: the count on the button, the tooltip, and the hint line below. This window has **no confirmation dialog** by design (settled 09-20), so the hint line is the only notice it gives.
+**D does not delete cards**: a single bare keystroke putting several files in the recycle bin is far too easy to trigger, especially with your hand on the arrow keys nudging cards. Deleting goes through that button.
+(The vault's own story view still only moves cards in card mode — there is no such button there.)
 
 **1.3.81** · Fixes: **clicking "Edit" left a stray blank tab behind** (full screen, floating window and embedded alike). The plugin asked the host to "reuse an existing tab" with `getLeaf(false)`, and that call **does not** mean "reuse one" — internally the host runs `getUnpinnedLeaf()`, which asks for **an unpinned** tab and **creates a fresh empty one** whenever the active tab happens to be pinned. While you are in the reader, the active tab is **the vault's own**, so every ✎ click added one. The proof: a probe in the host console printed the call stack at the moment a tab was inserted into the DOM (`mountEditor → getLeaf → getUnpinnedLeaf → setActiveLeaf → … → insertBefore`). The fix: that spot **needs the class, not a real tab** — it now takes the constructor from an already-known markdown tab, which is a lookup: no activation, no creation.
 
