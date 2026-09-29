@@ -80,6 +80,8 @@ The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically*
 
 > **A box you drew belongs to the layer you drew it on.** Make one inside 「Python/数据分析」 and it is not there when you switch to 「Python/爬虫」 — go back and it is exactly as you left it. It did not used to work that way: boxes were global, so switching folders left the other layer's boxes sitting on screen.
 
+A box made with 「**＋ 框**」 lands **where you are looking** (the middle of the viewport), not in some fixed corner of the world — boxes used to appear at a hard-coded (60, 60), so if you had panned away you had to pan back to find it. Same for a newly created card.
+
 Collapsing puts the cards inside away together with the lines running to them — **but "there is still something in there" is never lost**:
 
 - any outside card that still has a blue line into a collapsed box gets a **yellow filled dot** in its corner;
@@ -108,9 +110,26 @@ Without this, filing a dozen cards into one box meant dragging them **one at a t
 > - **There is no "delete" in card mode**: the 「删除实线 / 删除蓝线」 button hides itself. Boxing cards only moves them around — it **does not touch a single word of your notes**.
 > - To un-highlight them, **click empty space** or press **Esc**.
 
-### Placing things by the square: the grid and the arrow keys
+### Card positions travel with your notes
 
-On top of the world coordinates, the structure window and the storyline have a **grid**. Every card and every box you drew yourself sits on it, anchored at the **bottom-left corner** — so two cards side by side line up along their **bottom edge**.
+**Where a card sits is written into that card's own frontmatter** (a field called `晶体坐标`). So open the same vault on another machine with the same plugin and **every card sits exactly where you left it** — the view state is per-machine, and only what is written into the files travels.
+
+The field looks like this; the unit is a grid square (the minimum unit is a tenth of a card's width, 21px), anchored at the **bottom-left corner**:
+
+```yaml
+晶体坐标: [3, 5]
+```
+
+> The `晶体` ("crystal") prefix is deliberate: this plugin gets installed in other people's vaults, and a bare `坐标` ("coordinate") is far too generic a name — anyone with a field of their own by that name would have it silently overwritten.
+
+> - **Gold boxes need nothing of their own:** their position and size are the bounding box of the cards inside, so they follow along automatically.
+> - **Manual boxes (the ones you drew) are not in the files** — their positions live only on this machine. "Whose box is this?" needs an answer of its own, and this round did not touch it.
+> - **Imported cards (borrowed via 「导入卡片」) are not written either**: where it sits in *your* layer is a different thing from where it sits in its own crystal, and writing it would move it back home.
+> - Position writes are **debounced** — they land a moment after you stop dragging (you sync across devices, and a write per drag would set off a sync storm). Closing the vault flushes anything still pending, so nothing is lost.
+
+### Placing cards by the square: the grid and the arrow keys
+
+Cards in the storyline sit on a **grid**, anchored at the **bottom-left corner** — so two cards side by side line up along their **bottom edge**.
 
 | Key | One step |
 | --- | --- |
@@ -119,14 +138,11 @@ On top of the world coordinates, the structure window and the storyline have a *
 
 **The minimum unit is a tenth of a card's width: 21px.** That is where it comes from — every card is the same size, so using it as the ruler makes the whole picture line up.
 
-Two ways to place things:
+Drag a card and it settles onto the nearest grid point; box some cards in and step them one square at a time with the arrow keys.
 
-- **Drag** — drag it around; wherever you let go, it settles onto the nearest grid point.
-- **Arrow keys** — select something first, then step it one square at a time. Cards: box them in with 「**框：卡**」. Boxes: **click the box's title bar** (a selected box turns into a bright solid outline; click again to deselect).
-
-> - **Gold boxes (the ones grown from folders) do not take part.** Their position and size are **computed** from the cards inside, so they have no position of their own to nudge. Coordinates apply to **cards** and to the **manual boxes you drew**.
-> - **Positions you already arranged are never mass-moved.** The grid only takes effect the next time you drag that thing or press an arrow key — otherwise it would be a change nobody pressed a button for. The cost: a card you have never touched may sit off-grid until you move it once.
-> - Resizing a manual box is stepped too: drag the bottom-right grip and its right and bottom edges settle onto the grid — a bottom-left corner on the grid only pins the left and bottom edges, so this is what squares up the other two.
+> - **Manual boxes are not on the grid**: they go wherever you drag them and resize to whatever you pull. A box is a free container *you* draw; cards are the things that need to line up — the two jobs are not the same.
+> - **Gold boxes (the ones grown from folders) are not on it either.** Their position and size are **computed** from the cards inside, so they have no position of their own.
+> - **Positions you already arranged are never mass-moved.** The grid only takes effect the next time you drag that card or press an arrow key — otherwise it would be a change nobody pressed a button for. The cost: a card you have never touched may sit off-grid until you move it once.
 
 ### Import a card: borrow one from another crystal
 

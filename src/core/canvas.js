@@ -97,6 +97,8 @@ export function beginDraft(ctx) {
     // 两层表，**里面那层数组也要拷**：浅拷的话草稿和存档共用同一个数组，
     // 在草稿里 push 一张，存档那一份当场跟着变（`importsOf` 读的就是它）。
     imports: JSON.parse(JSON.stringify(v.imports || {})),
+    // 3.0 刀 34：引进来的卡摆在本层的哪儿。**同一条**——两层表都要深拷。
+    importPos: JSON.parse(JSON.stringify(v.importPos || {})),
   };
 }
 
@@ -124,6 +126,8 @@ export function isDraftDirty(ctx) {
     // 3.0 刀 31：引进来哪几张卡也是「我刚摆的东西」——不算上的话，
     // 屏幕右下角那个「未保存」小点会说假话（同上面那三条）。
     im: o.imports || {},
+    // 3.0 刀 34：引进来的卡摆在哪儿也是「我刚摆的东西」。
+    ip: o.importPos || {},
   });
   return JSON.stringify(pick(a)) !== JSON.stringify(pick(b));
 }

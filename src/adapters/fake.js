@@ -103,7 +103,7 @@ export function createFakeAdapter({
    * 它要保证的只有一件事：用核心写下的东西、核心自己读得回来。
    */
   function readCardFields(content) {
-    const out = { concept: "", source: "", tags: [] };
+    const out = { concept: "", source: "", tags: [], pos: null };
     const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---/.exec(String(content || ""));
     if (!m) return out;
     for (const line of m[1].split(/\r?\n/)) {
@@ -113,7 +113,18 @@ export function createFakeAdapter({
       const raw = kv[2].trim();
       if (key === "概念") out.concept = unquote(raw);
       else if (key === "来源") out.source = unquote(raw);
-      else if (key === "tags" && /^\[.*\]$/.test(raw)) {
+      // 3.0 刀 34：`晶体坐标: [gx, gy]`。和 tags 一样是行内列表，
+      // **形状不对就当没写过**（回 null）——与真宿主那边 `posOf` 同一条口径。
+      // ⚠️ 必须 `unquote`：核心写它的时候走 `asNumber`（裸写数字），但**读回来的
+      // 可能是引号形式**（老格式 `["5", "9"]`、或者用户手改过）。不加这一句，
+      // `Number('"5"')` 是 NaN，整条读回路径在这里静默断掉。
+      else if (key === "晶体坐标" && /^\[.*\]$/.test(raw)) {
+        const n = raw
+          .slice(1, -1)
+          .split(",")
+          .map((s) => Number(unquote(s.trim())));
+        if (n.length >= 2 && Number.isFinite(n[0]) && Number.isFinite(n[1])) out.pos = [n[0], n[1]];
+      } else if (key === "tags" && /^\[.*\]$/.test(raw)) {
         out.tags = raw
           .slice(1, -1)
           .split(",")
@@ -122,6 +133,11 @@ export function createFakeAdapter({
       }
     }
     return out;
+  }
+
+  /** 假盘上那份 frontmatter 里的 `坐标`。真宿主那边这一份来自 metadataCache。 */
+  function posFromDisk(path) {
+    return readCardFields(disk.get(path)).pos;
   }
 
   function unquote(s) {
@@ -497,6 +513,10 @@ export function createFakeAdapter({
       concept: base ? base.concept : "",
       tags: base ? base.tags || [] : [],
       source: base ? base.source : "",
+      // 3.0 刀 34：真宿主那边 `坐标` 也从 metadataCache 来；这里顺手从假盘的
+      // frontmatter 里读，**读不到就沿用卡上原有的值**——写坐标那条路正是
+      // 靠这个回读来更新的（和 `source` 同一个道理）。
+      pos: posFromDisk(path) || (base ? base.pos : null) || null,
       content: disk.get(path),
     };
     // 广播给所有订阅者——真宿主那边一个 modify 会打到每一个还挂着监听的实例上，

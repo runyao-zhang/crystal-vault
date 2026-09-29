@@ -160,8 +160,21 @@ export function createObsidianAdapter({
       concept: toStr(fm["概念"]),
       tags: tagsOf(fm.tags),
       source: toStr(fm["来源"]),
+      // 3.0 刀 34：卡片在故事线里的**格坐标**（左下角），存在它自己的 frontmatter 里。
+      // 只认 `[数, 数]` 这一个形状——一个手滑写歪的字符串（"3,2"）在这儿就当没有，
+      // 不去 `split` 猜：猜错的话整屏卡片的位置会以"看起来很正常"的方式全部错位。
+      pos: posOf(fm["晶体坐标"]),
       content,
     };
+  }
+
+  /** frontmatter 里的 `晶体坐标` → `[gx, gy]`；形状不对就回 null（当没写过）。 */
+  function posOf(raw) {
+    if (!Array.isArray(raw) || raw.length < 2) return null;
+    const gx = Number(raw[0]);
+    const gy = Number(raw[1]);
+    if (!Number.isFinite(gx) || !Number.isFinite(gy)) return null;
+    return [gx, gy];
   }
 
   /**

@@ -100,12 +100,14 @@ import {
   isCardMarquee,
   setCardMarquee,
   cardSel,
-  // 3.0 刀 32：框的选中（点标题栏选的）与"取消一切选中"。
-  hasNudgeSel,
-  clearPicked,
   hiddenCardSet,
   showAllHidden,
+  // 3.0 刀 34：新建的卡片落在**你正看着的地方**（用户 09-29 报的"还要回去找"）。
+  placeNewCard,
 } from "./storyline.js";
+import { viewportCenter } from "./storyspot.js";
+// 3.0 刀 34：卡片坐标写进它自己的 frontmatter（用户 09-29）。
+import { migrateCardPos, flushCardPos } from "./cardpos.js";
 // 3.0 刀 17：故事线的「写」。**和结构窗共用同一份**，不是各写一套——
 // 这套东西会改用户手写的笔记，两个实现迟早漂移。
 import { createStoryWrite } from "./storywrite.js";
@@ -379,9 +381,23 @@ function sameCard(a, b) {
   if (a.content !== b.content) return false;
   if (a.concept !== b.concept) return false;
   if (a.source !== b.source) return false;
+  // 3.0 刀 34：**坐标也要比。** 这一条是"换台电脑位置一样"能不能真的生效的关键：
+  // 别的机器把新坐标同步下来时，`content` 确实变了（frontmatter 就在全文里），
+  // 所以这一趟**本来就会走到下面去**；但哪天有人把 frontmatter 摘出 content
+  // 单独比，漏了这一句就会变成"文件变了、模型没变"，而且**只在同步坐标时**发作。
+  // 顺手写上，成本是一次数组比较。
+  if (!samePos(a.pos, b.pos)) return false;
   const x = a.tags || [];
   const y = b.tags || [];
   return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+/** 两份坐标是不是同一个（都是 `[gx, gy]` 或都是没有）。 */
+function samePos(a, b) {
+  const x = Array.isArray(a) ? a : null;
+  const y = Array.isArray(b) ? b : null;
+  if (!x || !y) return !x && !y;
+  return Number(x[0]) === Number(y[0]) && Number(x[1]) === Number(y[1]);
 }
 
 /**
@@ -549,8 +565,10 @@ function applyExternalChange(ctx, incoming, from, gone) {
   // el._card、以及此刻开着的面板同时握着，换成一个新对象只会更新其中一处，
   // 屏幕上就是一半新一半旧。
   applyCardFields(
-    card,
-    { 概念: incoming.concept, 来源: incoming.source, tags: incoming.tags },
+    // 3.0 刀 34：`pos` 也要跟着走——**这是"别的机器把卡片摆好了、我这边跟着动"
+    // 的唯一入口**。漏了它的话，文件里的 `晶体坐标` 变了、卡上那份没变，
+    // 而屏幕上什么都不说。
+    { 概念: incoming.concept, 来源: incoming.source, tags: incoming.tags, pos: incoming.pos },
     incoming.content
   );
 
@@ -875,6 +893,14 @@ export async function mount({
     clearTimeout(win.__kbV13StatusTimer);
     win.__kbV13StatusTimer = 0;
   }
+  // 同一个套路的第三个：3.0 刀 34 那个「把卡片坐标写进 frontmatter」的防抖。
+  // ⚠️ 这一个比前两个更要紧：它的回调**会写用户的笔记文件**。旧实例那个
+  // 还没到点的 timer 拖着一个已经拆掉的 ctx 去写盘，写的是哪一份 base、
+  // 对着哪个模型，都不好说——宁可让那一笔落空（下一次拖它还会再排一次）。
+  if (win.__kbV13CardPosTimer) {
+    clearTimeout(win.__kbV13CardPosTimer);
+    win.__kbV13CardPosTimer = 0;
+  }
 
   if (injectStyles) {
     const style = doc.createElement("style");
@@ -1180,7 +1206,8 @@ export async function mount({
   // 同一条规矩（刚建出来的东西停在一个能改的名字上，用户才不用再找一次怎么改）。
   fs.querySelector("#kb-fs-addbox").addEventListener("click", (e) => {
     e.stopPropagation();
-    const id = createBox(ctx, []);
+    // 3.0 刀 34：**建在你正看着的地方**（用户 09-29 报的"还要回去找"）。
+    const id = createBox(ctx, [], viewportCenter(ctx));
     // 没有"这一层"时 `createBox` 回 null（见那边）。库里这颗按钮只在故事线出现、
     // 而故事线只在钻进了晶体之后才有，正常到不了这儿——但真到了就得说一句，
     // 静默返回就是"点了没反应"。
@@ -1428,10 +1455,6 @@ export async function mount({
       // **不落盘**（同 linking / lineEdit / marqueeArm）：一次操作中途的状态。
       marqueeCard: false,
       cardSel: [],
-      // 3.0 刀 32：选中的**框**（点标题栏选的，方向键挪的就是它）。与 cardSel
-      // 分开两张表：卡片是"框选"出来的（一片），框是"点"出来的（一个），
-      // 两种手势两种粒度。**不落盘**——同上面几条，一次操作中途的状态。
-      boxSel: [],
       // 3.0 刀 2 显示模式（"ring" / "canvas" / "grid" / "storyline"）。
       // ⚠️ 与 `ctx.stage`（舞台那个 DOM 节点）同名但完全无关，读的时候看上下文。
       // 它是**推导出来的缓存**：真正的源头是 openCrystal + prefs 里那两档，
@@ -1763,6 +1786,10 @@ export async function mount({
     // 每次打开都重读一次：上次留下的视角是这次会话的起点，
     // 之后的改动都基于它，不是基于核心刚起来时的空白默认。
     ctx.state.view = readViewState(ctx);
+    // 3.0 刀 34：把**只存在这台机器上**的那些位置搬进卡片的 frontmatter
+    // （用户 09-29 要的"别人电脑上相对位置一样"）。一次开库最多搬一批，
+    // 剩下的下次开接着搬——理由写在 `migrateCardPos` 顶上。
+    migrateCardPos(ctx, ctx.state.view.crystalPos);
     // #9 模式不落盘，所以每次打开都回到回忆模式。别让一次误切把自测变成看答案——
     // 代价只是多点一下，比"哪天打开发现答案全摊着"轻得多。
     applyMode(ctx, MODE_RECALL);
@@ -1793,6 +1820,9 @@ export async function mount({
   }
 
   function closeFullscreen() {
+    // 3.0 刀 34：**催一下还没写下去的坐标。** 它们是防抖写的（拖完停一会儿才落盘），
+    // 关库正好卡在窗口期里的话，最后那一两次摆放就白摆了——而用户完全看不出来。
+    flushCardPos(ctx);
     // 关掉那一刻屏幕上是什么，就记什么：晶体环、某颗晶体的第几页、某张翻开着的卡。
     // 必须在收缩之前取下来——收缩会把运行时清零，那之后取到的只剩「晶体环」，
     // 于是一个从晶体里出来的用户，再打开会莫名其妙回到环上。
@@ -1976,18 +2006,6 @@ export async function mount({
       if (ctx.state.linking) {
         setLinking(ctx, false);
         e.stopImmediatePropagation();
-        return;
-      }
-      // 3.0 刀 32：**选中了框（但没在编辑模式）时，Esc 先取消选中。**
-      //
-      // 框是"点标题栏"选中的，那条路不经过编辑模式——没有这一支的话，
-      // 用户想取消选中按 Esc，会一路掉到下面的「退一层 / 关掉整个晶体库」，
-      // 一下把库关了。结构窗那边是同一条规矩（见 embedstory 的 onEsc）。
-      if (!ctx.state.lineEdit && hasNudgeSel(ctx)) {
-        clearPicked(ctx);
-        if (ctx.refreshStoryline) ctx.refreshStoryline();
-        e.stopImmediatePropagation();
-        e.preventDefault();
         return;
       }
       if (!overlay.classList.contains("open")) {

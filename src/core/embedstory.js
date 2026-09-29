@@ -58,10 +58,13 @@ import {
   hiddenCardSet,
   showAllHidden,
   storylineCards,
-  hasNudgeSel,
-  clearPicked,
+  // 3.0 刀 34：新建的卡片摆到这一扇窗的正中央。
+  placeNewCard,
 } from "./storyline.js";
+import { viewportCenter } from "./storyspot.js";
 import { importCard } from "./storyimports.js";
+// 3.0 刀 34：关窗之前催一下还没写下去的卡片坐标（它们是防抖写的）。
+import { flushCardPos } from "./cardpos.js";
 
 /** 结构窗那一小块自绘界面的样式。
  *
@@ -164,10 +167,6 @@ function makeFacade(ctx, view) {
   // （路径是同一个库里的路径，真的对得上），而库里根本没有卡档这个概念。
   st.marqueeCard = false;
   st.cardSel = [];
-  // 3.0 刀 32：选中的框。**同一条理由**——透到真 state 的话，在结构窗里点中一个框，
-  // 切回库那一屏按方向键会把库里那个同 id 的框挪走（id 是 `m:1` 这种全局编号，
-  // 两边的框本来就撞号）。
-  st.boxSel = [];
   st.hideLinks = false;
   fake.state = st;
   fake.fs = view.root; // 模式类名（kb-v13-linking 等）挂在这一扇窗自己的根上
@@ -191,8 +190,7 @@ function makeFacade(ctx, view) {
   fake._cardHit = null;
   // 3.0 刀 32：框 id → 元素那张表。**同上一条**——这一扇窗要是从没画过故事线
   // （比如还没挑晶体，`render` 半路就返回了），`_boxEls` 就会顺着原型链读到
-  // **库那一屏**那张表，于是 `applyBoxSel` 去给库的框加/去选中类。
-  // 画面上是"库那屏有个框莫名其妙亮着"，不报错。
+  // **库那一屏**那张表，于是悬停黄点那个联动会去闪库里的框（而不是这扇窗的）。
   fake._boxEls = null;
   fake._rubber = null;
   fake._rubberSide = null;
@@ -303,7 +301,11 @@ export function createEmbedStory(ctx, opts = {}) {
     // `createBox` 在"还没挑晶体"时会回 null（那会儿没有"这一层"可归，
     // 建出来是个谁也看不见、也删不掉的框）。**必须说一句**——
     // 不说的话这颗按钮就成了"点了没反应"，而那正是这一族按钮最忌讳的。
-    if (!createBox(fake, [])) say("先挑一颗晶体（顶栏那颗「晶体：…」），框才有地方放。", false);
+    // 3.0 刀 34：**建在你正看着的地方**，不是世界的某个固定角落
+    // （用户 09-29：「视口远离那个固定位置，还要回去找」）。
+    if (!createBox(fake, [], viewportCenter(fake))) {
+      say("先挑一颗晶体（顶栏那颗「晶体：…」），框才有地方放。", false);
+    }
   });
 
   // 3.0 刀 31（用户 09-27）：「从别的晶体引一张卡进来」。
@@ -384,19 +386,14 @@ export function createEmbedStory(ctx, opts = {}) {
     // 要找的是别的东西——吞掉它等于让 Esc 在别处静默失效。
     const rect = root.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    // 3.0 刀 32：**选中了框但没在编辑模式**时，Esc 也该管用——框是"点标题栏"
-    // 选中的，那条路不经过编辑模式，而那会儿没有别的东西能取消它
-    // （只有"再点一下同一个框"）。有东西被选中时按 Esc，人的意思一定是取消选中。
-    const nudge = hasNudgeSel(fake);
-    if (!fake.state.lineEdit && !nudge) return;
+    if (!fake.state.lineEdit) return;
     // 正在我们自己的编辑表单里打字时不认领——那一下的意思是「从输入框里出来」，
     // 归 reader.js 的 typingNow 那条管，这里抢了就把人锁在框里了。
     const a = doc.activeElement;
     if (a && a.closest && a.closest(".kb-v13-editform")) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (fake.state.lineEdit) setLineEdit(fake, false);
-    else clearPicked(fake);
+    setLineEdit(fake, false);
   };
   doc.addEventListener("keydown", onEsc, true);
 
@@ -637,6 +634,18 @@ export function createEmbedStory(ctx, opts = {}) {
     writeMode: () => !!fake.state.linkWrite,
     setWriteMode,
     /**
+     * 3.0 刀 34：**新建的卡片摆到这一扇窗的正中央**（用户 09-29 报的
+     * 「视口远离那个固定位置，还要回去找」）。由 reader 建完卡之后调回来。
+     *
+     * 只有"这张卡正好属于这一扇窗在看的那一层"时才摆（判断在 `placeNewCard` 里）
+     * ——摆到别处是没有意义的坐标。摆了才重画，不摆就什么都不做。
+     */
+    placeNewCard: (path) => {
+      if (!placeNewCard(fake, path)) return false;
+      render(view.path, { keepCamera: true });
+      return true;
+    },
+    /**
      * 3.0 刀 31：把一张**别的晶体**的卡引到这一屏上来。选择器挑完由 reader 调回来。
      *
      * ⚠️ 三种"引不进来"都要**说话**，一个都不许静默——这条路上三个都很容易撞上：
@@ -675,6 +684,10 @@ export function createEmbedStory(ctx, opts = {}) {
     /** 收掉只属于这一屏的运行时状态（模式、选中）。离开这一档时要叫一次。 */
     leave: () => leaveStoryline(fake),
     destroy: () => {
+      // 3.0 刀 34：窗关掉之前把还没写下去的坐标催一遍（它们是防抖写的）。
+      // **放在最前面**：下面那几行会把这一扇窗的运行时拆掉，而那之后再取
+      // 位置取到的就不是这一屏了。
+      flushCardPos(ctx);
       // ⚠️ Esc 那条是挂在 **doc** 上的，不摘的话这扇窗关掉之后它还活着：
       // 每开一次结构窗就攒一个监听，而它们全都读着已经没人要的 fake——
       // 表现是"关掉窗之后再按 Esc，别的窗口莫名退出编辑模式"。

@@ -17,6 +17,12 @@
  * @property {string}   concept  frontmatter「概念」字段
  * @property {string[]} tags     frontmatter「tags」字段
  * @property {string}   source   frontmatter「来源」字段
+ * @property {[number,number]|null} [pos]
+ *   3.0 刀 34：frontmatter「坐标」字段——卡片在故事线里的**格坐标**（左下角），
+ *   `[gx, gy]`，单位见 core/storygrid.js。它是「换一台电脑打开，相对摆放位置还一样」
+ *   的**唯一**来源：视图状态是每台机器各存各的，只有它能跟着文件走。
+ *   **形状不对就当没有**（回 null），不去解析 `"3,2"` 这类字符串——猜错的话
+ *   整屏卡片的位置会以"看起来很正常"的方式全部错位。老存档的卡没有它是正常的。
  * @property {string}   content  正文原文（含 frontmatter），关系由核心从中解析
  *
  * @typedef {Object} LinkTarget

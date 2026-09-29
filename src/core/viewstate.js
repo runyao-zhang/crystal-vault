@@ -70,6 +70,14 @@ export function defaultViewState() {
     // 3.0 刀 31：从**别的晶体**引进来、摆在这一层上的卡。
     // 形状与 `cardLinks` 一样：`{ "<晶体路径>": [卡片路径, ...] }`。
     imports: {},
+    // 3.0 刀 34：**引进来的卡摆在本层的哪儿**。`{ "<晶体路径>": { "<卡片路径>": {x,y} } }`。
+    //
+    // 为什么不能塞进 `crystalPos`（那张扁平表）：`crystalPos` 是**一张卡在自己家
+    // 那一层**的位置，而「导入」是把别人的卡摆到**我这一层**来。两者共用一个键的话，
+    // 在 B 层拖动一张从 A 层引进来的卡，会**连带把它在 A 层的位置也改掉**——
+    // 用户回到 A 层会发现那张卡自己挪了地方，而且不报错。
+    // （现在坐标还要写进卡片的 frontmatter，不改的话会把 A 层的位置直接写坏。）
+    importPos: {},
     openCrystal: null,
     selectedCrystal: null,
     selectedCard: null,
@@ -427,6 +435,32 @@ function sanitizeImports(raw) {
   return out;
 }
 
+/**
+ * 引进来的卡摆在本层的哪儿（3.0 刀 34）。**两层表**：层键 → 卡片路径 → 坐标。
+ *
+ * 逐条过滤，一个坏坐标只丢那一条（同 `sanitizeCrystalPos` 那条）。
+ */
+function sanitizeImportPos(raw) {
+  if (!isObj(raw)) return {};
+  const out = {};
+  for (const [key, map] of Object.entries(raw)) {
+    if (!key || !isObj(map)) continue;
+    const one = {};
+    let n = 0;
+    for (const [path, val] of Object.entries(map)) {
+      if (n >= MAX_IMPORTS) break;
+      if (!path || !isObj(val)) continue;
+      const x = num(val.x, null);
+      const y = num(val.y, null);
+      if (x === null || y === null) continue;
+      one[path] = { x, y };
+      n++;
+    }
+    if (n) out[key] = one;
+  }
+  return out;
+}
+
 function sanitizeCrystalPos(raw) {
   if (!isObj(raw)) return {};
   const out = {};
@@ -468,6 +502,7 @@ export function sanitizeViewState(raw) {
     boxNames: sanitizeBoxNames(raw.boxNames),
     collapsedBoxes: sanitizeCollapsedBoxes(raw.collapsedBoxes),
     imports: sanitizeImports(raw.imports),
+    importPos: sanitizeImportPos(raw.importPos),
     openCrystal: nullableStr(raw.openCrystal),
     selectedCrystal: nullableStr(raw.selectedCrystal),
     selectedCard: nullableStr(raw.selectedCard),

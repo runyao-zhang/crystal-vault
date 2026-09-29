@@ -22,6 +22,7 @@
 
 import { NODE_W, NODE_H } from "./storylayout.js";
 import { snapPos } from "./storygrid.js";
+import { viewportCenter } from "./storyspot.js";
 
 /** 这一层是哪一层。与 `cardLinks` / `manualLinks` 用的是同一把钥匙。 */
 const keyOf = (ctx) => (ctx.state.crystalPath || []).join(" ");
@@ -75,6 +76,37 @@ export function importsOf(ctx) {
 }
 
 /**
+ * 3.0 刀 34：引进来的卡**摆在本层的哪儿**。
+ *
+ * 单独一格，**不并进 `crystalPos`**：`crystalPos` 记的是"一张卡在自己家那一层的位置"，
+ * 而这是"别人的卡摆到我这一层的位置"。共用一个键的话，在 B 层拖一张从 A 层引进来的卡，
+ * 会**连带把它在 A 层的位置也改掉**——回到 A 层那张卡自己挪了地方，不报错。
+ *
+ * 读的时候**按路径查、不按层遍历**（`nodePosOf` 每帧都要问一次）。
+ */
+export function importPosOf(ctx, path) {
+  const st = ctx && ctx.state ? ctx.state : null;
+  const v = st ? st.draft || st.view : null;
+  const t = v && v.importPos;
+  if (!t || typeof t !== "object") return null;
+  const one = t[keyOf(ctx)];
+  const p = one && typeof one === "object" ? one[String(path || "")] : null;
+  if (!p || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) return null;
+  return { x: Number(p.x), y: Number(p.y) };
+}
+
+/** 记下"引进来的卡摆在本层的哪儿"。**只写视图状态，不碰卡片文件。** */
+export function setImportPos(ctx, path, at) {
+  const v = ensureTable(ctx);
+  if (!v || !path || !at) return false;
+  if (!v.importPos || typeof v.importPos !== "object" || Array.isArray(v.importPos)) v.importPos = {};
+  const k = keyOf(ctx);
+  if (!v.importPos[k] || typeof v.importPos[k] !== "object") v.importPos[k] = {};
+  v.importPos[k][String(path)] = { x: Number(at.x) || 0, y: Number(at.y) || 0 };
+  return true;
+}
+
+/**
  * 把引进来的路径**解析成卡片对象**，并滤掉不该画的那些。
  *
  * 三道过滤：
@@ -121,20 +153,11 @@ export function importedCards(ctx, base, path) {
  * 表现就是「点了导入，什么都没发生」。
  */
 function centerSpot(ctx) {
-  const pz = ctx._panzoom;
-  const st = ctx.stage;
-  if (pz && st && typeof pz.clientToWorld === "function") {
-    try {
-      const r = st.getBoundingClientRect();
-      const w = pz.clientToWorld(r.left + r.width / 2, r.top + r.height / 2);
-      if (Number.isFinite(w.x) && Number.isFinite(w.y)) {
-        return { x: w.x - NODE_W / 2, y: w.y - NODE_H / 2 };
-      }
-    } catch (e) {
-      /* 量不到就退到下面那份 */
-    }
-  }
-  return { x: 60, y: 60 };
+  const c = viewportCenter(ctx);
+  // 量不到（没进相机档 / 那一屏不在屏幕上）就退到一个明确的角落——
+  // 总比 (0,0) 强：原点多半正压着一堆别的卡。
+  if (!c) return { x: 60, y: 60 };
+  return { x: c.x - NODE_W / 2, y: c.y - NODE_H / 2 };
 }
 
 /**
@@ -166,10 +189,12 @@ export function importCard(ctx, cardPath, base) {
   // 而屏幕上看起来仍然只有一张——用户会以为导入没生效。
   const spot = centerSpot(ctx);
   const n = list.length - 1;
-  // 3.0 刀 32：**落座也走格点。** 这是 `crystalPos` 除拖动 / 方向键之外唯一的
-  // 第三个写入点——不吸的话，刚引进来的卡一上来就停在格外，
+  // 3.0 刀 32：**落座也走格点。** 不吸的话，刚引进来的卡一上来就停在格外，
   // 而用户第一次按方向键时它会先"跳"到格上再走一格，看着像多走了一下。
-  v.crystalPos[p] = snapPos(spot.x + (n % 6) * 30, spot.y + (n % 6) * 30, NODE_H);
+  //
+  // ⚠️ 3.0 刀 34：写的是 `importPos`（本层的位置），**不是 `crystalPos`**
+  // （那张是"它在自己家的位置"，见 `importPosOf` 那段）。
+  setImportPos(ctx, p, snapPos(spot.x + (n % 6) * 30, spot.y + (n % 6) * 30, NODE_H));
   return true;
 }
 

@@ -293,6 +293,21 @@ function escapeRe(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * 3.0 刀 34：**明确要写成数字**的值。
+ *
+ * 下面 `mustQuote` 那条「数字形状一律加引号」是给**字符串字段**立的规矩
+ * （`概念: 2026` 不加引号，Dataview 读回来就成 number 了）。但有些字段天生
+ * 就是数字——比如卡片坐标。不给出路的话它会被写成 `["5", "9"]`：
+ * 读得回来，但那是**一串字符串**，语义上就不对，而且难看。
+ *
+ * 用法：`{ 晶体坐标: [asNumber(3), asNumber(5)] }`。
+ * ⚠️ 只对**我们自己确定是数字**的值用。默认那条"偏保守往引号靠"的规矩别动——
+ * 它的注释写着「多引号永远只是难看，少引号是**读错**」，那是对的。
+ */
+const NUM_TAG = Symbol("yamlNumber");
+export const asNumber = (n) => ({ [NUM_TAG]: Number(n) });
+
 /** 按值的形状选编码：数组走行内流式列表，其余走标量。 */
 export function encodeValue(v) {
   if (Array.isArray(v)) {
@@ -322,6 +337,12 @@ const LEADING_RE = /^[-?:,[\]{}#&*!|>%@'"`]/;
  * 写回去的那一行跟原来长得一模一样。
  */
 export function encodeScalar(v) {
+  // 3.0 刀 34：被 `asNumber` 标过的值**裸写**（见那个函数的注释）。
+  // 排在 `toStr` 前面——它的值是个对象，转成字符串就成了 "[object Object]"。
+  if (v && typeof v === "object" && NUM_TAG in v) {
+    const n = Number(v[NUM_TAG]);
+    return Number.isFinite(n) ? String(n) : "0";
+  }
   const s = toStr(v);
   if (!mustQuote(s)) return s;
   return (

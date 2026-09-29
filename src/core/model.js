@@ -274,11 +274,32 @@ export function normalizeCard(raw, keyOfFolder) {
     concept: toStr(raw.concept),
     tags: (raw.tags || []).map(toStr).filter(Boolean),
     source: toStr(raw.source),
+    // 3.0 刀 34：卡片在故事线里的**格坐标**（frontmatter「晶体坐标」，左下角）。
+    // ⚠️ **这一行不能省。** 这个函数是**逐个字段列出来**建新对象的，漏一个字段
+    // 就是把它整个丢掉——适配层那边读得再对也没用。漏掉它的表现很隐蔽：
+    // 位置照样工作（视图状态里那份还在），但**换台电脑打开就全回排布算法**
+    // （那正是这一刀要修的事），而且迁移的去重护栏永远为假、每次开库
+    // 都重排同一批。**加字段时先看这里。**
+    pos: posPair(raw.pos),
     content: toStr(raw.content),
     // #13 卡头关键词。在归一化时算一次，卡面与浮层两处直接读——
     // 卡片重建（翻页）频率不低，没必要每建一个 DOM 就把正文重扫一遍。
     keywords: extractHighlights(raw.content, raw.concept),
   };
+}
+
+/**
+ * 3.0 刀 34：坐标只认 `[数, 数]` 这一个形状，其余一律当没有。
+ *
+ * 与适配层那边 `posOf` / 假适配层那段**同一条口径**：契约说"形状不对就当没有"，
+ * 而这里是最后一道。
+ */
+function posPair(raw) {
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const gx = Number(raw[0]);
+  const gy = Number(raw[1]);
+  if (!Number.isFinite(gx) || !Number.isFinite(gy)) return null;
+  return [gx, gy];
 }
 
 /**
@@ -305,6 +326,10 @@ export function applyCardFields(card, fields, content) {
   if (f.概念 !== undefined) card.concept = toStr(f.概念);
   if (f.来源 !== undefined) card.source = toStr(f.来源);
   if (f.tags !== undefined) card.tags = (f.tags || []).map(toStr).filter(Boolean);
+  // 3.0 刀 34：坐标也要能就地更新——**别的机器改了「晶体坐标」同步过来时**
+  // 走的就是这条路（`applyCardFields(card, fields, content)`）。
+  // 与上面几条同一个写法：传了才动，没传就留着原来那份。
+  if (f.pos !== undefined) card.pos = posPair(f.pos);
   if (content !== undefined) card.content = toStr(content);
   card.keywords = extractHighlights(card.content, card.concept);
   return card;

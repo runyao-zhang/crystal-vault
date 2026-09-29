@@ -40,8 +40,13 @@ export const UNIT = Math.max(4, Math.round(NODE_W / 10));
 export const STEP_X = UNIT * 2;
 export const STEP_Y = UNIT;
 
+// 3.0 刀 34：`snapX` / `snapY` 现在只给下面 `snapPos` 用，`onGrid` 整个删了
+// （收纳方框不走格点之后就没有调用方了）。**不 export 了**——它们是这个模块的
+// 内部零件，而"对外只暴露一个 `snapPos`"能少一处"有人只吸了一半"的机会
+// （只按 x 吸、忘了 y 要带高度，出来的东西会差一个卡片高）。
+
 /** 把横坐标对到格点上（左下角的 x 就是左边缘的 x）。 */
-export function snapX(x) {
+function snapX(x) {
   const v = Number(x);
   if (!Number.isFinite(v)) return 0;
   return Math.round(v / UNIT) * UNIT;
@@ -53,7 +58,7 @@ export function snapX(x) {
  * @param {number} y 上边缘此刻在哪（`crystalPos` / 手动框存的都是这个）
  * @param {number} [h] 这个东西有多高。不给就按 0 算（等于直接对 y）。
  */
-export function snapY(y, h) {
+function snapY(y, h) {
   const v = Number(y);
   if (!Number.isFinite(v)) return 0;
   const hh = Number.isFinite(Number(h)) ? Number(h) : 0;
@@ -66,10 +71,4 @@ export function snapY(y, h) {
 /** 一次把 x / y 都对好（y 要带高度）。 */
 export function snapPos(x, y, h) {
   return { x: snapX(x), y: snapY(y, h) };
-}
-
-/** 这个位置已经在格点上了吗（给"要不要落盘"那种判断用；容差按像素的千分之一）。 */
-export function onGrid(x, y, h) {
-  const p = snapPos(x, y, h);
-  return Math.abs(p.x - x) < 0.01 && Math.abs(p.y - y) < 0.01;
 }

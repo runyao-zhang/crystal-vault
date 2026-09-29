@@ -245,7 +245,7 @@ export function edgeHidden(memberOf, collapsed, aPath, bPath) {
  * @param {Function} el  createElement 助手
  * @returns {Map<string, HTMLElement>} 框 id -> 元素（悬停闪烁要用）
  */
-export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H, sel) {
+export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
   const made = new Map();
   if (!boxes.length) return made;
   for (const b of boxes) {
@@ -285,10 +285,6 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H, sel) {
 
     const node = el("div", "kb-v13-sbox" + (b.crystal ? " kb-v13-sbox-crystal" : "") + (b.collapsed ? " kb-v13-sbox-collapsed" : ""));
     node.dataset.box = b.id;
-    // 3.0 刀 32：这个框被选中了（点标题栏选的，方向键挪的就是它）。
-    // **只有手动框会被选中**——晶体框没有自己存的位置（用户 09-28 拍的），
-    // 挪它等于挪成员，而"挪哪些成员"要先把成员挑出来，是另一件事。
-    if (sel && sel.has(b.id)) node.classList.add("kb-v13-sbox-sel");
     if (b.collapsed) {
       // 收起：只剩一条标题栏，摆在自己的重心附近——**不摆在矩形左上角**，
       // 因为矩形可能是按展开时的大小定的，收起后那个位置会离得很远。
@@ -412,7 +408,13 @@ function afterWrite(ctx) {
  * `collapsedBoxes` 是**按 id 索引**的两张独立表，id 一旦在某两层里撞上，
  * 改一个框的名字会连着把另一层的同名框一起改了。
  */
-export function createBox(ctx, paths) {
+/**
+ * @param {{x:number,y:number}} [center] 框**以哪个世界坐标点为中心**坐下。
+ *   不给就用 `NEW_BOX_X/Y` 那个默认角落。调用方一般直接把 `viewportCenter(ctx)`
+ *   的结果丢进来——**收的是中心不是左上角**，退半个身位这件事由这里做，
+ *   因为"框有多大"只有这一层知道（见下面那段「用户 09-29 报的」）。
+ */
+export function createBox(ctx, paths, center) {
   // ⚠️ **没有"这一层"就不建。** 结构窗那颗「＋ 框」是**一直摆着**的
   // （刀 24 有意如此），包括"还没挑晶体"的时候——那会儿 `crystalPath` 是空的，
   // 建出来的框会落进 `""` 那个桶里。而晶体库只在有路径时才画故事线，
@@ -429,14 +431,26 @@ export function createBox(ctx, paths) {
   }
   const id = "m:" + (max + 1);
   // ⚠️ **空框也要有落脚点**：它没有成员，包围盒算不出来，而"看得见"正是
-  // 把卡拖进去的前提。按本层已有的框数错开摆，免得连建两个叠在同一个位置上。
-  const n = list.length;
+  // 把卡拖进去的前提。
+  //
+  // 用户 09-29 报的：「新建…不建在当前窗口的中央，而是建立在固定的地方，
+  // 如果我的视口远离那个固定位置，还要回去找」。原来这里写死世界的 (60,60)，
+  // 视口一推远，新建的框就在屏幕外——**建完得先推回去找它**，那一步完全没有道理。
+  // 现在由调用方把**视口中心**传进来（`storyspot.js` 的 `viewportCenter`）。
+  //
+  // 收的是**中心**，而框的 x/y 存的是左上角，所以两边各退半个身子。
+  // 退不到精确的"正中"也无所谓——那是给眼睛用的。
+  const fallback = { x: NEW_BOX_X + (list.length % 6) * 44, y: NEW_BOX_Y + (list.length % 6) * 44 };
+  const x =
+    center && Number.isFinite(Number(center.x)) ? Number(center.x) - DEFAULT_BOX_W / 2 : fallback.x;
+  const y =
+    center && Number.isFinite(Number(center.y)) ? Number(center.y) - DEFAULT_BOX_H / 2 : fallback.y;
   list.push({
     id,
     name: "方框 " + (max + 1),
     paths: (paths || []).slice(),
-    x: NEW_BOX_X + (n % 6) * 44,
-    y: NEW_BOX_Y + (n % 6) * 44,
+    x,
+    y,
     w: DEFAULT_BOX_W,
     h: DEFAULT_BOX_H,
   });

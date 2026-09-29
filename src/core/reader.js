@@ -47,6 +47,8 @@ import {
   DESK_PER_PAGE,
 } from "./desk.js";
 import { createEmbedStory } from "./embedstory.js";
+// 3.0 刀 34：新建的卡片要摆到"你正看着的那一屏"的中央（用户 09-29 报的）。
+import { placeNewCard } from "./storyline.js";
 
 // 页面尺寸那几档。改这些数会连带改掉「一屏摆几页」，所以集中放这儿，
 // 别散在 computeGrid 和样式表两处各写一个。
@@ -3635,6 +3637,19 @@ export function createReader(ctx, opts = {}) {
       tags: [],
       content: toStr(res.content),
     });
+
+    // 3.0 刀 34：**新卡摆到"你正看着的那一屏"的正中央**（用户 09-29 报的
+    // 「不建在当前窗口的中央…还要回去找」）。
+    //
+    // 两屏都试一遍：**结构窗在前**（阅读器开着的时候，它才是用户眼前那块），
+    // 然后才是晶体库那一屏的故事线。两边都**只在这张卡正好属于那一层时才摆**
+    // ——判断在 `placeNewCard` 里，摆到别处是没有意义的坐标。
+    // ⚠️ 排在 `renderCrystals` **前面**：那一趟会把这一屏整个重画掉，
+    // 位置得先定好，重画出来的才是摆好的样子。
+    const sw = desk.wins.find((w) => w.kind === "storyline");
+    const swRt = sw ? rtOf(sw.id) : null;
+    if (!(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
+
     if (ctx.renderCrystals) ctx.renderCrystals();
     if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
     if (ctx.refreshOrphans) ctx.refreshOrphans();
