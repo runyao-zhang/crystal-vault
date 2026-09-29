@@ -1515,7 +1515,33 @@ const READER = [
   ".kb-v13-reader-bar{",
   "  display:flex;align-items:center;gap:10px;flex-wrap:wrap;",
   "  padding:12px 20px;border-bottom:1px solid var(--background-modifier-border, rgba(255,255,255,.08));",
+  // 3.0 刀 38：高度是**过渡**的（同「边看边记」的宽度那条），收起那一下才像"挤回去"。
+  // ⚠️ 过渡期间**谁都不许去量它、也不许去夹桌面窗**——那会儿的几何是不存在的
+  // （`sideEl` 那条监听记过同一件事）。夹取放在 `transitionend` 里。
+  "  overflow:hidden;transition:height .25s ease,padding .25s ease;",
   "}",
+  // 收起态：**只留那颗图标**，其余十几颗一起让位。
+  //
+  // ⚠️ 「只留一颗」不是审美，是**出口**：收起来的东西不能是唯一的出口
+  //    （「边看边记」那颗按钮长在顶栏上、不在被收的那一栏上，所以它没这个问题；
+  //     而这里收的就是顶栏自己）。留哪一颗必须是**那颗按钮**。
+  // ⚠️ 用 `#id` 选择器重新点亮它：`> *` 那条优先级低，靠 id 压回来，
+  //    不依赖书写顺序。
+  ".kb-v13-reader-bar.kb-v13-reader-bar-tucked{",
+  "  height:34px;padding:2px 8px;flex-wrap:nowrap;",
+  "}",
+  ".kb-v13-reader-bar.kb-v13-reader-bar-tucked > *{display:none;}",
+  ".kb-v13-reader-bar.kb-v13-reader-bar-tucked > #kb-reader-topfold{",
+  "  display:inline-flex;align-items:center;margin-left:auto;",
+  "}",
+  // 那颗图标：**同一个 glyph，两档之间转 180°**。
+  // 基础态是"顶栏展开着"——按下去会收起、内容往上走，所以箭头**朝上**：
+  // 原始图形是朝左的箭头（`◀`），顺时针 90° 正好朝上。收起态逆时针 90°（=朝下）。
+  // **不换 path、不换图标**，状态的差别另一头由 tooltip 那句话说清楚。
+  ".kb-v13-reader-topfold{display:inline-flex;align-items:center;padding:4px 7px;}",
+  ".kb-v13-reader-topfold svg{transition:transform .25s ease;}",
+  ".kb-v13-reader-topfold svg{transform:rotate(90deg);}",
+  ".kb-v13-reader-bar-tucked .kb-v13-reader-topfold svg{transform:rotate(-90deg);}",
   ".kb-v13-reader-title{font-size:15px;font-weight:700;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.8));",
   "  max-width:calc(var(--kb-vw,100vw)*.38);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
   ".kb-v13-reader-count{font-size:12px;color:var(--text-muted, rgba(160,190,220,.5));}",

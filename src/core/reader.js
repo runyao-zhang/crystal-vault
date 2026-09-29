@@ -301,6 +301,9 @@ export function createReader(ctx, opts = {}) {
     // 阅读器的可见性今天一个都不落盘（`desk.on` 也不落），收不收那一栏是
     // 「我这一会儿想读宽一点」，不是「我的工作台长什么样」。
     sideTucked: false,
+    // 3.0 刀 38：顶栏收起来了没有。**运行时不落盘**——同 `sideTucked`，
+    // 是"这一会儿想读宽一点"的临时动作，不是「上次看到哪儿」的一部分。
+    topTucked: false,
     // 3.0 刀 18：左边的收纳栏开着没有。同样不落盘。
     dockOn: false,
     docs: [],
@@ -367,6 +370,24 @@ export function createReader(ctx, opts = {}) {
     '<button type="button" class="kb-v13-reader-zoom" id="kb-reader-zoomout" title="每页小一点，一屏摆更多">－</button>' +
     '<span class="kb-v13-reader-zoomval" id="kb-reader-zoomval">100%</span>' +
     '<button type="button" class="kb-v13-reader-zoom" id="kb-reader-zoomin" title="每页大一点">＋</button>' +
+    // 3.0 刀 38（用户 09-29）：**把顶栏收起来。**
+    //
+    // 桌面模式下这条顶栏挺占地方，收起来之后桌面那一块就高出一条，
+    // 结构窗和页面窗能摆到原先顶栏占的位置上。
+    //
+    // ⚠️ **这颗按钮必须在收起之后还看得见**——它是唯一的出口。
+    // 「边看边记」那颗之所以能收能展，是因为它长在**顶栏**上、不在被收的那一栏上；
+    // 而这里收的**就是顶栏自己**，所以收起态的规矩是「**只留这颗图标**」，
+    // 其余那十几颗一起让位。图标位置不变（在顶栏最右端），用户的手不用重新找。
+    //
+    // ⚠️ 图形是**同一个**，两档之间转 180°：展开态箭头朝上（按下去内容往上走）、
+    // 收起态朝下（按下去内容挤回来）。旋转在 CSS 里，不换 path。
+    '<button type="button" class="kb-v13-reader-nav kb-v13-reader-topfold" id="kb-reader-topfold"' +
+    ' aria-pressed="false"' +
+    ' title="收起顶栏：把它压成一颗图标，桌面多出一条。再点一下推回来。">' +
+    '<svg viewBox="0 0 1024 1024" width="13" height="13" aria-hidden="true" focusable="false">' +
+    '<path fill="currentColor" d="M201.088 552.512l220.416 211.456-49.472 51.584L64 520l306.688-328 52.224 48.832L201.28 477.824h556.16v74.688H201.088z m687.424-351.36H960v632.192h-71.488V201.216z"/>' +
+    "</svg></button>" +
     "</div>" +
     '<div class="kb-v13-reader-main">' +
     // 收纳栏（3.0 刀 18）。
@@ -568,6 +589,9 @@ export function createReader(ctx, opts = {}) {
   const dockListEl = $("kb-reader-docklist");
   const dockBtn = $("kb-reader-dockbtn");
   const sideBtn = $("kb-reader-sidebtn");
+  // 3.0 刀 38：顶栏收起那颗，以及顶栏本身（`paintTop` 要挂类）。
+  const topFoldBtn = $("kb-reader-topfold");
+  const barEl = el.querySelector(".kb-v13-reader-bar");
   const dockAddBtn = $("kb-reader-dockadd");
   const dockNewEl = $("kb-reader-docknew");
   const dockUrlEl = $("kb-reader-dockurl");
@@ -704,6 +728,35 @@ export function createReader(ctx, opts = {}) {
     // 一份文献都没开时那一栏是藏着的，而按钮亮着会让人以为是自己收的。
     sideBtn.setAttribute("aria-pressed", st.sideTucked ? "true" : "false");
     sideBtn.classList.toggle("kb-v13-reader-nav-on", !!st.sideTucked);
+  }
+
+  /**
+   * 3.0 刀 38：**把顶栏收起来**（用户 09-29）。和 `paintSide` 一个套路——
+   * 收起走一个类、由 CSS 做过过渡，这里只负责挂类。
+   *
+   * ⚠️ **桌面那一块不用自己算**：它是 `bar` 后面的 flex 兄弟，顶栏一矮它自己就高，
+   * 于是结构窗/页面窗能摆到原先顶栏占的位置上——「展开时碰不到、收起时碰得到」
+   * 这条**由布局自己保证**，一行算术都不用写。
+   *
+   * ⚠️ 反过来那条「再展开时**向下挤**」要自己动手：桌面窗是绝对定位的，
+   * 桌面变矮它们不会自己动。这个放在 `transitionend` 里做（见下面那条监听）——
+   * **不能在过渡中间夹**，那会儿量到的几何是不存在的。
+   */
+  function paintTop() {
+    barEl.classList.toggle("kb-v13-reader-bar-tucked", !!st.topTucked);
+    topFoldBtn.setAttribute("aria-pressed", st.topTucked ? "true" : "false");
+    // 字说的是**按下去会怎样**（顶栏那几颗都是这个口径）。
+    // ⚠️ 图形只有一个、只转 180°，**状态的差别全靠这句话**说清楚。
+    topFoldBtn.title = st.topTucked
+      ? "展开顶栏：把它推回来。桌面被压在它下面的那些窗会跟着往下让。"
+      : "收起顶栏：把它压成一颗图标，桌面多出一条。再点一下推回来。";
+  }
+
+  function setTopTucked(on) {
+    const next = !!on;
+    if (next === st.topTucked) return;
+    st.topTucked = next;
+    paintTop();
   }
 
   function setSideTucked(on) {
@@ -4592,6 +4645,15 @@ export function createReader(ctx, opts = {}) {
   // 3.0 刀 18。两颗一起看：一颗收窗、一颗收栏，都是「把地方腾出来读」。
   dockBtn.addEventListener("click", () => setDockMode(!st.dockOn));
   sideBtn.addEventListener("click", () => setSideTucked(!st.sideTucked));
+  topFoldBtn.addEventListener("click", () => setTopTucked(!st.topTucked));
+  // 顶栏高度是**过渡**过去的（同「边看边记」那条）。过渡走完再夹一遍桌面窗——
+  // 桌面变矮之后，绝对定位的窗不会自己动，得有人把它们推下来。
+  // ⚠️ **绝不能在过渡中间夹**：那会儿 `deskBounds()` 量到的是一个不存在的几何，
+  // 算出来的盒子全落在错误的位置上（`sideEl` 那条监听记过同一件事）。
+  barEl.addEventListener("transitionend", (e) => {
+    if (e.target !== barEl || e.propertyName !== "height") return;
+    resizeNow();
+  });
   // 3.0 刀 19：收纳栏那颗 `+`，和它那块填网址的小面板。
   dockAddBtn.addEventListener("click", () => showDockNew(dockNewEl.classList.contains("off")));
   dockOkBtn.addEventListener("click", () => commitDockUrl());
@@ -4647,6 +4709,10 @@ export function createReader(ctx, opts = {}) {
     el.classList.add("open");
     st.err = "";
     say("", true);
+    // 3.0 刀 38：顶栏的收起态**跨开关保留**（同 `sideTucked`，那是"我想读宽一点"
+    // 的偏好，不是一次操作中途的状态）——所以每次打开都要重画一遍，
+    // 否则类名是上次摘掉的、而 `st.topTucked` 还是 true，两者对不上。
+    paintTop();
     refreshBar();
     refreshDeskUi();
     // 每次打开都重扫一遍：用户很可能刚刚才把 PDF 拖进 vault，
@@ -4727,6 +4793,8 @@ export function createReader(ctx, opts = {}) {
     if (!st.open || !st.hidden) return;
     st.hidden = false;
     el.classList.add("open");
+    // 3.0 刀 38：同 `open()` 那条——收起态跨挂起/恢复保留，这里要重画一遍。
+    paintTop();
     refreshBar();
     refreshDeskUi();
     // 和 open() 最后那一步同一条规矩：什么都没打开过的话，把「选哪份文献」
