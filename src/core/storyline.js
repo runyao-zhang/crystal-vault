@@ -211,10 +211,19 @@ function layoutFor(ctx, path) {
 export function placeNewCard(ctx, path) {
   const card = ctx.model && ctx.model.byPath ? ctx.model.byPath.get(String(path || "")) : null;
   if (!card || !card.crystal) return false;
-  // 只在"你正看着这一层"时才摆。`_storyLayer` 由 `renderStorylineStage` 每帧写上。
+  // ⚠️ 判据是「**这张卡落在你正看着的那一层的子树里**」，不是"两条链完全相等"。
+  //
+  // 第一版写的是后者，于是**建在子文件夹里的卡永远摆不进来**——而它明明就画在
+  // 这一屏上（`cardsUnder` 是**递归**的）。用户 09-29 报的正是这个：
+  // 「新卡还是在默认位置，虽然能实时显示了，但不是我打开的这个结构窗的视口里」。
+  // 症状之所以是"默认位置"，是因为这里回 false 之后没人给它位置，它就落回
+  // `nodePosOf` 的下一层（卡片 frontmatter 或排布算法）。
+  //
+  // 看着的那一层是 `ctx.state.crystalPath`（一条链，如 `["Python","Python/数据分析"]`）。
+  const viewed = Array.isArray(ctx.state.crystalPath) ? ctx.state.crystalPath : [];
   const chain = ctx.model.resolveChain ? ctx.model.resolveChain(card.crystal) : null;
-  const key = Array.isArray(chain) ? chain.join(" ") : "";
-  if (!key || key !== ctx._storyLayer) return false;
+  if (!Array.isArray(chain) || chain.length < viewed.length) return false;
+  for (let i = 0; i < viewed.length; i++) if (viewed[i] !== chain[i]) return false;
   const c = viewportCenter(ctx);
   if (!c) return false;
   // 卡片以中心落座（`crystalPos` 存的是左上角），走格点——卡片是走格点的那一类。
@@ -341,9 +350,10 @@ export function renderStorylineStage(ctx, path) {
   const extra = importedCards(ctx, base, path);
   const cards = extra.length ? base.concat(extra) : base;
   const importSet = new Set(extra.map((c) => c.path));
-  // 3.0 刀 34：**"我正在看的是哪一层"**。新建的卡片靠它判断"你是不是正看着它
-  // 那一层"，是的话才把它摆到视口中央（见 `placeNewCard`）。
-  ctx._storyLayer = (path || []).join(" ");
+  // 3.0 刀 34："我正在看的是哪一层"这件事，`placeNewCard` 直接读
+  // `ctx.state.crystalPath`（那本来就是权威，而且是**链**不是拼出来的字符串——
+  // 判子树关系要按段比，拼成字符串再切会栽在"文件夹名里有空格"上，
+  // 刀 35 的 `folderOfChain` 记过同一件事）。这里不再多存一份。
   const { chain, links, ghosts } = edgesUnder(ctx, cards);
   const layout = base.length ? layoutFor(ctx, path) : { positions: new Map() };
   const pos = new Map();

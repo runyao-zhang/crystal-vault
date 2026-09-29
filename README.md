@@ -267,6 +267,8 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.76** · Fixes: **a card created inside a sub-folder was not placed in the structure window's viewport** (it fell back to the default position). The test used to be "the card's crystal chain must equal the layer you are looking at exactly", but **cards are usually created in a deeper folder** — it is plainly drawn on that screen (card lookup is recursive) and was still being rejected.
+
 **1.3.75** · The reader's top bar can be **collapsed**: a new icon at its right end squashes it down to that one icon, freeing a strip the desk can use — the structure window and page windows can now sit where the bar used to be. **The icon rotates 180° between the two states** (arrow up when expanded, meaning pressing moves things up; arrow down when collapsed, meaning pressing brings them back), and it is **always the same glyph** — the tooltip is what explains the state. Expanding again **pushes down** any window that had moved under the bar.
 
 **1.3.74** · Four fixes to 1.3.73 plus one you reported: the embedded mode's resize observer **was never created at all** — a declaration-order error, swallowed by a `catch` that left no trace; embedded mode scaled the vault to the whole screen instead of the tab (card rows overflowed a half-width split); double-clicking the mode button skipped a mode; and that button's refresh missed the re-layout. **And: a card saved into the vault now appears in the structure window immediately** — it used to need closing and reopening (the refresh is now wired to "the vault redrew" instead of being added to each entry point).
