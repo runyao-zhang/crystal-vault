@@ -246,6 +246,66 @@ Then link onward: [[02-Next card]] and say why you are linking
 3. **Number the filename** (`01-`, `02-`, …) to control ordering. Cards are sorted by filename.
 4. **Use `==highlight==`** for anything you want turned into a quiz point.
 
+## Changelog
+
+Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.60** · Boxes are written to disk: one `.crystal-boxes.json` per crystal (dot-prefixed, so Obsidian never shows it), holding each box's name, size, collapsed state and members. Positions that only ever lived on this machine are moved in automatically the first time you open the vault after upgrading.
+
+**1.3.59** · Card positions are written into the card's own frontmatter (`晶体坐标: [3, 5]`, anchored at the **bottom-left corner**) — so the same vault on another machine has the same arrangement. Also: manual boxes are **off the grid** (they go wherever you drag them), and new cards and 「＋ 框」 **land where you are looking** instead of in a fixed corner of the world you have to pan back to.
+
+**1.3.58** · Manual boxes are **scoped to their crystal**. They used to be global — switch to another folder and the other layer's boxes were still sitting there.
+
+**1.3.57** · Cards get a **grid and arrow keys**: drags snap to the grid, and arrow keys step a selection one square at a time. The minimum unit is a tenth of a card's width, anchored at the **bottom-left corner**.
+
+**1.3.56** · Four fixes to Import card. Two matter: clicking a **folder name** in the card picker silently changed your "create cards in" setting, and dropping an imported card onto a sub-crystal box did nothing at all (it now tells you to use 「＋ 框」).
+
+**1.3.55** · **Import a card**: pull a card in from another crystal, drop it into a box, and **cross-level blue links** work from then on. The card itself is not touched.
+
+**1.3.54** · **Box cards in and move the whole batch**. A 「框：卡」 button joins the top bar — box a few cards, drag any one of them and the batch moves, and on release the whole batch is re-filed. Before this, filing a dozen cards into a box meant dragging them one at a time.
+
+**1.3.53** · Fixed: a dragged box moved a different distance from a dragged card (whenever the camera was zoomed), and dragging a collapsed box flung its cards outside it.
+
+**1.3.52** · Manual boxes became **boxes you draw yourself**: draggable, resizable, no longer just a computed shell around cards. And when collapsed, an outside card with a blue line into it gets a **yellow dot**; hover it and the related boxes **flash around their edge**.
+
+**1.3.51** · Box colour darkened. The first pass was so faint it was invisible on the library's own dark background.
+
+**1.3.50** · Fixed: empty boxes were not drawn, so 「＋ 框」 looked like it did nothing. You have to be able to *see* a box before you can drag cards into it.
+
+**1.3.49** · Dragging a box's **title bar moves the whole group of cards** with it.
+
+**1.3.48** · The 「**＋ 框**」 entry point for manual boxes; drag cards in and out; delete a box (a box is just a grouping — deleting one does not touch your cards).
+
+**1.3.47** · Fixed: boxes were not being cleared from the stage, so they stacked up one layer per redraw.
+
+**1.3.46** · **Boxes** in the structure window: one per sub-crystal, renameable and collapsible. Collapsing puts the cards and their lines away — but "there is still something in there" is never lost.
+
+**1.3.45** · A 「concept」 line on the desk's card windows.
+
+**1.3.44** · The structure window section filled in (**view / write** modes, the three right-click targets); ＋ pages paginate markdown **by line, and take effect on Enter**; getting started gained a step about putting something readable into the cards folder. The README was rewritten in this version to put **文献模式 · 桌面 (the reader's desk)** front and centre.
+
+**1.3.43** · **Rename card / Rename crystal** buttons; and a fix for "somebody renamed a file in Obsidian and the plugin never noticed" — which used to leave a grey card on the graph that opened to nothing.
+
+**1.3.42** · Every window gets a 「收纳」 (dock) button, unconditionally.
+
+**1.3.41** · The `+` at the top of the dock: **external tabs**, so you can keep deepseek, Google and the like open inside the reader.
+
+**1.3.40** · The reader's **dock**, and the toggle for the 「边看边记」 column.
+
+**1.3.39** · The storyline gets its own **view / write** modes: in write mode dragging a line really writes a `[[link]]`, the marquee deletes blue lines, and there is one undo.
+
+**1.3.38** · Removed the "why does this link exist?" box in write mode — it interrupted you once per line while you were drawing several. You can still hand-write the reason after the `]]`; the plugin just no longer asks.
+
+**1.3.37** · A 「**选框**」 (marquee) in write mode to delete blue lines: box in a few and the matching `[[link]]` is cut out of the card body — both directions, byte-exact, one undo.
+
+**1.3.36** · Blue lines became **orthogonal polylines** like the gold ones (straight runs with rounded corners) instead of bezier arcs — an arc cuts across the middle of cards, and two of them crossing makes it impossible to tell which connects to which.
+
+**1.3.35** · Blue lines can attach from top / bottom / left / right (it honours the port you dragged from); in write mode, **right-clicking a card hides every link into and out of it**, with a 「显示全部」 button to bring them all back; the rubber-band preview is now the same shape and colour as what you get on release.
+
+**1.1.31 / 1.1.3 / 1.1.2 / 1.1.1 / 1.1.0** · Scratch notes, the "back" button in read-and-jot, delete a card; and scratch notes went from a pile of text to **a real card placed on the desk**. The odd patch numbers are because a published version number can never be reused.
+
+**1.0.2 / 1.0.1 / 1.0.0** · Default card folder became the neutral `cards`; three fixes from the automated review; first commit.
+
 ## Licence
 
 [GPL-3.0](LICENSE).
