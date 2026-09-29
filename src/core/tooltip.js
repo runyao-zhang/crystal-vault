@@ -51,12 +51,16 @@ export function showTooltip(ctx, cardEl, card, hue) {
 
   tooltip.style.setProperty("--tt-clr", hsl(hue, 70, 50, 0.3));
 
-  // 左右边界保护
+  // 左右边界保护。
+  // ⚠️ 3.0 刀 36：边界是**这一层界面**（`ctx.viewRect()`），不是视口。浮层本身是
+  // `position:fixed`、坐标就是屏幕坐标，所以这里只换"夹在哪个范围内"，
+  // 位置本身不用换算。全屏时两者相同，逐像素不变。
+  const vr = ctx.viewRect ? ctx.viewRect() : { left: 0, top: 0, w: win.innerWidth, h: win.innerHeight };
   const ttL = cardRect.left - s(40);
   const ttR = cardRect.right + s(40);
   const pad = s(10);
-  const clampL = Math.max(pad, ttL);
-  const clampR = Math.min(win.innerWidth - pad, ttR);
+  const clampL = Math.max(vr.left + pad, ttL);
+  const clampR = Math.min(vr.left + vr.w - pad, ttR);
   tooltip.style.left = clampL + "px";
   tooltip.style.width = Math.max(clampR - clampL, s(200)) + "px";
   tooltip.style.borderColor = hsl(hue, 70, 45, 0.3);
@@ -67,14 +71,15 @@ export function showTooltip(ctx, cardEl, card, hue) {
   let ttTop;
   let arrowFlip = false;
 
-  if (belowY + 180 < win.innerHeight - vPad) {
+  // 上下同理：夹在**这一层界面**里（`vr.top` ~ `vr.top + vr.h`），不是视口。
+  if (belowY + 180 < vr.top + vr.h - vPad) {
     ttTop = belowY;
-  } else if (aboveY > vPad) {
+  } else if (aboveY > vr.top + vPad) {
     ttTop = aboveY;
     arrowFlip = true;
   } else {
-    ttTop = Math.max(vPad, win.innerHeight - 180 - vPad);
-    arrowFlip = belowY + 180 > win.innerHeight;
+    ttTop = Math.max(vr.top + vPad, vr.top + vr.h - 180 - vPad);
+    arrowFlip = belowY + 180 > vr.top + vr.h;
   }
 
   tooltip.style.top = ttTop + "px";

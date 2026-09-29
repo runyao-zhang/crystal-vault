@@ -291,6 +291,17 @@ export function closeHologram(ctx) {
   ctx.removeEscHandler();
 }
 
+/**
+ * 3.0 刀 36：**这一层界面在屏幕上的位置和大小**（屏幕坐标）。
+ * 全屏时正好是视口；浮窗时是那个窗口。兜底那一支与从前的 `win.innerWidth`
+ * 逐字相同，给不认识 `viewRect` 的 ctx 用。
+ */
+function viewRectOf(ctx) {
+  if (ctx && typeof ctx.viewRect === "function") return ctx.viewRect();
+  const w = (ctx && ctx.win) || {};
+  return { left: 0, top: 0, w: w.innerWidth || 0, h: w.innerHeight || 0 };
+}
+
 export function renderSatellites(ctx, card, hue) {
   const { satContainer, satLines, win, overlay, model } = ctx;
   satContainer.innerHTML = "";
@@ -302,8 +313,12 @@ export function renderSatellites(ctx, card, hue) {
   ctx._satHue = hue;
   ctx._satBase = { sats: [], lines: [] };
 
-  // 每次开全息都按当前窗口尺寸刷新 viewBox，避免窗口 resize 后连线坐标错位
-  satLines.setAttribute("viewBox", "0 0 " + win.innerWidth + " " + win.innerHeight);
+  // 每次开全息都按当前窗口尺寸刷新 viewBox，避免窗口 resize 后连线坐标错位。
+  // ⚠️ 3.0 刀 36：**原点是这一层界面的左上角**，不是屏幕左上角。连线/卫星的点
+  // 全用屏幕坐标算，所以 viewBox 写成 `left top w h` = 把用户坐标系平移回去
+  // ——点的算法一个字不用改。全屏时它就是 `0 0 视口`，与从前逐字相同。
+  const vr = viewRectOf(ctx);
+  satLines.setAttribute("viewBox", vr.left + " " + vr.top + " " + vr.w + " " + vr.h);
 
   const outRel = model.relatedOf(card);
   const backRel = model.backlinksOf(card);
@@ -388,8 +403,8 @@ export function renderSatellites(ctx, card, hue) {
     let sx = cx + Math.cos(angle) * rxOut - outW / 2;
     let sy = cy + Math.sin(angle) * ryOut - outH / 2;
     const pad = ctx.s(10);
-    sx = Math.min(Math.max(sx, pad), win.innerWidth - outW - pad);
-    sy = Math.min(Math.max(sy, pad), win.innerHeight - outH - pad);
+    sx = Math.min(Math.max(sx, vr.left + pad), vr.left + vr.w - outW - pad);
+    sy = Math.min(Math.max(sy, vr.top + pad), vr.top + vr.h - outH - pad);
     const el = EL("div", "kb-v13-satellite");
     el.style.left = sx + "px";
     el.style.top = sy + "px";
@@ -438,8 +453,8 @@ export function renderSatellites(ctx, card, hue) {
       let sx = cx + Math.cos(angle) * rxBack - backW / 2;
       let sy = cy + Math.sin(angle) * ryBack - backH / 2;
       const pad = ctx.s(10);
-      sx = Math.min(Math.max(sx, pad), win.innerWidth - backW - pad);
-      sy = Math.min(Math.max(sy, pad), win.innerHeight - backH - pad);
+      sx = Math.min(Math.max(sx, vr.left + pad), vr.left + vr.w - backW - pad);
+      sy = Math.min(Math.max(sy, vr.top + pad), vr.top + vr.h - backH - pad);
       const el = EL("div", "kb-v13-satellite kb-v13-sat-back");
       el.style.left = sx + "px";
       el.style.top = sy + "px";

@@ -112,9 +112,17 @@ const ROW_SPEC = [
 // 舞台上下留白（缩放后）
 const STAGE_PAD = 72;
 
-export function createMetrics(win) {
+/**
+ * @param {{w:number,h:number}} size **这一层界面**多大——不是视口。
+ *   3.0 刀 36 起传的是 `ctx.viewRect()`。全屏时它正好等于视口（于是与从前
+ *   逐像素等同），浮窗时是那个窗口——继续传视口的话，窗口里的环形排布会按
+ *   整块屏幕缩放，卡片大得塞不下。
+ */
+export function createMetrics(size) {
   // 与原脚本一致：SCALE 在脚本执行时算一次，不随 resize 更新
-  const SCALE = Math.min(win.innerWidth / REF_W, win.innerHeight / REF_H, 1.3);
+  const vw = Math.max(1, Number(size && size.w) || 1);
+  const vh = Math.max(1, Number(size && size.h) || 1);
+  const SCALE = Math.min(vw / REF_W, vh / REF_H, 1.3);
   const s = (v) => Math.round(v * SCALE);
 
   // 环形卡片布局：行高、行距、每行尺寸

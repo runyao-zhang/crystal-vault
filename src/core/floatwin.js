@@ -74,6 +74,23 @@ export function findFloat(ctx, unit) {
  *   `ctx.win.innerWidth/innerHeight`（视口），而定位基准是 host——宿主比视口小的话，
  *   窗会顺着夹取跑到宿主外面去。阅读器正好是 `inset:0`，两者重合，不用换算。
  */
+/**
+ * 3.0 刀 36：**这一层界面在屏幕上的位置和大小**。
+ *
+ * 原来这里到处都是 `ctx.win.innerWidth/innerHeight`，而那是**视口**——
+ * 全屏模式下两者相同（所以从前一直是对的），浮窗模式下界面只占屏幕一块，
+ * 继续读视口的话：开窗会居中到屏幕正中（跑到窗口外面）、夹取会把窗夹到
+ * 窗口外去（拖出去了就抓不回来）。
+ *
+ * 兜底那一支是给不认识 `viewRect` 的 ctx 用的（测试夹具、老的挂载路径），
+ * 语义与从前**逐字相同**。
+ */
+function viewRectOf(ctx) {
+  if (ctx && typeof ctx.viewRect === "function") return ctx.viewRect();
+  const w = (ctx && ctx.win) || {};
+  return { left: 0, top: 0, w: w.innerWidth || 0, h: w.innerHeight || 0 };
+}
+
 export function openFloat(ctx, spec) {
   const { cls, unit } = spec;
   const host = spec.host || ctx.overlay;
@@ -153,11 +170,12 @@ export function openFloat(ctx, spec) {
     // 装得下就居中起步，多个窗按开窗顺序往右下错开（见 STAGGER_Y 的注释）。
     // 这里不需要"装不下就钉左上角"那一支：锁比例那条路在 defaultBox 里已经把窗
     // 缩进了视口，自由那条路本来就夹在两轴内——起步位置永远落在屏幕里。
+    const vr = viewRectOf(ctx);
     applyBox(
       ctx,
       entry,
-      (ctx.win.innerWidth - box.w) / 2 + n * STAGGER_X,
-      (ctx.win.innerHeight - box.h) / 2 + n * STAGGER_Y,
+      vr.left + (vr.w - box.w) / 2 + n * STAGGER_X,
+      vr.top + (vr.h - box.h) / 2 + n * STAGGER_Y,
       box.w,
       box.h
     );
@@ -257,8 +275,9 @@ export function closeTopFloat(ctx) {
 function defaultBox(ctx, entry, natural) {
   const ch = entry.chrome;
   const frac = entry.spec.maxFrac || DEFAULT_MAX_FRAC;
-  const maxW = ctx.win.innerWidth * frac.w - ch.x;
-  const maxH = ctx.win.innerHeight * frac.h - ch.y;
+  const vr = viewRectOf(ctx);
+  const maxW = vr.w * frac.w - ch.x;
+  const maxH = vr.h * frac.h - ch.y;
 
   let cw = Math.max(1, natural.w);
   let hh = Math.max(1, natural.h);
@@ -280,8 +299,14 @@ function defaultBox(ctx, entry, natural) {
 
 // 尺寸先夹到下限与视口内，位置再夹——顺序反了会出现「缩到一半被位置挤回去」
 function applyBox(ctx, entry, x, y, w, h) {
-  const vw = ctx.win.innerWidth;
-  const vh = ctx.win.innerHeight;
+  // 3.0 刀 36：**尺寸看这一层界面、位置看它在屏幕上的哪儿。**
+  // 窗是 `position:fixed`，`x/y` 就是屏幕坐标；而"装不装得下"问的是这一层多大。
+  // 全屏时 `vr` 正好是 `{0,0,视口}`，与从前逐像素等同。
+  const vr = viewRectOf(ctx);
+  const vw = vr.w;
+  const vh = vr.h;
+  const x0 = vr.left;
+  const y0 = vr.top;
   const ch = entry.chrome;
 
   if (entry.ratio) {
@@ -311,8 +336,8 @@ function applyBox(ctx, entry, x, y, w, h) {
   }
   // 位置夹取。上下界不用再自己排序：上面两条路都已经把窗夹进了视口（w ≤ vw − 2×EDGE），
   // 所以 `vw - w - EDGE ≥ EDGE` 恒成立，直接夹就是对的。
-  x = Math.max(EDGE, Math.min(x, vw - w - EDGE));
-  y = Math.max(EDGE, Math.min(y, vh - h - EDGE));
+  x = Math.max(x0 + EDGE, Math.min(x, x0 + vw - w - EDGE));
+  y = Math.max(y0 + EDGE, Math.min(y, y0 + vh - h - EDGE));
   entry.win.style.left = x + "px";
   entry.win.style.top = y + "px";
   entry.win.style.width = w + "px";

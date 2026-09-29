@@ -189,6 +189,18 @@ Crystal Vault answers a different question: **"what is in this collection, and h
 
 It is not a better graph. It is a different starting point.
 
+## Windowed mode: it does not have to take the whole screen
+
+Opening the vault from the ribbon icon gives you the **full screen** by default. If you would rather **keep your note visible while you use the vault**, set 「**打开方式**」 (how it opens) to 「**浮窗**」 (floating window) in the plugin settings: the vault shrinks to a rectangle on screen with your note still visible beside it.
+
+- **Drag its top bar** to move it, **drag the bottom-right corner** to resize it;
+- the position and size **travel with the vault**, so it opens where you left it on another machine;
+- the 「**浮窗 / 全屏**」 button in the vault's own top bar switches either way — the label tells you what pressing it does.
+
+> - Switching **reopens the view** (whatever you had open in the reader, and the windows on the desk, are dropped). This mode changes the vault's *geometry*, and patching that in place always leaves something stale.
+> - **The reader and the card panel stay inside the window too** — click a card and the panel does not cover your note.
+> - **The dataviewjs form has no such mode** (it already lives inside a note), so that button never appears there.
+
 ## Install
 
 ### From the community directory
@@ -249,6 +261,8 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.70** · **Windowed mode**: the vault no longer has to fill the screen — it can shrink to a draggable, resizable rectangle floating over your note, so you can read and use the vault at the same time. Pick the default in the plugin settings, or flip it any time with the button in the vault's top bar. (The version jumps from 1.3.60 because this is an architectural change: the vault gained a notion of *how much screen it occupies*, and every piece of coordinate maths that assumed "the viewport" now asks "this layer" instead.)
 
 **1.3.60** · Boxes are written to disk: one `.crystal-boxes.json` per crystal (dot-prefixed, so Obsidian never shows it), holding each box's name, size, collapsed state and members. Positions that only ever lived on this machine are moved in automatically the first time you open the vault after upgrading.
 

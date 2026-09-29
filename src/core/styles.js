@@ -1413,6 +1413,33 @@ const CANVAS = [
   "}",
   // 标题给那颗按钮让出位置——不让的话它压在字上，两条都读不清。
   ".kb-v13-snode-import .kb-v13-snode-title{padding-right:20px;}",
+
+  // ===== 3.0 刀 36：非全屏（浮窗）=====
+  //
+  // 三块"铺满视口"的层（`.kb-v13-fullscreen` / `.kb-v13-overlay` / `.kb-v13-reader`）
+  // 的矩形由 JS 写在行内样式上（`app.js` 的 `paintViewBox`），所以这里没有它们的规则
+  // ——**只在浮窗模式下写**，全屏时行内样式是空串，CSS 里那条 `inset:0` 照旧管。
+  //
+  // ⚠️ 行内样式必须**连 right/bottom 一起清掉**：`inset:0` 展开出来就是它们，
+  // 只写 left/width 的话 right 还钉在 0 上，元素会被拉成从 left 一直铺到屏幕右边。
+  //
+  // 右下角那颗抓手。**z-index 要在所有层之上**（库 9990 / 遮罩 9999 / 阅读器 10020 /
+  // 悬浮窗 10050）——阅读器开着的时候也得抓得到，否则"这时候拖不动窗口"。
+  // 它挂在 body 上（不挂在库里）：库本体是 `overflow` 裁过的一块，抓手压在被裁的
+  // 角上会缺一半。
+  ".kb-v13-viewgrip{",
+  "  position:fixed;width:16px;height:16px;z-index:10060;cursor:nwse-resize;",
+  "  background:linear-gradient(135deg,transparent 46%,rgba(0,210,255,.9) 46%);",
+  "  border-bottom-right-radius:5px;pointer-events:auto;",
+  "}",
+  // 顶栏那颗「浮窗 / 全屏」。长相跟旁边那颗「忘掉上次看到哪儿」同一族。
+  ".kb-v13-topbar-win{",
+  "  cursor:pointer;font:inherit;font-size:11.5px;padding:4px 9px;border-radius:6px;",
+  "  margin-left:6px;white-space:nowrap;",
+  "  border:1px solid rgba(0,200,255,.28);background:rgba(8,18,34,.6);",
+  "  color:rgba(175,215,245,.9);",
+  "}",
+  ".kb-v13-topbar-win:hover{border-color:rgba(0,220,255,.65);color:rgba(215,240,255,.98);}",
 ];
 
 // ===== 3.0 刀 6：文献阅读器 =====

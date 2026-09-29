@@ -78,15 +78,20 @@ function canStartDrag(panel, e) {
  * 免得夹出空集把面板钉死在某个角上。
  */
 function clampOffset(ctx, base, x, y) {
-  const vw = ctx.win.innerWidth;
-  const vh = ctx.win.innerHeight;
+  // 3.0 刀 36：夹在**这一层界面**里，不是视口——浮窗模式下界面只占屏幕一块，
+  // 按视口夹的话面板能拖到窗口外面去（拖出去了就再也抓不回来）。
+  // 面板是 `position:fixed`、`base` 来自 `getBoundingClientRect`，两边都是屏幕
+  // 坐标，所以只换"夹在哪个范围内"，位置本身不用换算。全屏时两者相同。
+  const vr = ctx.viewRect
+    ? ctx.viewRect()
+    : { left: 0, top: 0, w: ctx.win.innerWidth, h: ctx.win.innerHeight };
 
-  const ax = EDGE - base.left;
-  const bx = vw - EDGE - base.left - base.w;
+  const ax = vr.left + EDGE - base.left;
+  const bx = vr.left + vr.w - EDGE - base.left - base.w;
   x = Math.min(Math.max(x, Math.min(ax, bx)), Math.max(ax, bx));
 
-  const ay = EDGE - base.top;
-  const by = vh - EDGE - base.top - base.h;
+  const ay = vr.top + EDGE - base.top;
+  const by = vr.top + vr.h - EDGE - base.top - base.h;
   y = Math.min(Math.max(y, Math.min(ay, by)), Math.max(ay, by));
 
   return { x, y };

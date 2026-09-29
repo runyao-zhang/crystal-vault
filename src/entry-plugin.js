@@ -72,6 +72,12 @@ const DEFAULT_SETTINGS = {
   cardsFolder: DEFAULT_CARDS_FOLDER,
   scratchFolder: DEFAULT_SCRATCH_FOLDER,
   dockColor: DEFAULT_DOCK_COLOR,
+  // 3.0 刀 36：**打开方式**。`false` = 全屏（老行为，也是出厂默认）；
+  // `true` = 浮窗——库收成屏幕上一块可拖可缩的矩形，旁边还看得见笔记。
+  windowed: false,
+  /** 浮窗上次摆在哪儿 `{x,y,w,h}`。**跟着 vault 走**（同其它设置），
+   *  于是换台机器打开时窗口也在你习惯的位置。`null` = 还没摆过，用默认摆位。 */
+  windowBox: null,
 };
 
 class CrystalVaultView extends ItemView {
@@ -160,6 +166,15 @@ class CrystalVaultView extends ItemView {
         // 3.0 刀 18：阅读器收纳栏那条竖栏的底色。**只影响一层皮**，
         // 所以它是设置项而不是核心偏好（理由见 `prefs.js` 那个白名单的坑）。
         dockColor: this.plugin.settings.dockColor,
+        // 3.0 刀 36：非全屏（浮窗）。三项一起给，缺一不可：
+        //   · windowed   —— 这次开成哪个档（设置里那行「打开方式」）
+        //   · windowBox  —— 上次摆在哪儿
+        //   · onWindowBox—— 拖完/缩完之后写回设置（不然下次又回默认摆位）
+        // `onToggleWindow` 是顶栏那颗按钮：**切档 + 重挂**。
+        windowed: !!this.plugin.settings.windowed,
+        windowBox: this.plugin.settings.windowBox,
+        onWindowBox: (box) => this.plugin.saveWindowBox(box),
+        onToggleWindow: () => this.plugin.toggleWindowed(),
         // 样式走仓库根目录的 styles.css（Obsidian 自己加载），运行时一份都不注。
         injectStyles: false,
       });
@@ -257,6 +272,30 @@ class CrystalVaultSettingTab extends PluginSettingTab {
         });
       });
 
+    // 3.0 刀 36：打开方式。**下拉而不是开关**——两档各有各的用处，说成
+    // "开/关"会让人以为浮窗是某种增强功能，而它其实是"占多少屏幕"的取舍。
+    new Setting(containerEl)
+      .setName("打开方式")
+      .setDesc(
+        "全屏：铺满整个窗口，老行为。浮窗：收成屏幕上一块可拖可缩的矩形，" +
+          "旁边还看得见笔记。浮窗可以拖顶栏挪位置、拖右下角改大小，" +
+          "**下次打开还在你放的地方**（这份设置跟着 vault 走）。" +
+          "库里顶栏那颗「浮窗 / 全屏」能随时切换，两档都会重开一次视图。"
+      )
+      .addDropdown((d) => {
+        d.addOption("full", "全屏");
+        d.addOption("windowed", "浮窗");
+        d.setValue(this.plugin.settings.windowed ? "windowed" : "full");
+        d.onChange(async (v) => {
+          const next = v === "windowed";
+          if (next === !!this.plugin.settings.windowed) return;
+          // 走同一个方法翻档（它与顶栏那颗按钮是同一条路，不另写一份）。
+          await this.plugin.toggleWindowed();
+          // 重挂之后这一页也可能被重建了，刷新一下下拉自己的值
+          d.setValue(this.plugin.settings.windowed ? "windowed" : "full");
+        });
+      });
+
     new Setting(containerEl)
       .setName("收纳栏底色")
       .setDesc(
@@ -315,6 +354,15 @@ export default class CrystalVaultPlugin extends Plugin {
     if (!/^#[0-9a-f]{6}$/i.test(String(this.settings.dockColor || ""))) {
       this.settings.dockColor = DEFAULT_DOCK_COLOR;
     }
+    // 3.0 刀 36：浮窗那两项也要过一道。**不可信输入**（用户手改过 data.json、
+    // 或者从旧版本升上来）——`windowed` 只要真值语义，`windowBox` 形状不对就当没有，
+    // 让它回默认摆位。交给核心那边兜也行，但这里顺手做掉，设置页读的时候才一致。
+    this.settings.windowed = !!this.settings.windowed;
+    const wb = this.settings.windowBox;
+    this.settings.windowBox =
+      wb && typeof wb === "object" && ["x", "y", "w", "h"].every((k) => Number.isFinite(Number(wb[k])))
+        ? { x: Number(wb.x), y: Number(wb.y), w: Number(wb.w), h: Number(wb.h) }
+        : null;
     // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
     // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），
     // 而且状态写得极频繁，没理由让每次滚动都去动设置页看的那几个值。
@@ -366,6 +414,42 @@ export default class CrystalVaultPlugin extends Plugin {
       }
     }
     new Notice("晶体库：草稿纸改到 " + this.settings.scratchFolder);
+  }
+
+  /**
+   * 3.0 刀 36：记下浮窗摆在哪儿。**不重挂视图**——重挂会把阅读器里开着的文献、
+   * 桌面上摆的窗全丢掉，而拖动一次窗口就来一记，那代价完全不成比例。
+   * 窗口的矩形是 `mount` 那边自己在改的，这里只负责落盘。
+   */
+  async saveWindowBox(box) {
+    this.settings.windowBox = box && typeof box === "object" ? { ...box } : null;
+    await this.flush();
+  }
+
+  /**
+   * 3.0 刀 36：全屏 ⇄ 浮窗（顶栏那颗按钮）。
+   *
+   * ⚠️ **必须重挂**，和 `setCardsFolder` 那两个同一类理由：这一档换的是
+   * **库的几何**——三块层的矩形、环形排布的缩放基准（`createMetrics` 是挂载时
+   * 算一次）、以及一堆"这一层多大"的推导，全都长在挂载那一刻。原地改的话
+   * 总有一块不跟着变，而那种坏法是"卡片位置差一截"，很难查。
+   *
+   * 代价是阅读器里开着的文献、桌面上的窗会没——与 `setCardsFolder` 同一条，
+   * 换档本来就是件"重新摆一次"的事，用户点它的时候心里有数。
+   */
+  async toggleWindowed() {
+    this.settings.windowed = !this.settings.windowed;
+    // 切成浮窗时**把上次那个矩形留着**：来回切几次不该每次都回到默认摆位。
+    await this.flush();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view && typeof view.dispose === "function" && typeof view.renderInto === "function") {
+        view.dispose();
+        await view.renderInto(view.contentEl);
+        // 重挂之后 `renderInto` 自己会 `open()`，不用在这里再喊。
+      }
+    }
+    new Notice("晶体库：" + (this.settings.windowed ? "收成浮窗了" : "回到全屏了"));
   }
 
   /**

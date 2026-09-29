@@ -18,6 +18,9 @@ import { beginInlineRename } from "./inlinerename.js";
 import { createBox, renameBox } from "./storyboxes.js";
 import { CSS } from "./styles.js";
 import { createMetrics } from "./layout.js";
+// 3.0 刀 36：浮窗模式的拖动/缩放收编桌面窗那一套（`bindDeskDrag`），不另写一份
+// ——它已经踩平了阈值、指针捕获、连同「move/up 必须绑在 doc 上」那几个坑。
+import { bindDeskDrag } from "./desk.js";
 import { createModel, applyCardFields } from "./model.js";
 import { showTooltip, hideTooltip } from "./tooltip.js";
 import {
@@ -159,6 +162,54 @@ const JUST_SAVED_TTL_MS = 5000;
 // 短到不会一直悬着、长到来得及点第二下——这是**防误触**，不是防犹豫：
 // 犹豫的人会重新看一眼按钮上的「确认恢复？」，那正是我们要他做的事。
 const RESET_ARM_MS = 4000;
+
+// ---- 3.0 刀 36：非全屏（浮窗）模式 ----
+//
+// 库不铺满屏幕，而是占屏幕上一个可拖可缩的矩形。三块"铺满视口"的层
+// （库本体 / 阅读器 / 全息遮罩）都缩进这块矩形，坐标计算改问 `ctx.viewRect()`。
+
+/** 角度抓手的边长。它是 **body 级**的，自己贴在窗口右下角上（见 positionViewGrip）。 */
+const GRIP_SIZE = 16;
+/** 窗口的下限。比这个再小就不是"用库"了，是"看一个缝"。 */
+const VIEW_WIN_MIN_W = 420;
+const VIEW_WIN_MIN_H = 320;
+
+function validBox(b) {
+  if (!b || typeof b !== "object") return false;
+  return ["x", "y", "w", "h"].every((k) => Number.isFinite(Number(b[k])));
+}
+
+/**
+ * 第一次开浮窗时摆在哪儿：**屏幕中间、占七成多**。
+ *
+ * 有意**不铺满**——铺满就跟全屏没区别了，用户选浮窗要的正是"旁边还看得见笔记"。
+ * 也不顶到左上角：那样看着像个没定位好的对话框。
+ */
+function defaultViewBox(vw, vh) {
+  const w = Math.max(VIEW_WIN_MIN_W, Math.round((vw || 1280) * 0.76));
+  const h = Math.max(VIEW_WIN_MIN_H, Math.round((vh || 800) * 0.78));
+  return {
+    x: Math.round(((vw || 1280) - w) / 2),
+    y: Math.round(((vh || 800) - h) / 2),
+    w,
+    h,
+  };
+}
+
+/**
+ * 把一块矩形夹回屏幕里，并保证不小于下限。
+ *
+ * **至少留一条边在屏幕内**（不是"完全在屏幕内"）：用户把窗口拖到屏幕边上是常事，
+ * 完全夹死的话他就没法把窗口挪到副屏或者屏幕边缘了。留一角能抓住就够。
+ */
+function clampViewBox(box, vw, vh) {
+  const w = Math.max(VIEW_WIN_MIN_W, Math.min(Number(box.w) || 0, Math.max(VIEW_WIN_MIN_W, vw)));
+  const h = Math.max(VIEW_WIN_MIN_H, Math.min(Number(box.h) || 0, Math.max(VIEW_WIN_MIN_H, vh)));
+  const keep = 60; // 至少留这么多像素在屏幕里
+  const x = Math.min(Math.max(Number(box.x) || 0, keep - w), vw - keep);
+  const y = Math.min(Math.max(Number(box.y) || 0, 0), vh - keep);
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
 
 /**
  * 读回视图状态。契约要求适配层的 loadViewState 不许抛，但接缝对面的实现
@@ -858,6 +909,21 @@ export async function mount({
   // 「下次写盘静默丢掉」的风险（`prefs.js` 里那个坑记过一次）。
   // dataviewjs 形态不传这一项，就是默认白。
   dockColor = "",
+  // 3.0 刀 36「非全屏（浮窗）」。
+  //
+  // `true` = 库不铺满屏幕，而是占屏幕上的一个可拖可缩的矩形（**浮在笔记上方**）。
+  // 三块"铺满视口"的层（库本体 / 阅读器 / 全息遮罩）都跟着缩进这块矩形，
+  // 而所有"拿视口当边界"的坐标计算改问 `ctx.viewRect()`。
+  //
+  // ⚠️ **这一项是宿主给的**（插件设置里那行「打开方式」），不是核心偏好——
+  // dataviewjs 形态本来就嵌在笔记里，没有"全屏"这回事，永远不传。
+  windowed = false,
+  /** 上次这个窗口摆在哪儿 `{x,y,w,h}`。形状不对就当没有，回默认摆位。 */
+  windowBox = null,
+  /** 窗口被拖动/缩放之后回调（宿主写盘）。**只在浮窗模式下会被调。** */
+  onWindowBox = null,
+  /** 想切换全屏 / 浮窗（库顶栏那颗按钮）。不给就不显示那颗按钮。 */
+  onToggleWindow = null,
 }) {
   assertAdapter(adapter);
 
@@ -876,7 +942,12 @@ export async function mount({
   // 于是退化成从前的行为——只有有卡的才上环。
   const folders = adapter.listFolders ? await adapter.listFolders() : [];
   const model = createModel(cards, adapter, folders);
-  const metrics = createMetrics(win);
+  // 3.0 刀 36：按**这一层界面**的尺寸算，不是视口（浮窗模式下两者不一样）。
+  // ⚠️ 这里**不能调 `viewRect()`**：下面那段（定义 viewBox / viewRect 的）还没执行到，
+  // 那是一对 `const`，提前引用会 TDZ 抛错。就地写同一件事的两种情形。
+  const metrics = createMetrics(
+    viewBox ? { w: viewBox.w, h: viewBox.h } : { w: win.innerWidth, h: win.innerHeight }
+  );
 
   // ---- 样式（清理旧实例，代码块重跑时不叠加）----
   const oldStyle = doc.getElementById(STYLE_ID);
@@ -931,6 +1002,62 @@ export async function mount({
     '<span class="kb-v13-trigger-sub">' + model.crystalKeys.length + " 组晶簇 · " + model.totalCards + " 卡片</span>" +
     "</span>" +
     "</button>";
+
+  // ---- 3.0 刀 36：这一层界面在屏幕上的位置和大小 ----
+  //
+  // 全屏模式 = **视口**；浮窗模式 = **那个窗口**。库里所有"拿视口当边界"的地方
+  // 都改问 `ctx.viewRect()`，而全屏时它返回的正是视口——所以这一次改造对
+  // 现有一切是**逐像素等同**的。
+  //
+  // ⚠️ 为什么要专门有这个函数，而不是各处继续读 `win.innerWidth`：
+  // 那六处（悬浮窗居中/夹取、卡片面板夹取、卫星连线的 SVG 坐标系、悬停浮层
+  // 夹取、环形排布的缩放基准、卫星 viewBox）全都**假设"这一层铺满视口"**。
+  // 界面一旦只占屏幕的一块，那个假设就不成立了，而失效的表现是
+  // "面板飘到窗口外面去了"——不报错，只是东西跑到你看不见的地方。
+  let viewBox = windowed
+    ? clampViewBox(validBox(windowBox) ? windowBox : defaultViewBox(win.innerWidth, win.innerHeight), win.innerWidth, win.innerHeight)
+    : null;
+  let viewGrip = null;
+  const viewRect = () =>
+    viewBox
+      ? { left: viewBox.x, top: viewBox.y, w: viewBox.w, h: viewBox.h }
+      : { left: 0, top: 0, w: win.innerWidth, h: win.innerHeight };
+
+  /**
+   * 把一块矩形套到那三块"铺满视口"的层上。
+   *
+   * 三块都是 `position:fixed; inset:0`（CSS 里写死的）。浮窗模式下要给它们
+   * 明确的 left/top/width/height，而**必须同时把 right/bottom 清掉**——
+   * `inset:0` 展开出来的是 right/bottom，只写 left/width 的话 right 还钉在 0 上，
+   * 元素会被拉成从 left 一直铺到屏幕右边。
+   */
+  function paintViewBox() {
+    const els = [fs, readerEl, overlay];
+    for (const el of els) {
+      if (!el) continue;
+      if (!viewBox) {
+        el.style.left = el.style.top = el.style.width = el.style.height = "";
+        el.style.right = el.style.bottom = "";
+        continue;
+      }
+      el.style.left = viewBox.x + "px";
+      el.style.top = viewBox.y + "px";
+      el.style.width = viewBox.w + "px";
+      el.style.height = viewBox.h + "px";
+      el.style.right = "auto";
+      el.style.bottom = "auto";
+    }
+    if (viewGrip) viewGrip.style.display = viewBox ? "" : "none";
+    positionViewGrip();
+  }
+
+  /** 右下角那颗抓手贴在窗口的右下角上。**它是 body 级的**（不跟着窗口走），所以要自己摆。 */
+  function positionViewGrip() {
+    if (!viewGrip) return;
+    if (!viewBox) return;
+    viewGrip.style.left = viewBox.x + viewBox.w - GRIP_SIZE + "px";
+    viewGrip.style.top = viewBox.y + viewBox.h - GRIP_SIZE + "px";
+  }
 
   // ---- 全屏暗场 ----
   const oldFs = doc.getElementById("kb-fullscreen");
@@ -1047,6 +1174,11 @@ export async function mount({
     '<button class="kb-v13-topbar-forget" id="kb-fs-forget"' +
     ' title="清掉记住的那颗晶体、那一页和最后翻开的那张卡。下次打开晶体库，回到所有晶体围成一圈的样子。">' +
     "忘掉上次看到哪儿</button>" +
+    // 3.0 刀 36：全屏 ⇄ 浮窗。**字说的是按下去会怎样**（顶栏其它开关都是这个口径）。
+    // 宿主没给 `onToggleWindow` 时整颗不出现——dataviewjs 形态本来就嵌在笔记里，
+    // 没有"全屏"这回事，摆一颗点了没反应的比不摆更糟。
+    '<button class="kb-v13-topbar-win" id="kb-fs-winmode" style="display:none"' +
+    ' title="把晶体库收成一个浮在笔记上的窗口，可拖可缩，旁边还看得见笔记。再点一下回全屏。">浮窗</button>' +
     '<button class="kb-v13-topbar-close" id="kb-fs-close">✕</button>' +
     "</div>" +
     // 孤岛汇总浮层。挂在 topbar 外面（不是里面）——topbar 是 flex 行，
@@ -1077,6 +1209,17 @@ export async function mount({
     "</div>" +
     "</div>";
   doc.body.appendChild(fs);
+
+  // 3.0 刀 36：浮窗模式下那两颗"窗口家具"。
+  //
+  // 抓手**挂在 body 上**、不挂在库里：库本体是 `overflow` 裁过的一块，
+  // 抓手压在它右下角会被裁掉一半。而且它得比库本体更靠上（z-index），
+  // 才抓得住——它是三块层里最后画的一个。
+  if (windowed) {
+    viewGrip = EL("div", "kb-v13-viewgrip");
+    viewGrip.title = "拖这里改这个窗口的大小";
+    doc.body.appendChild(viewGrip);
+  }
 
   // ---- 悬停浮层 ----
   const oldTip = doc.querySelector(".kb-v13-tooltip");
@@ -1134,7 +1277,17 @@ export async function mount({
 
   const satLines = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
   satLines.setAttribute("class", "kb-v13-sat-lines");
-  satLines.setAttribute("viewBox", "0 0 " + win.innerWidth + " " + win.innerHeight);
+  // ⚠️ 3.0 刀 36：viewBox 的**原点要跟着这一层走**。
+  // 这张 SVG 的坐标原点是它自己的左上角（＝ overlay 的左上角），而里面的点
+  // （卫星、连线）全是用**屏幕坐标**算的。全屏时两者重合、写 `0 0` 正好；
+  // 窗口挪到 (300,200) 之后还写 `0 0` 的话，所有连线会整体偏 (-300,-200)。
+  // 写成 `left top w h` 就等于把用户坐标系平移回去——**点的算法一个字不用改**。
+  satLines.setAttribute(
+    "viewBox",
+    viewBox
+      ? viewBox.x + " " + viewBox.y + " " + viewBox.w + " " + viewBox.h
+      : "0 0 " + win.innerWidth + " " + win.innerHeight
+  );
   satLines.id = "kb-sat-lines";
   overlay.appendChild(satLines);
   satLines.style.display = "none";
@@ -1148,6 +1301,10 @@ export async function mount({
   const readerEl = EL("div", "kb-v13-reader");
   readerEl.id = "kb-reader";
   doc.body.appendChild(readerEl);
+
+  // 三块"铺满视口"的层（库本体 / 遮罩 / 阅读器）都建好了，现在才套窗口矩形。
+  // ⚠️ **顺序是硬的**：`paintViewBox` 要同时够到这三块，早一步就是 TDZ。
+  paintViewBox();
 
   const stage = fs.querySelector("#kb-stage");
   const canvas = fs.querySelector("#kb-canvas");
@@ -1470,6 +1627,13 @@ export async function mount({
       // 所以它永远和 crystalPath 对得上，不存在「钻进晶体了却在画布上」。
       stage: "ring",
     },
+    // 3.0 刀 36：**这一层界面在屏幕上的位置和大小**（屏幕坐标）。
+    // 全屏模式返回的正是视口，所以"改成问它"这件事对全屏是逐像素等同的。
+    // 悬浮窗的居中/夹取、卡片面板的夹取、悬停浮层、卫星连线的坐标系、
+    // 环形排布的缩放基准——**这些全都不该再直接问 `win.innerWidth`**。
+    viewRect: () => viewRect(),
+    /** 现在是浮窗模式吗（少数几处要区别对待：滚动条、body 的 overflow 之类）。 */
+    isWindowed: () => !!viewBox,
     hideTooltip: () => hideTooltip(ctx),
     // 3.0 刀 31：**一层通用的「说一句话」**。
     //
@@ -1904,6 +2068,67 @@ export async function mount({
 
   root.querySelector(".kb-v13-trigger").addEventListener("click", openFullscreen);
   fs.querySelector("#kb-fs-close").addEventListener("click", closeFullscreen);
+
+  // ---- 3.0 刀 36：浮窗模式的拖动与缩放 ----
+  //
+  // 收编 `desk.js` 那套（`bindDeskDrag`）而不是再写一份：它已经踩平了那几个坑
+  // ——阈值之内不捕获（否则点一下标题栏就被吞掉）、过了阈值才 `setPointerCapture`
+  // （否则开头几个像素收不到事件）、move/up **绑在 doc 上**（抓手就在窗角上，
+  // 往右下拽的头几个像素立刻越过窗的边界）。
+  //
+  // 拖的是**三块层**（库本体 / 阅读器 / 全息遮罩），不是一块——它们都得跟着走，
+  // 否则开着的阅读器会留在原地、而库已经挪走了。
+  if (viewBox) {
+    const bounds = () => ({ w: win.innerWidth, h: win.innerHeight });
+    const bindOne = (bar) =>
+      bar &&
+      bindDeskDrag(ctx, {
+        // `spec.el` 在 bindDeskDrag 里其实没被用到（它只碰 bar / grip / box），
+        // 传库本体是表意。
+        el: fs,
+        bar,
+        grip: viewGrip,
+        box: () => ({ ...viewBox }), // 视口尺寸变化时按当时的算
+        bounds,
+        onChange: (next) => {
+          // `bindDeskDrag` 用的是桌面那套下限（更小），这里补一道本窗口的下限。
+          viewBox = {
+            ...next,
+            w: Math.max(VIEW_WIN_MIN_W, next.w),
+            h: Math.max(VIEW_WIN_MIN_H, next.h),
+          };
+          paintViewBox();
+        },
+        onCommit: (box) => {
+          viewBox = clampViewBox(box, win.innerWidth, win.innerHeight);
+          paintViewBox();
+          if (onWindowBox) onWindowBox({ ...viewBox });
+        },
+      });
+    // **两条标题栏都能拖**：库顶栏，以及阅读器自己的顶栏——阅读器开着的时候
+    // 它盖在库上面，只绑库那条的话"这时候拖不动窗口"，而用户正对着的就是它。
+    const unbindBar = bindOne(fs.querySelector(".kb-v13-topbar"));
+    const unbindReader = bindOne(readerEl.querySelector(".kb-v13-reader-bar"));
+    if (unbindBar || unbindReader) {
+      // 这个实例拆掉时两条一起摘（同 mount 里其它一次性监听的收尾规矩）。
+      ctx.unbindViewWin = () => {
+        if (unbindBar) unbindBar();
+        if (unbindReader) unbindReader();
+      };
+    }
+  }
+
+  // 顶栏那颗「浮窗 / 全屏」。宿主没给回调就不出现（dataviewjs 形态没有全屏这回事）。
+  const winModeBtn = fs.querySelector("#kb-fs-winmode");
+  if (onToggleWindow) {
+    winModeBtn.style.display = "";
+    // 字说的是**按下去会怎样**：现在是全屏，按下去就成浮窗。
+    winModeBtn.textContent = viewBox ? "全屏" : "浮窗";
+    winModeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onToggleWindow();
+    });
+  }
   fs.querySelector("#kb-fs-forget").addEventListener("click", forgetViewState);
 
   // #9 顶栏模式开关。点已经选中的那一枚不做事（幂等），省得来回扫两趟 DOM。
