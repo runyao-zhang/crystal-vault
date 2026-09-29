@@ -189,17 +189,22 @@ Crystal Vault answers a different question: **"what is in this collection, and h
 
 It is not a better graph. It is a different starting point.
 
-## Windowed mode: it does not have to take the whole screen
+## Three ways to open it: full screen / floating window / embedded
 
-Opening the vault from the ribbon icon gives you the **full screen** by default. If you would rather **keep your note visible while you use the vault**, set 「**打开方式**」 (how it opens) to 「**浮窗**」 (floating window) in the plugin settings: the vault shrinks to a rectangle on screen with your note still visible beside it.
+Opening the vault from the ribbon icon gives you the **full screen** by default — it fills the window and covers your note. The other two live in the plugin's 「**打开方式**」 (how it opens) setting, and the button in the vault's own top bar cycles through all three (**the label names the mode you will get**):
 
-- **Drag its top bar** to move it, **drag the bottom-right corner** to resize it;
-- the position and size **travel with the vault**, so it opens where you left it on another machine;
-- the 「**浮窗 / 全屏**」 button in the vault's own top bar switches either way — the label tells you what pressing it does.
+| | What it looks like |
+| --- | --- |
+| **Full screen** | Fills the whole window, over your note. The old behaviour, and the default. |
+| **Floating window** | Shrinks to a rectangle **floating over your note** — read and use the vault at the same time. |
+| **Embedded** | **Lives inside its own Obsidian tab**, covering nothing. Can sit side by side with other tabs. |
 
-> - Switching **reopens the view** (whatever you had open in the reader, and the windows on the desk, are dropped). This mode changes the vault's *geometry*, and patching that in place always leaves something stale.
-> - **The reader and the card panel stay inside the window too** — click a card and the panel does not cover your note.
-> - **The dataviewjs form has no such mode** (it already lives inside a note), so that button never appears there.
+**Floating window**: drag its top bar to move it, drag the bottom-right corner to resize it; the position and size **travel with the vault**, so it opens where you left it on another machine.
+
+> - Switching between the three **reopens the view** (whatever you had open in the reader, and the windows on the desk, are dropped). The mode changes the vault's *geometry*, and patching that in place always leaves something stale.
+> - **The reader and the card panel stay inside whichever mode you are in** — in a floating window, clicking a card does not cover your note; embedded, they only occupy that tab.
+> - **Embedded mode does not lock your note's scrolling** (the other two do — they sit over the note, so it should not scroll behind them).
+> - **The dataviewjs form has none of this** (it already lives inside a note), so that button never appears there.
 
 ## Install
 
@@ -261,6 +266,8 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.73** · A third mode, 「**嵌入**」 (embedded): the vault lives inside its own Obsidian tab, covering nothing, and can sit side by side with other tabs. The top-bar button now **cycles through all three** (full screen → floating window → embedded) and names the one you will get. Embedded mode **does not lock your note's scrolling** (the other two do — they sit over the note).
 
 **1.3.72** · Six fixes to windowed mode: **satellites and floating windows were offset** (their coordinates come from the screen, but the layer they live in uses layer-local coordinates — the two differ by the window's origin once it is not fullscreen); **the resize grip stayed on your note after closing the vault** (and only ever accumulated); drag listeners were never unbound (six leaked per open); **the card panel could be taller than the window** (`vh` always measures the viewport) — the CSS now asks how big *this layer* is; **the toolbar was clipped in a narrow window** (✕ included) — it wraps now; and a window wider than the screen could put the grip out of reach.
 

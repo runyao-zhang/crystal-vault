@@ -72,9 +72,13 @@ const DEFAULT_SETTINGS = {
   cardsFolder: DEFAULT_CARDS_FOLDER,
   scratchFolder: DEFAULT_SCRATCH_FOLDER,
   dockColor: DEFAULT_DOCK_COLOR,
-  // 3.0 刀 36：**打开方式**。`false` = 全屏（老行为，也是出厂默认）；
-  // `true` = 浮窗——库收成屏幕上一块可拖可缩的矩形，旁边还看得见笔记。
-  windowed: false,
+  // 3.0 刀 36/37：**打开方式**。三档，出厂是全屏（老行为）。
+  //   · `"full"`     铺满整个窗口，盖在笔记上
+  //   · `"windowed"` 收成屏幕上一块可拖可缩的矩形，浮在笔记上
+  //   · `"embedded"` 就长在它那颗 Obsidian 标签页里，不盖任何东西
+  // ⚠️ 1.3.70/1.3.71 里它是**布尔** `windowed`。`loadSettings` 里有一条迁移把它读过来
+  // ——**别把那条删了**，删了的话已经切过浮窗的人升级后会静默回到全屏。
+  openMode: "full",
   /** 浮窗上次摆在哪儿 `{x,y,w,h}`。**跟着 vault 走**（同其它设置），
    *  于是换台机器打开时窗口也在你习惯的位置。`null` = 还没摆过，用默认摆位。 */
   windowBox: null,
@@ -171,10 +175,11 @@ class CrystalVaultView extends ItemView {
         //   · windowBox  —— 上次摆在哪儿
         //   · onWindowBox—— 拖完/缩完之后写回设置（不然下次又回默认摆位）
         // `onToggleWindow` 是顶栏那颗按钮：**切档 + 重挂**。
-        windowed: !!this.plugin.settings.windowed,
+        windowed: this.plugin.settings.openMode === "windowed",
+        embedded: this.plugin.settings.openMode === "embedded",
         windowBox: this.plugin.settings.windowBox,
         onWindowBox: (box) => this.plugin.saveWindowBox(box),
-        onToggleWindow: () => this.plugin.toggleWindowed(),
+        onToggleWindow: () => this.plugin.cycleOpenMode(),
         // 样式走仓库根目录的 styles.css（Obsidian 自己加载），运行时一份都不注。
         injectStyles: false,
       });
@@ -277,22 +282,29 @@ class CrystalVaultSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("打开方式")
       .setDesc(
-        "全屏：铺满整个窗口，老行为。浮窗：收成屏幕上一块可拖可缩的矩形，" +
-          "旁边还看得见笔记。浮窗可以拖顶栏挪位置、拖右下角改大小，" +
-          "**下次打开还在你放的地方**（这份设置跟着 vault 走）。" +
-          "库里顶栏那颗「浮窗 / 全屏」能随时切换，两档都会重开一次视图。"
+        "全屏：铺满整个窗口，盖在笔记上，老行为。" +
+          "浮窗：收成屏幕上一块可拖可缩的矩形，浮在笔记上——拖顶栏挪位置、" +
+          "拖右下角改大小，**下次打开还在你放的地方**（这份设置跟着 vault 走）。" +
+          "嵌入：就长在它那颗 Obsidian 标签页里，不盖任何东西，可以和别的标签页分屏。" +
+          "库里顶栏那颗按钮能随时循环切换（全屏 → 浮窗 → 嵌入），**换档都会重开一次视图**。"
       )
       .addDropdown((d) => {
         d.addOption("full", "全屏");
         d.addOption("windowed", "浮窗");
-        d.setValue(this.plugin.settings.windowed ? "windowed" : "full");
+        d.addOption("embedded", "嵌入");
+        d.setValue(String(this.plugin.settings.openMode));
         d.onChange(async (v) => {
-          const next = v === "windowed";
-          if (next === !!this.plugin.settings.windowed) return;
-          // 走同一个方法翻档（它与顶栏那颗按钮是同一条路，不另写一份）。
-          await this.plugin.toggleWindowed();
-          // 重挂之后这一页也可能被重建了，刷新一下下拉自己的值
-          d.setValue(this.plugin.settings.windowed ? "windowed" : "full");
+          if (String(v) === String(this.plugin.settings.openMode)) return;
+          // 走同一个方法落档（它与顶栏那颗按钮是同一条路，不另写一份）。
+          // ⚠️ 那个方法是**循环**的（给按钮用），所以这里不能直接调——先把
+          // 当前档设成"目标档的前一档"，再循环一步就正好落到目标档。
+          // 听着绕，但比再写一份"设到某一档"的实现强：两份实现迟早会漂。
+          const order = ["full", "windowed", "embedded"];
+          const want = order.indexOf(String(v));
+          if (want < 0) return;
+          this.plugin.settings.openMode = order[(want + order.length - 1) % order.length];
+          await this.plugin.cycleOpenMode();
+          d.setValue(String(this.plugin.settings.openMode));
         });
       });
 
@@ -357,7 +369,14 @@ export default class CrystalVaultPlugin extends Plugin {
     // 3.0 刀 36：浮窗那两项也要过一道。**不可信输入**（用户手改过 data.json、
     // 或者从旧版本升上来）——`windowed` 只要真值语义，`windowBox` 形状不对就当没有，
     // 让它回默认摆位。交给核心那边兜也行，但这里顺手做掉，设置页读的时候才一致。
-    this.settings.windowed = !!this.settings.windowed;
+    // ⚠️ **1.3.70/1.3.71 那个布尔 `windowed` 的迁移。** 那两版里「打开方式」
+    // 只有全屏/浮窗两档、存的是一个布尔；1.3.72 起换成了三档的字符串。
+    // 不迁的话，已经切过浮窗的人升级后会**静默回到全屏**（`openMode` 取默认值），
+    // 而他会以为自己那次设置没生效。只在"没有 openMode 但 windowed 是真的"时才迁。
+    if (!raw.openMode && raw.windowed === true) this.settings.openMode = "windowed";
+    if (["full", "windowed", "embedded"].indexOf(String(this.settings.openMode)) < 0) {
+      this.settings.openMode = "full";
+    }
     const wb = this.settings.windowBox;
     this.settings.windowBox =
       // ⚠️ **不能只 `Number.isFinite(Number(v))`**：`Number(null)` 与 `Number("")`
@@ -440,8 +459,12 @@ export default class CrystalVaultPlugin extends Plugin {
    * 代价是阅读器里开着的文献、桌面上的窗会没——与 `setCardsFolder` 同一条，
    * 换档本来就是件"重新摆一次"的事，用户点它的时候心里有数。
    */
-  async toggleWindowed() {
-    this.settings.windowed = !this.settings.windowed;
+  async cycleOpenMode() {
+    // 三档循环：全屏 → 浮窗 → 嵌入 → 全屏。**顺序与库顶栏那颗按钮的文案一致**
+    // （它写的就是"下一档叫什么"，见 app.js 里那颗）。
+    const order = ["full", "windowed", "embedded"];
+    const at = order.indexOf(String(this.settings.openMode));
+    this.settings.openMode = order[(at + 1) % order.length];
     // 切成浮窗时**把上次那个矩形留着**：来回切几次不该每次都回到默认摆位。
     await this.flush();
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
@@ -452,7 +475,8 @@ export default class CrystalVaultPlugin extends Plugin {
         // 重挂之后 `renderInto` 自己会 `open()`，不用在这里再喊。
       }
     }
-    new Notice("晶体库：" + (this.settings.windowed ? "收成浮窗了" : "回到全屏了"));
+    const label = { full: "回到全屏了", windowed: "收成浮窗了", embedded: "嵌进这颗标签页了" };
+    new Notice("晶体库：" + (label[this.settings.openMode] || "换档了"));
   }
 
   /**

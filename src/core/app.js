@@ -932,8 +932,21 @@ export async function mount({
   windowBox = null,
   /** 窗口被拖动/缩放之后回调（宿主写盘）。**只在浮窗模式下会被调。** */
   onWindowBox = null,
-  /** 想切换全屏 / 浮窗（库顶栏那颗按钮）。不给就不显示那颗按钮。 */
+  /** 想切换全屏 / 浮窗 / 嵌入（库顶栏那颗按钮）。不给就不显示那颗按钮。 */
   onToggleWindow = null,
+  // 3.0 刀 37「嵌入」。
+  //
+  // `true` = 库**就长在它那颗 Obsidian 标签页里**——不盖住笔记、也不浮在笔记上，
+  // 而是把标签页那一块填满。左键点侧边栏图标进来的那颗标签页本来就在那儿，
+  // 这一档只是让库**老老实实待在它里面**。
+  //
+  // 实现上它是最省事的一档：三块层（库 / 遮罩 / 阅读器）从 `document.body`
+  // 改挂到宿主的 `container` 上，CSS 从 `fixed` 改成 `absolute` 就完了——
+  // 因为 `container` 本来就是一块**有明确矩形**的元素，而"这一层界面多大"
+  // 这件事在刀 36 里已经抽成 `ctx.viewRect()` 了。
+  //
+  // ⚠️ 与 `windowed` **互斥**（同时为真时会当嵌入处理；宿主那边不该这么传）。
+  embedded = false,
 }) {
   assertAdapter(adapter);
 
@@ -968,6 +981,20 @@ export async function mount({
       )
     : null;
   let viewGrip = null;
+
+  /**
+   * 3.0 刀 37：三块层挂到**谁**底下。
+   *
+   * 全屏 / 浮窗都挂 `document.body`（它们是浮在整个窗口之上的）；嵌入挂宿主给的
+   * `container`（那颗标签页的内容区）。**只有这一处区别**，其余全走 `viewRect()`。
+   *
+   * ⚠️ 不是这三块的还有两样：**tooltip 永远挂 body**（它是个跟着鼠标跑的提示，
+   * 被标签页的 `overflow` 裁掉就没意义了），**抓手只在不嵌的时候建**（嵌进标签页
+   * 的库没有"窗口"可改大小）。
+   */
+  // ⚠️ `container` 缺失时**必须退回 body**，不能把 undefined 交给 appendChild
+  // ——那是一次"打开库就崩"，而它是宿主参数没传全的问题，不该由用户承担。
+  const layerRoot = embedded && container ? container : doc.body;
 
   // 3.0 刀 36：按**这一层界面**的尺寸算，不是视口（浮窗模式下两者不一样）。
   const metrics = createMetrics(
@@ -1041,10 +1068,19 @@ export async function mount({
   // "面板飘到窗口外面去了"——不报错，只是东西跑到你看不见的地方。
   // ⚠️ `viewBox` / `viewGrip` 的**声明在上面的 `createMetrics` 之前**（见那一行
   // 附近的注释）——这里只放函数。**别再往这段前面加用到它们的东西**。
-  const viewRect = () =>
-    viewBox
+  const viewRect = () => {
+    // 嵌入：这一层就是**那颗标签页的内容区**，而它会随分屏拖动不停变——
+    // 所以这里**每次现量**，不能像浮窗那样缓存一个数。
+    // （尺寸变了那些 `vh`/`vw` 写死的限制也会跟着对——`paintViewBox` 每帧
+    // 把 `--kb-vw/--kb-vh` 写上去，见那边。）
+    if (embedded && container && container.getBoundingClientRect) {
+      const r = container.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { left: r.left, top: r.top, w: r.width, h: r.height };
+    }
+    return viewBox
       ? { left: viewBox.x, top: viewBox.y, w: viewBox.w, h: viewBox.h }
       : { left: 0, top: 0, w: win.innerWidth, h: win.innerHeight };
+  };
 
   /**
    * 把一块矩形套到那三块"铺满视口"的层上。
@@ -1070,8 +1106,26 @@ export async function mount({
 
   function paintViewBox() {
     const els = [fs, readerEl, overlay];
+    // 嵌入模式下三块层是**绝对定位**（相对 `container`），不是 fixed。
+    // 纯 CSS 的事，但类名由这里挂——它和"挂到谁底下"是同一个开关的两半。
+    for (const el of els) if (el) el.classList.toggle("kb-v13-layer-embed", !!embedded);
+    // 嵌入模式**没有 window 矩形**（`viewBox` 是 null），三块层靠 `inset:0`
+    // 铺满 `container` ✓——但 `--kb-vw/--kb-vh` 还是得写：CSS 里那一批
+    // `vh`/`vw` 尺寸（面板高度、阅读器标题宽度）问的必须是**标签页**多大。
+    const embRect = embedded ? viewRect() : null;
     for (const el of els) {
       if (!el) continue;
+      if (embRect) {
+        el.style.removeProperty("left");
+        el.style.removeProperty("top");
+        el.style.removeProperty("width");
+        el.style.removeProperty("height");
+        el.style.removeProperty("right");
+        el.style.removeProperty("bottom");
+        el.style.setProperty("--kb-vw", embRect.w + "px");
+        el.style.setProperty("--kb-vh", embRect.h + "px");
+        continue;
+      }
       if (!viewBox) {
         el.style.left = el.style.top = el.style.width = el.style.height = "";
         el.style.right = el.style.bottom = "";
@@ -1264,14 +1318,16 @@ export async function mount({
     '<button class="kb-v13-nav-arrow" id="kb-nav-down" style="width:40px;height:40px;border-radius:50%;border:1px solid rgba(0,200,255,0.15);background:rgba(10,20,40,0.7);color:rgba(0,200,255,0.5);font-size:18px;cursor:pointer">▼</button>' +
     "</div>" +
     "</div>";
-  doc.body.appendChild(fs);
+  layerRoot.appendChild(fs);
 
   // 3.0 刀 36：浮窗模式下那两颗"窗口家具"。
   //
   // 抓手**挂在 body 上**、不挂在库里：库本体是 `overflow` 裁过的一块，
   // 抓手压在它右下角会被裁掉一半。而且它得比库本体更靠上（z-index），
   // 才抓得住——它是三块层里最后画的一个。
-  if (windowed) {
+  // ⚠️ 嵌入模式**不建抓手**：库长在标签页里，没有"窗口"可改大小——
+  // 要改大小是拖 Obsidian 自己的分屏，那不归我们管。
+  if (windowed && !embedded) {
     viewGrip = EL("div", "kb-v13-viewgrip");
     viewGrip.title = "拖这里改这个窗口的大小";
     doc.body.appendChild(viewGrip);
@@ -1312,7 +1368,7 @@ export async function mount({
     '<div class="kb-v13-holo-body" id="kb-holo-body"></div>' +
     '<div class="kb-v13-beam"></div>' +
     "</div>";
-  doc.body.appendChild(overlay);
+  layerRoot.appendChild(overlay);
 
   // ---- 卫星 ----
   const oldSat = doc.getElementById("kb-satellites");
@@ -1356,11 +1412,24 @@ export async function mount({
   if (oldReader) oldReader.remove();
   const readerEl = EL("div", "kb-v13-reader");
   readerEl.id = "kb-reader";
-  doc.body.appendChild(readerEl);
+  layerRoot.appendChild(readerEl);
 
   // 三块"铺满视口"的层（库本体 / 遮罩 / 阅读器）都建好了，现在才套窗口矩形。
   // ⚠️ **顺序是硬的**：`paintViewBox` 要同时够到这三块，早一步就是 TDZ。
   paintViewBox();
+
+  // 3.0 刀 37：嵌入模式下**这一层的大小会随分屏拖动一直变**，而 `vh`/`vw`
+  // 写死的那批尺寸（面板高度、正文字段……）得跟着变。窗口 resize 那条路
+  // 接不到"拖 Obsidian 自己的分屏"（窗口尺寸没变），所以挂一个观察器。
+  // `paintViewBox` 自己会重新量 `viewRect()` 并把 `--kb-vw/--kb-vh` 写上去。
+  if (embedded && container && typeof win.ResizeObserver === "function") {
+    try {
+      ctx._viewRO = new win.ResizeObserver(() => paintViewBox());
+      ctx._viewRO.observe(container);
+    } catch (e) {
+      /* 宿主没有就没有——只是那一批 vh 尺寸在分屏拖动时不跟着变，不影响能不能用 */
+    }
+  }
 
   const stage = fs.querySelector("#kb-stage");
   const canvas = fs.querySelector("#kb-canvas");
@@ -2039,7 +2108,11 @@ export async function mount({
     const justSaved = !!savedAt && Date.now() - savedAt < JUST_SAVED_TTL_MS;
     fs.classList.toggle("kb-v13-restored", justSaved);
     fs.classList.add("open");
-    doc.body.style.overflow = "hidden";
+    // ⚠️ 3.0 刀 37：**嵌入模式不许锁 body 的滚动。** 这一句是给全屏/浮窗写的
+    // ——那两档里库盖在整个窗口上，背后那篇笔记不该跟着滚。而嵌入模式里
+    // 库只在标签页那一块，笔记本来就不在它下面；锁了等于**平白把整个 vault
+    // 的滚动冻住**（而且锁上容易、解开只认 closeFullscreen，一旦宿主重挂就永久冻住）。
+    if (!embedded) doc.body.style.overflow = "hidden";
     // 同步渲染。原来靠两层 rAF 等布局就绪，但 rAF 会被浏览器节流，
     // 页面没在前台时晶体就永远不出来。classList.add 之后读一次
     // getBoundingClientRect 已强制样式重算，stage 此刻就有真实尺寸。
@@ -2059,6 +2132,15 @@ export async function mount({
     //   · 拖拽监听挂在 `doc` 上，不收就是每开一次库漏六个（`bindDeskDrag` 的
     //     `unbind` 是唯一摘得掉它们的地方）。
     removeViewGrip();
+    // 嵌入模式那个观察器同一条：不摘的话它会一直拿着一个已经拆掉的实例。
+    if (ctx._viewRO) {
+      try {
+        ctx._viewRO.disconnect();
+      } catch (e) {
+        /* 摘不掉就算了，它跟着 container 一起没 */
+      }
+      ctx._viewRO = null;
+    }
     if (ctx.unbindViewWin) {
       ctx.unbindViewWin();
       ctx.unbindViewWin = null;
@@ -2188,8 +2270,11 @@ export async function mount({
   const winModeBtn = fs.querySelector("#kb-fs-winmode");
   if (onToggleWindow) {
     winModeBtn.style.display = "";
-    // 字说的是**按下去会怎样**：现在是全屏，按下去就成浮窗。
-    winModeBtn.textContent = viewBox ? "全屏" : "浮窗";
+    // 字说的是**按下去会怎样**——三档循环：全屏 → 浮窗 → 嵌入 → 全屏。
+    // 一颗按钮轮着切在这里是**对的**（和刀 30 那颗「选框」不一样）：那里两档的
+    // 差别在"框住的东西是什么"，屏幕上看不出来；这里按钮上直接写着下一档叫什么，
+    // 按下去落在哪儿一目了然。
+    winModeBtn.textContent = embedded ? "全屏" : viewBox ? "嵌入" : "浮窗";
     winModeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       onToggleWindow();

@@ -1443,6 +1443,30 @@ const CANVAS = [
   "  color:rgba(175,215,245,.9);",
   "}",
   ".kb-v13-topbar-win:hover{border-color:rgba(0,220,255,.65);color:rgba(215,240,255,.98);}",
+
+  // ===== 3.0 刀 37：嵌入 =====
+  //
+  // 三块层默认是 `position:fixed`（浮在整个窗口之上）。嵌入模式下它们改挂到
+  // 宿主那颗标签页的 `contentEl` 底下，并戴上这个类 → 变成**相对标签页**的
+  // 绝对定位。类名由 `paintViewBox` 挂（它和"挂到谁底下"是同一个开关的两半）。
+  //
+  // 选择器写成两个类（`.kb-v13-fullscreen.kb-v13-layer-embed`）而不是
+  // `.kb-v13-layer-embed` 单独一条：后者与 `.kb-v13-fullscreen{position:fixed}`
+  // **同优先级**，胜负取决于样式表里的先后——那种"能不能生效看顺序"的写法
+  // 迟早会在某次调整里静默翻车。两个类，稳定压过。
+  ".kb-v13-fullscreen.kb-v13-layer-embed,",
+  ".kb-v13-overlay.kb-v13-layer-embed,",
+  ".kb-v13-reader.kb-v13-layer-embed{position:absolute;}",
+  // 宿主那一块（插件形态下是视图的 `contentEl`）。它得是**定位基准**，
+  // 否则上面那三块 `absolute` 会一路上溯到 `.workspace-leaf` 上去。
+  // 顺带把 Obsidian 默认给 `view-content` 的内边距清零——不清的话库四周会
+  // 多出一圈背景色。
+  // ⚠️ `z-index:0` 不是为了压谁，是为了**造一个层叠上下文**：嵌入模式下
+  // 阅读器是 z-index 10020、悬浮窗 10050、tooltip 99999——不关起来的话这些数
+  // 会跑到**整个 Obsidian 的**层叠里去比，库里的 tooltip（99999）足以压在
+  // 宿主的弹窗、设置面板之上。`position:relative` + `z-index:0` 把它们全部
+  // 关在这颗标签页里，与从前"挂在 body 上"时的相对关系一模一样。
+  ".kb-v13-plugin-host{position:relative;z-index:0;overflow:hidden;padding:0!important;}",
 ];
 
 // ===== 3.0 刀 6：文献阅读器 =====
