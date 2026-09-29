@@ -4435,6 +4435,17 @@ export function createReader(ctx, opts = {}) {
       return null;
     }
 
+    // 3.0 刀 38（用户 09-29）：**新卡摆到"你正看着的那一屏"的视口里。**
+    //
+    // ⚠️ 这一段原来只在**另一条**建卡路径（不挂原生编辑器那条）里有，
+    // 而这条没有——用户走的恰好是这条，于是他看到的是"卡出来了，但在默认位置"。
+    // **两条路都是"建一张卡"，位置这件事只能一样。**
+    {
+      const sw = desk.wins.find((w) => w.kind === "storyline");
+      const swRt = sw ? rtOf(sw.id) : null;
+      if (!(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
+    }
+
     // 新卡可能**长出一颗新晶体**（建在一个还没有卡的文件夹里时），所以重画
     // 走的是整片舞台那条路，不是「补一张卡」。顺序与 editform 的 refreshAfterWrite
     // 一致：关系图（addCard 里已经重建）→ 舞台 → 晶体层那几个汇总。

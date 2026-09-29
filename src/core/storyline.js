@@ -45,8 +45,10 @@ import { gridToPixel, queueCardPos } from "./cardpos.js";
 // 3.0 刀 34：收纳方框不走格点了（用户 09-29），所以 `UNIT` / `snapX` / `snapY`
 // 从这里不再需要——**格点现在只管卡片**，用的是 `snapPos` 和那两步长。
 import { STEP_X, STEP_Y, snapPos } from "./storygrid.js";
-// 3.0 刀 34：新建的东西（卡片 / 收纳方框 / 引进来的卡）一律落在**你正看着的地方**。
-import { viewportCenter } from "./storyspot.js";
+// 3.0 刀 34/38：新建的东西落在**你正看着的地方**。
+// ⚠️ 这一层现在直接问 `ctx.viewRect()`（它要的是**整个矩形**——新卡按用户定的
+// 公式落在"右边留 5%"上，不是正中），所以 `viewportCenter` 在这里不再需要。
+// 它还在给 `storyimports`（引进来的卡）和收纳方框用。
 import { beginInlineRename } from "./inlinerename.js";
 
 /** 节点之间的连线留出的空档（从节点边缘切进去多少） */
@@ -224,10 +226,24 @@ export function placeNewCard(ctx, path) {
   const chain = ctx.model.resolveChain ? ctx.model.resolveChain(card.crystal) : null;
   if (!Array.isArray(chain) || chain.length < viewed.length) return false;
   for (let i = 0; i < viewed.length; i++) if (viewed[i] !== chain[i]) return false;
-  const c = viewportCenter(ctx);
-  if (!c) return false;
-  // 卡片以中心落座（`crystalPos` 存的是左上角），走格点——卡片是走格点的那一类。
-  const at = snapPos(c.x - NODE_W / 2, c.y - NODE_H / 2, NODE_H);
+  // ---- 落点：**按当前视口算出来的**（用户 09-29 定的公式）----
+  //
+  // 「根据当前视口，建立在**视口右侧 5%** 的位置」：
+  //   · 横向：贴右边，离视口右边缘留 5% 宽 —— 也就是卡片的**右边缘**落在
+  //     `视口右边 − 5%` 上（不是左边缘落在 95% 上：那样子卡会几乎全在屏幕外）；
+  //   · 纵向：**居中**（用户只说了横向）。
+  //
+  // ⚠️ 这里**不吸附到格点**（别处拖卡片是吸附的）。用户给的是一个**具体公式**，
+  //    对不上他会以为又没生效；而"离右边 5%"本来就多半不在格点上，硬吸会差半格。
+  //    他拖一下它自己就归位了。
+  const r = typeof ctx.viewRect === "function" ? ctx.viewRect() : null;
+  if (!r || !(r.w > 0)) return false;
+  const left = r.left + r.w * 0.95 - NODE_W;
+  const at = {
+    // 视口比卡片还窄时别把它推到屏幕外——退到左边贴边。
+    x: Math.max(r.left, left),
+    y: r.top + r.h / 2 - NODE_H / 2,
+  };
   const l = layoutOf(ctx);
   if (!l.crystalPos) l.crystalPos = {};
   l.crystalPos[card.path] = at;
