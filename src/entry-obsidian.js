@@ -697,15 +697,49 @@ export function createObsidianAdapter({
         const file = app.vault.getAbstractFileByPath(path);
         if (!file) return fail("找不到这个文件");
         // 构造函数只能从**活着的实例**上取。取不到就说明这个宿主不给这个口子。
+        //
+        // ⚠️ 3.0 刀 40（用户 09-29 真机抓到，1.3.81 修）：**这一段里绝对不能调
+        // `workspace.getLeaf(false)`。**
+        //
+        // 这里原来写的是 `const anyLeaf = app.workspace.getLeaf(false);`，注释还写着
+        // "false = 用现成的叶子，不新开一个"。**那句话是错的。** 宿主内部走的是
+        // `getUnpinnedLeaf()`——它的语义是"拿一颗**没被钉住**的叶子"，而当前活动的那颗
+        // 要是钉住的（或不可用），它**当场造一个新的空标签页**。
+        //
+        // 用户在阅读器里点 ✎ 时，活动叶子正是**晶体库自己那颗**，于是每点一次 ✎
+        // 就凭空多一个空白标签页——用户报的「无论什么卡片，点编辑都新增标签页」
+        // 就是这个。全屏/浮窗/嵌入三档都中，因为三档下活动叶子都是库自己那颗。
+        //
+        // 实证（用户真机 Console 探针，标签页被插进 DOM 那一刻的调用栈）：
+        //   mountEditor → t.getLeaf → t.getUnpinnedLeaf → t.setActiveLeaf
+        //   → t.selectTabIndex → t.updateTabDisplay → Element.insertBefore
+        //
+        // 而这个函数**只要那个类，根本不要那颗叶子**（下面 `new anyLeaf.constructor(app)`）。
+        // 所以从已经查到的 markdown 叶子上取构造器就够——`getLeavesOfType` 只是查表，
+        // 不激活、不新建，零副作用。
         let ViewCtor = null;
+        let anyLeaf = null;
         for (const l of app.workspace.getLeavesOfType("markdown") || []) {
           const v = l && l.view;
           if (v && typeof v.setState === "function" && v.editor) {
             ViewCtor = v.constructor;
+            anyLeaf = l; // 顺手留一颗**真**叶子，只为取它的类
             break;
           }
         }
-        const anyLeaf = app.workspace.getLeaf(false); // false = 用现成的叶子，不新开一个
+        // 连一颗 markdown 叶子都没有时退一步：`iterateAllLeaves` 同样只遍历、不激活。
+        // 仍然只要类，不要叶子。
+        // ⚠️ 回调用**块体**、不交返回值：宿主的 iterate* 见到真值会提前停，
+        //    写成 `(l) => anyLeaf = l` 这种表达式体会在第一颗叶子就断掉。
+        if (!anyLeaf) {
+          try {
+            app.workspace.iterateAllLeaves((l) => {
+              if (!anyLeaf && l && l.constructor) anyLeaf = l;
+            });
+          } catch (e) {
+            /* 落到下面那句 fail */
+          }
+        }
         if (!ViewCtor || !anyLeaf) return fail("拿不到宿主的编辑器类（它没开任何 markdown 视图？）");
 
         leaf = new anyLeaf.constructor(app);
