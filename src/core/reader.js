@@ -1047,6 +1047,56 @@ export function createReader(ctx, opts = {}) {
     return desk.rt.get(id);
   }
 
+  /**
+   * 3.0 刀 37 修（用户 09-29）：**建完卡之后，把结构窗也刷一遍。**
+   *
+   * 用户报的：「边看边记存进晶体库，卡片存进去之后，结构窗不能实时显示，
+   * 必须要关闭一次再打开结构窗才能显示」。
+   *
+   * 根因很直白：建卡那条路只调了 `ctx.renderCrystals()`——那刷的是**晶体库那一屏**
+   * （此刻还被阅读器盖着，用户根本看不见）。而结构窗画的是**同一份模型**，
+   * 却**没有任何人在管它**：关一次再打开能好，走的正是它自己的 `render()`。
+   *
+   * 三处建卡（手填的、草稿纸转的、原生编辑器那条）都要走这里——写成一个函数
+   * 而不是在三处各抄两行，是因为**漏掉哪一处的症状一模一样**（"某个入口建的卡
+   * 结构窗不显示"），而用户只会记住"有时候不灵"。
+   */
+  let storyRefreshing = false;
+  function refreshStoryWindows() {
+    // 重入闸：`embed.refresh()` 会重画那一扇窗，而重画的路上可能又碰回
+    // `ctx.renderCrystals`（见下面那个收口）。没有它就是一个无限递归。
+    if (storyRefreshing) return;
+    storyRefreshing = true;
+    try {
+      for (const w of desk.wins) {
+        if (!w || w.kind !== "storyline") continue;
+        const rt = rtOf(w.id);
+        if (rt && rt.embed && typeof rt.embed.refresh === "function") rt.embed.refresh();
+      }
+    } finally {
+      storyRefreshing = false;
+    }
+  }
+
+  // **收口**：阅读器里**每一次 "库那一屏重画" 都顺带刷一遍结构窗。**
+  //
+  // 收在这里而不是逐处补的理由：reader.js 里有七处 `ctx.renderCrystals()`，
+  // 而每一处都意味着"模型刚被改过"（建卡、存卡、删卡、改名、撤销…）。
+  // 逐个记得加 `refreshStoryWindows()` 的话，**漏掉哪一处的症状都一模一样**
+  // ——"结构窗要关一次再打开才显示"——而用户只会记住"有时候不灵"。
+  // 收在入口上，往后新增的刷新点自动带上。
+  //
+  // ⚠️ 只包一层：`ctx.renderCrystals` 是 app.js 给的箭头函数，这里换掉的是
+  // **阅读器这一侧握着的那个引用**（同一个 ctx 对象，所以库那一侧也走这一份）
+  // ——效果就是"库重画 ⇒ 窗也重画"，两边永远同步。
+  const baseRenderCrystals = ctx.renderCrystals;
+  if (typeof baseRenderCrystals === "function") {
+    ctx.renderCrystals = () => {
+      baseRenderCrystals();
+      refreshStoryWindows();
+    };
+  }
+
   const winEl = (id) => deskEl.querySelector('.kb-v13-desk-win[data-id="' + id + '"]');
   const findWin = (id) => desk.wins.find((w) => w.id === id) || null;
 

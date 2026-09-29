@@ -996,10 +996,32 @@ export async function mount({
   // ——那是一次"打开库就崩"，而它是宿主参数没传全的问题，不该由用户承担。
   const layerRoot = embedded && container ? container : doc.body;
 
-  // 3.0 刀 36：按**这一层界面**的尺寸算，不是视口（浮窗模式下两者不一样）。
-  const metrics = createMetrics(
-    viewBox ? { w: viewBox.w, h: viewBox.h } : { w: win.innerWidth, h: win.innerHeight }
-  );
+  /**
+   * **这一层界面在屏幕上的位置和大小。**
+   *
+   * 三档各自的答案：全屏 = 视口；浮窗 = 那个矩形；嵌入 = **宿主标签页的内容区**。
+   *
+   * ⚠️ 嵌入档**每次现量**，不能像浮窗那样缓存一个数——拖 Obsidian 自己的分屏
+   * 会让它一直变。（量到 0×0 就往下退：挂载那一刻标签页可能还没布局完。）
+   */
+  const viewRect = () => {
+    if (embedded && container && container.getBoundingClientRect) {
+      const r = container.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { left: r.left, top: r.top, w: r.width, h: r.height };
+    }
+    return viewBox
+      ? { left: viewBox.x, top: viewBox.y, w: viewBox.w, h: viewBox.h }
+      : { left: 0, top: 0, w: win.innerWidth, h: win.innerHeight };
+  };
+
+  // 3.0 刀 36：**按"这一层界面"的尺寸算，不是视口。**
+  //
+  // ⚠️ 这里必须是 `viewRect()`，不能像第一版那样写成 `viewBox ? … : 视口`——
+  // 嵌入档 `viewBox` 是 null，那样会把**整块屏幕**的尺寸喂给环形排布，
+  // 于是库在半宽的标签页里按全屏的比例缩放，卡片一排就撑出去被 `overflow:hidden` 裁掉
+  // （刀 36 给浮窗修过同一个病）。
+  // 位置：它在 `viewRect` 声明**之后**——顺序是硬的，上面那句注释说的就是这个。
+  const metrics = createMetrics(viewRect());
 
   // ---- 样式（清理旧实例，代码块重跑时不叠加）----
   const oldStyle = doc.getElementById(STYLE_ID);
@@ -1066,22 +1088,6 @@ export async function mount({
   // 夹取、环形排布的缩放基准、卫星 viewBox）全都**假设"这一层铺满视口"**。
   // 界面一旦只占屏幕的一块，那个假设就不成立了，而失效的表现是
   // "面板飘到窗口外面去了"——不报错，只是东西跑到你看不见的地方。
-  // ⚠️ `viewBox` / `viewGrip` 的**声明在上面的 `createMetrics` 之前**（见那一行
-  // 附近的注释）——这里只放函数。**别再往这段前面加用到它们的东西**。
-  const viewRect = () => {
-    // 嵌入：这一层就是**那颗标签页的内容区**，而它会随分屏拖动不停变——
-    // 所以这里**每次现量**，不能像浮窗那样缓存一个数。
-    // （尺寸变了那些 `vh`/`vw` 写死的限制也会跟着对——`paintViewBox` 每帧
-    // 把 `--kb-vw/--kb-vh` 写上去，见那边。）
-    if (embedded && container && container.getBoundingClientRect) {
-      const r = container.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return { left: r.left, top: r.top, w: r.width, h: r.height };
-    }
-    return viewBox
-      ? { left: viewBox.x, top: viewBox.y, w: viewBox.w, h: viewBox.h }
-      : { left: 0, top: 0, w: win.innerWidth, h: win.innerHeight };
-  };
-
   /**
    * 把一块矩形套到那三块"铺满视口"的层上。
    *
@@ -1108,7 +1114,13 @@ export async function mount({
     const els = [fs, readerEl, overlay];
     // 嵌入模式下三块层是**绝对定位**（相对 `container`），不是 fixed。
     // 纯 CSS 的事，但类名由这里挂——它和"挂到谁底下"是同一个开关的两半。
-    for (const el of els) if (el) el.classList.toggle("kb-v13-layer-embed", !!embedded);
+    //
+    // ⚠️ 判据是 **`layerRoot` 是不是那张标签页**，不是 `embedded` 这个参数：
+    // 宿主没给 `container` 时会退回 `document.body`（那里是为了不崩），
+    // 而那时再挂这个类，三块层会变成**相对 body 的 absolute**——跟着笔记一起滚走。
+    // 两个判据必须同源，否则"防崩"那一手会换出另一种坏法。
+    const inTab = layerRoot === container && !!container;
+    for (const el of els) if (el) el.classList.toggle("kb-v13-layer-embed", inTab);
     // 嵌入模式**没有 window 矩形**（`viewBox` 是 null），三块层靠 `inset:0`
     // 铺满 `container` ✓——但 `--kb-vw/--kb-vh` 还是得写：CSS 里那一批
     // `vh`/`vw` 尺寸（面板高度、阅读器标题宽度）问的必须是**标签页**多大。
@@ -1417,19 +1429,6 @@ export async function mount({
   // 三块"铺满视口"的层（库本体 / 遮罩 / 阅读器）都建好了，现在才套窗口矩形。
   // ⚠️ **顺序是硬的**：`paintViewBox` 要同时够到这三块，早一步就是 TDZ。
   paintViewBox();
-
-  // 3.0 刀 37：嵌入模式下**这一层的大小会随分屏拖动一直变**，而 `vh`/`vw`
-  // 写死的那批尺寸（面板高度、正文字段……）得跟着变。窗口 resize 那条路
-  // 接不到"拖 Obsidian 自己的分屏"（窗口尺寸没变），所以挂一个观察器。
-  // `paintViewBox` 自己会重新量 `viewRect()` 并把 `--kb-vw/--kb-vh` 写上去。
-  if (embedded && container && typeof win.ResizeObserver === "function") {
-    try {
-      ctx._viewRO = new win.ResizeObserver(() => paintViewBox());
-      ctx._viewRO.observe(container);
-    } catch (e) {
-      /* 宿主没有就没有——只是那一批 vh 尺寸在分屏拖动时不跟着变，不影响能不能用 */
-    }
-  }
 
   const stage = fs.querySelector("#kb-stage");
   const canvas = fs.querySelector("#kb-canvas");
@@ -1757,8 +1756,6 @@ export async function mount({
     // 悬浮窗的居中/夹取、卡片面板的夹取、悬停浮层、卫星连线的坐标系、
     // 环形排布的缩放基准——**这些全都不该再直接问 `win.innerWidth`**。
     viewRect: () => viewRect(),
-    /** 现在是浮窗模式吗（少数几处要区别对待：滚动条、body 的 overflow 之类）。 */
-    isWindowed: () => !!viewBox,
     hideTooltip: () => hideTooltip(ctx),
     // 3.0 刀 31：**一层通用的「说一句话」**。
     //
@@ -2216,6 +2213,37 @@ export async function mount({
 
   root.querySelector(".kb-v13-trigger").addEventListener("click", openFullscreen);
   fs.querySelector("#kb-fs-close").addEventListener("click", closeFullscreen);
+
+  // 3.0 刀 37：嵌入模式下**这一层的大小会随分屏拖动一直变**。窗口 resize 那条路
+  // 接不到"拖 Obsidian 自己的分屏"（窗口尺寸根本没变），所以挂一个观察器。
+  //
+  // ⚠️ **这一块必须待在 `const ctx` 之后**。第一版把它放在挂层那一带（离
+  // `paintViewBox` 近，读着顺），而它写的是 `ctx._viewRO`——`ctx` 在 180 行之后
+  // 才声明，于是赋值目标先撞 TDZ 抛错，**被下面那个 `catch` 一声不响地吃掉了**
+  // （那个 catch 我写的时候以为只兜"宿主没有 ResizeObserver"）。
+  // 表现是：观察器根本没建起来，嵌入档下拖分屏什么都不会跟着变，而且没有任何痕迹。
+  // ——和上面 `viewBox` 那次是**同一个坑**，两处都栽在"声明顺序"上。
+  if (embedded && container && typeof win.ResizeObserver === "function") {
+    let raf = 0;
+    const tick = () => {
+      raf = 0;
+      paintViewBox();
+      // ⚠️ **光写 CSS 变量不够。** 环形排布、卡片行宽、导航箭头全是 JS 按像素
+      // 摆出来的（`cardgrid`），它们只认 `renderCrystals`。只改变量的话，面板的
+      // 尺寸跟着变了、里面那排卡片还按旧宽度排着——比不同步更难看。
+      renderCrystals(ctx);
+    };
+    try {
+      ctx._viewRO = new win.ResizeObserver(() => {
+        // 拖分屏会连着来几十下，每一帧只做一次。
+        if (raf) return;
+        raf = (win.requestAnimationFrame || ((f) => setTimeout(f, 16)))(tick);
+      });
+      ctx._viewRO.observe(container);
+    } catch (e) {
+      /* 宿主没有就没有——只是分屏拖动时尺寸不跟着变，不影响能不能用 */
+    }
+  }
 
   // ---- 3.0 刀 36：浮窗模式的拖动与缩放 ----
   //

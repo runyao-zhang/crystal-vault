@@ -336,7 +336,8 @@ const BASE = [
   // 动画中间值会让它们按一个不存在的几何摆一圈。进/出编辑态时 editform 会各重排一次。
   // max-width:94vw 这个组合本身就是手机的夹取惯用法（390px 屏上算出来 366px），
   // 不需要另写媒体查询——但**别在媒体查询里把它写回固定 px**。
-  ".kb-v13-hologram.kb-v13-editing{width:880px;max-width:94vw;}",
+  // 3.0 刀 37：`94vw` 同上面那批一样，量的永远是视口——浮窗/嵌入下要问这一层多大。
+  ".kb-v13-hologram.kb-v13-editing{width:880px;max-width:calc(var(--kb-vw,100vw)*.94);}",
   // 面板是 cursor:grab（#10 可拖），cursor 会继承进输入框——在正文里划选时看着像要拖动
   ".kb-v13-edit-input{cursor:auto;}",
   // 正文：等宽、能拉高。高度按「面板 82vh 减去操作栏与三个 FM 字段」估的，

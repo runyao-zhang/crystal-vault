@@ -460,6 +460,23 @@ export default class CrystalVaultPlugin extends Plugin {
    * 换档本来就是件"重新摆一次"的事，用户点它的时候心里有数。
    */
   async cycleOpenMode() {
+    // ⚠️ **重入闸。** 这个方法是"翻一档 + 重挂视图"，而重挂是异步的（要 await mount）。
+    // 两档的时候没有这个问题（连点两下等于没点）；三档之后**连点两下会跳一档**
+    // ——用户想要浮窗，落在嵌入，而提示还报着错的那个名字。
+    // 更糟的是两次重挂会撞在一起：第一次的 `handle` 还是 null（正在 mount），
+    // 第二次的 `dispose` 看到 null 就跳过 close，把 `contentEl` 从正在跑的那个
+    // mount 底下清空，于是同一个容器上跑起**两个活实例**（两份监听、一份被丢弃）。
+    if (this.modeBusy) return;
+    this.modeBusy = true;
+    try {
+      await this._cycleOpenModeOnce();
+    } finally {
+      this.modeBusy = false;
+    }
+  }
+
+  /** 真正翻档那一下（拆出来是为了让上面的闸管得住它）。 */
+  async _cycleOpenModeOnce() {
     // 三档循环：全屏 → 浮窗 → 嵌入 → 全屏。**顺序与库顶栏那颗按钮的文案一致**
     // （它写的就是"下一档叫什么"，见 app.js 里那颗）。
     const order = ["full", "windowed", "embedded"];
