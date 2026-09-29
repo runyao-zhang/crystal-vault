@@ -65,7 +65,10 @@ const BASE = [
 
   "/* 顶部栏 */",
   ".kb-v13-topbar{",
-  "  position:relative;z-index:10;display:flex;align-items:center;padding:14px 28px;",
+  // ⚠️ 3.0 刀 36：**要能换行。** 浮窗可以缩到 420px 宽，而这条顶栏的自然宽度
+  // 九百多（logo + 面包屑 + 八颗按钮）。不换行、而 `fs` 又是 `overflow:hidden` 的话，
+  // 右边那一簇会被**裁掉**——连 ✕ 和「浮窗 / 全屏」一起，那时只剩 Esc 能出来。
+  "  position:relative;z-index:10;display:flex;flex-wrap:wrap;align-items:center;padding:14px 28px;",
   "  border-bottom:1px solid rgba(255,255,255,0.3);",
   "}",
   ".kb-v13-logo{font-size:15px;font-weight:700;letter-spacing:3px;color:rgba(0,200,255,0.65);margin-right:16px;text-shadow:0 0 12px rgba(0,180,255,0.25);}",
@@ -280,7 +283,7 @@ const BASE = [
   // 面板：既盖住正文，也盖住右上角那枚 ✎。光给面板加 z-index 治不好——子元素跳不出
   // 遮罩自己的层叠上下文，得先把卫星搬进来（见 app.js mounting 处的注释）。
   ".kb-v13-hologram{",
-  "  position:relative;z-index:10;width:500px;max-width:90vw;max-height:82vh;overflow-y:scroll;overflow-x:hidden;scrollbar-width:none;",
+  "  position:relative;z-index:10;width:500px;max-width:calc(var(--kb-vw,100vw)*.9);max-height:calc(var(--kb-vh,100vh)*.82);overflow-y:scroll;overflow-x:hidden;scrollbar-width:none;",
   "  padding:36px 32px;border-radius:14px;",
   "  background:rgba(6,14,30,0.97);border:1px solid rgba(0,200,255,0.15);",
   "  box-shadow:0 0 60px rgba(0,200,255,0.06);",
@@ -310,7 +313,7 @@ const BASE = [
   ".kb-v13-holo-concept>*:first-child{margin-top:0;}",
   ".kb-v13-holo-concept>*:last-child{margin-bottom:0;}",
   ".kb-v13-holo-meta{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}",
-  ".kb-v13-holo-body{position:relative;z-index:1;margin-top:6px;padding:14px 16px;border-radius:10px;border:1px solid rgba(0,200,255,0.10);background:rgba(0,8,20,0.35);max-height:42vh;overflow-y:auto;overflow-x:hidden;}",
+  ".kb-v13-holo-body{position:relative;z-index:1;margin-top:6px;padding:14px 16px;border-radius:10px;border:1px solid rgba(0,200,255,0.10);background:rgba(0,8,20,0.35);max-height:calc(var(--kb-vh,100vh)*.42);overflow-y:auto;overflow-x:hidden;}",
   ".kb-v13-holo-body::-webkit-scrollbar{width:5px;}",
   ".kb-v13-holo-body::-webkit-scrollbar-thumb{background:rgba(0,200,255,.25);border-radius:3px;}",
   ".kb-v13-holo-body img{display:block;max-width:100%;height:auto;margin:10px auto;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.35);}",
@@ -338,7 +341,7 @@ const BASE = [
   ".kb-v13-edit-input{cursor:auto;}",
   // 正文：等宽、能拉高。高度按「面板 82vh 减去操作栏与三个 FM 字段」估的，
   // 面板自己是 overflow-y:scroll，短屏下不会撑破，操作栏吸顶不动。
-  ".kb-v13-edit-body{min-height:22vh;height:34vh;max-height:52vh;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55;white-space:pre-wrap;tab-size:2;}",
+  ".kb-v13-edit-body{min-height:calc(var(--kb-vh,100vh)*.22);height:calc(var(--kb-vh,100vh)*.34);max-height:calc(var(--kb-vh,100vh)*.52);resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55;white-space:pre-wrap;tab-size:2;}",
   // 撤销条（editform.js 末尾那一节）。夹在标签区与正文之间，所以看得见。
   ".kb-v13-undo{position:relative;z-index:2;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid rgba(120,220,160,.22);background:rgba(0,40,20,.35);}",
   ".kb-v13-undo-text{font-size:12px;line-height:1.5;color:rgba(160,240,200,.85);}",
@@ -953,7 +956,7 @@ const MULTILEVEL = [
   // 浮层。定位挂在顶栏下面右侧——按钮就在右上角那一带。
   // 顶栏高 = 14 上 + 36（最高那个是关闭按钮）+ 14 下 + 1 边框 = 65，浮层贴着它下沿
   ".kb-v13-orphan-panel{position:absolute;top:66px;right:14px;z-index:130;",
-  "  width:300px;max-height:min(56vh,420px);overflow-y:auto;",
+  "  width:300px;max-height:min(calc(var(--kb-vh,100vh)*.56),420px);overflow-y:auto;",
   "  background:rgba(8,18,36,.97);border:1px solid rgba(255,120,120,.28);",
   "  border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.55);",
   "  padding:6px;display:none;font-size:12px;}",
@@ -1489,7 +1492,7 @@ const READER = [
   "  padding:12px 20px;border-bottom:1px solid var(--background-modifier-border, rgba(255,255,255,.08));",
   "}",
   ".kb-v13-reader-title{font-size:15px;font-weight:700;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.8));",
-  "  max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+  "  max-width:calc(var(--kb-vw,100vw)*.38);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
   ".kb-v13-reader-count{font-size:12px;color:var(--text-muted, rgba(160,190,220,.5));}",
   ".kb-v13-reader-spacer{flex:1;}",
   ".kb-v13-reader-bar button{",

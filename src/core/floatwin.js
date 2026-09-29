@@ -338,8 +338,17 @@ function applyBox(ctx, entry, x, y, w, h) {
   // 所以 `vw - w - EDGE ≥ EDGE` 恒成立，直接夹就是对的。
   x = Math.max(x0 + EDGE, Math.min(x, x0 + vw - w - EDGE));
   y = Math.max(y0 + EDGE, Math.min(y, y0 + vh - h - EDGE));
-  entry.win.style.left = x + "px";
-  entry.win.style.top = y + "px";
+  // ⚠️ 3.0 刀 36：`x/y` 一路都是**屏幕坐标**（居中从 `vr` 推、拖动从
+  // `getBoundingClientRect` 加位移），而 `style.left` 是**相对谁的**要看宿主：
+  //   · 宿主是**遮罩** → 它有 `backdrop-filter`，会成为 fixed 后代的包含块
+  //     → `style.left` 是**层内坐标**，要减掉这一层的原点（`floatwin.js` 顶上
+  //     那段「host 必须是铺满视口的那一层」说的就是这件事，从前两者重合所以不用换算）；
+  //   · 宿主是**阅读器里那个 floatsEl** → 它是 `position:absolute; inset:0`、
+  //     没有 filter/transform，**不是**包含块 → 浮窗相对视口定位 → 不减。
+  // 全屏时这一层的原点是 (0,0)、两种算法相同，所以对现有一切逐像素不变。
+  const anchor = (entry.spec.host || ctx.overlay) === ctx.overlay ? { x: x0, y: y0 } : { x: 0, y: 0 };
+  entry.win.style.left = x - anchor.x + "px";
+  entry.win.style.top = y - anchor.y + "px";
   entry.win.style.width = w + "px";
   entry.win.style.height = h + "px";
   sizeMemory(ctx).set(entry.unit, { x, y, w, h });

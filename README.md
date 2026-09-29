@@ -262,6 +262,8 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.72** · Six fixes to windowed mode: **satellites and floating windows were offset** (their coordinates come from the screen, but the layer they live in uses layer-local coordinates — the two differ by the window's origin once it is not fullscreen); **the resize grip stayed on your note after closing the vault** (and only ever accumulated); drag listeners were never unbound (six leaked per open); **the card panel could be taller than the window** (`vh` always measures the viewport) — the CSS now asks how big *this layer* is; **the toolbar was clipped in a narrow window** (✕ included) — it wraps now; and a window wider than the screen could put the grip out of reach.
+
 **1.3.71** · Fixes a fatal bug in 1.3.70: **the vault would not open at all** (`Cannot access 'j' before initialization`). I had declared `viewBox` *after* the line that reads it — a temporal-dead-zone error — and in the production bundle the variable is minified to a single letter, so the message names nothing recognisable. The declaration now comes first.
 
 **1.3.70** · **Windowed mode**: the vault no longer has to fill the screen — it can shrink to a draggable, resizable rectangle floating over your note, so you can read and use the vault at the same time. Pick the default in the plugin settings, or flip it any time with the button in the vault's top bar. (The version jumps from 1.3.60 because this is an architectural change: the vault gained a notion of *how much screen it occupies*, and every piece of coordinate maths that assumed "the viewport" now asks "this layer" instead.)

@@ -174,9 +174,15 @@ const GRIP_SIZE = 16;
 const VIEW_WIN_MIN_W = 420;
 const VIEW_WIN_MIN_H = 320;
 
+/**
+ * 形状校验。**必须认 `typeof === "number"`，不能只 `Number.isFinite(Number(v))`**
+ * —— `Number(null)` 是 `0`（有限），`Number("")` 也是。只看转换结果的话
+ * `{x: null, y: null, w: null, h: null}` 会被当成合法矩形，然后被夹成
+ * 一个钉在左上角的 420×320 窗口，而不是回默认摆位。
+ */
 function validBox(b) {
   if (!b || typeof b !== "object") return false;
-  return ["x", "y", "w", "h"].every((k) => Number.isFinite(Number(b[k])));
+  return ["x", "y", "w", "h"].every((k) => typeof b[k] === "number" && Number.isFinite(b[k]));
 }
 
 /**
@@ -205,9 +211,13 @@ function defaultViewBox(vw, vh) {
 function clampViewBox(box, vw, vh) {
   const w = Math.max(VIEW_WIN_MIN_W, Math.min(Number(box.w) || 0, Math.max(VIEW_WIN_MIN_W, vw)));
   const h = Math.max(VIEW_WIN_MIN_H, Math.min(Number(box.h) || 0, Math.max(VIEW_WIN_MIN_H, vh)));
-  const keep = 60; // 至少留这么多像素在屏幕里
-  const x = Math.min(Math.max(Number(box.x) || 0, keep - w), vw - keep);
-  const y = Math.min(Math.max(Number(box.y) || 0, 0), vh - keep);
+  const keep = 60; // 装不下时至少留这么多像素在屏幕里
+  // ⚠️ **装得下就整窗留在屏幕内**，别用"留一角"那套：右下角那颗抓手是**唯一**
+  // 能改尺寸的东西，窗口比屏幕宽时按"留一角"夹的话，抓手的 x 会落在屏幕外
+  // ——那扇窗从此再也改不了大小（只剩拖顶栏把它挪回来这一条路）。
+  // 只有真的装不下（窗口比屏幕还宽/高）才退到"留一角"。
+  const x = w <= vw ? Math.min(Math.max(Number(box.x) || 0, 0), vw - w) : Math.min(Math.max(Number(box.x) || 0, keep - w), vw - keep);
+  const y = h <= vh ? Math.min(Math.max(Number(box.y) || 0, 0), vh - h) : Math.min(Math.max(Number(box.y) || 0, keep - h), vh - keep);
   return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
 }
 
@@ -1044,6 +1054,20 @@ export async function mount({
    * `inset:0` 展开出来的是 right/bottom，只写 left/width 的话 right 还钉在 0 上，
    * 元素会被拉成从 left 一直铺到屏幕右边。
    */
+  /**
+   * 把浮窗那两颗"家具"（抓手）从屏幕上摘掉。
+   *
+   * ⚠️ **3.0 刀 36 审查逮出来的**：抓手是 `position:fixed; pointer-events:auto` 的
+   * body 级元素，而它**不在** mount 任何一处清场名单里（fs / overlay / readerEl 各有
+   * 自己的 `oldFs.remove()` 那一路）——所以关掉晶体库之后，那颗 16px 的青色三角
+   * **还留在你的笔记上**，还挂着已经死掉那个实例的拖拽监听：拖它没反应、
+   * 点它那一片会被吃掉。切回全屏也一样留着，**而且每重挂一次就多一个**。
+   */
+  function removeViewGrip() {
+    if (viewGrip && viewGrip.parentNode) viewGrip.parentNode.removeChild(viewGrip);
+    viewGrip = null;
+  }
+
   function paintViewBox() {
     const els = [fs, readerEl, overlay];
     for (const el of els) {
@@ -1051,6 +1075,9 @@ export async function mount({
       if (!viewBox) {
         el.style.left = el.style.top = el.style.width = el.style.height = "";
         el.style.right = el.style.bottom = "";
+        // 回全屏要把那两个变量清掉，让样式表回退到 100vh / 100vw。
+        el.style.removeProperty("--kb-vw");
+        el.style.removeProperty("--kb-vh");
         continue;
       }
       el.style.left = viewBox.x + "px";
@@ -1059,6 +1086,17 @@ export async function mount({
       el.style.height = viewBox.h + "px";
       el.style.right = "auto";
       el.style.bottom = "auto";
+      // 3.0 刀 36：**把"这一层多大"告诉 CSS。**
+      //
+      // 库里有一批用 `vh`/`vw` 写的尺寸（卡片面板 `max-height:82vh`、正文字段
+      // `height:34vh`、阅读器标题 `max-width:38vw`……），而那两个单位量的**永远是
+      // 视口**。浮窗默认只有视口高度的 78%，于是那些限制全部失效：面板会长得比
+      // 装着它的窗口还高、白白盖到笔记上去。
+      //
+      // 样式表那边已经改成 `calc(var(--kb-vh,100vh)*.82)` 这种写法——**没设这两个
+      // 属性时回退到 100vh/100vw，与从前逐字相同**，所以全屏那一档不受影响。
+      el.style.setProperty("--kb-vw", viewBox.w + "px");
+      el.style.setProperty("--kb-vh", viewBox.h + "px");
     }
     if (viewGrip) viewGrip.style.display = viewBox ? "" : "none";
     positionViewGrip();
@@ -1075,6 +1113,11 @@ export async function mount({
   // ---- 全屏暗场 ----
   const oldFs = doc.getElementById("kb-fullscreen");
   if (oldFs) oldFs.remove();
+  // 3.0 刀 36：**上一份实例留下的抓手也要收掉**（它是 body 级的，不属于 fs，
+  // 上面那句 remove 带不走它）。不清的话每重挂一次屏幕上就多一颗，而且都还挂着
+  // 死实例的监听——见 `removeViewGrip` 那段。
+  const oldGrip = doc.querySelector(".kb-v13-viewgrip");
+  if (oldGrip) oldGrip.remove();
   const fs = EL("div", "kb-v13-fullscreen");
   fs.id = "kb-fullscreen";
   fs.innerHTML =
@@ -2010,6 +2053,16 @@ export async function mount({
   }
 
   function closeFullscreen() {
+    // 3.0 刀 36：**把浮窗那两颗家具收干净。**
+    //   · 抓手是 body 级的 fixed 元素——不清的话它会**留在笔记上**（一颗青色的
+    //     小三角，拖着没反应、点它那一片还被吃掉）；
+    //   · 拖拽监听挂在 `doc` 上，不收就是每开一次库漏六个（`bindDeskDrag` 的
+    //     `unbind` 是唯一摘得掉它们的地方）。
+    removeViewGrip();
+    if (ctx.unbindViewWin) {
+      ctx.unbindViewWin();
+      ctx.unbindViewWin = null;
+    }
     // 3.0 刀 34：**催一下还没写下去的坐标。** 它们是防抖写的（拖完停一会儿才落盘），
     // 关库正好卡在窗口期里的话，最后那一两次摆放就白摆了——而用户完全看不出来。
     flushCardPos(ctx);

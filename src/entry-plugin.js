@@ -360,8 +360,11 @@ export default class CrystalVaultPlugin extends Plugin {
     this.settings.windowed = !!this.settings.windowed;
     const wb = this.settings.windowBox;
     this.settings.windowBox =
-      wb && typeof wb === "object" && ["x", "y", "w", "h"].every((k) => Number.isFinite(Number(wb[k])))
-        ? { x: Number(wb.x), y: Number(wb.y), w: Number(wb.w), h: Number(wb.h) }
+      // ⚠️ **不能只 `Number.isFinite(Number(v))`**：`Number(null)` 与 `Number("")`
+      // 都是 `0`（有限），那样 `{x:null,…}` 会被当成合法矩形。与核心那边
+      // `validBox` 同一条口径。
+      wb && typeof wb === "object" && ["x", "y", "w", "h"].every((k) => typeof wb[k] === "number" && Number.isFinite(wb[k]))
+        ? { x: wb.x, y: wb.y, w: wb.w, h: wb.h }
         : null;
     // 「上次看到哪儿」、画布排布、面板颜色那一大坨**单独一个字段**，不跟设置混在
     // 一起：它们的寿命不一样（设置是「我的工作台长什么样」，状态是「我上次停在哪」），

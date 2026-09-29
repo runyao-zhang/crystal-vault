@@ -403,8 +403,14 @@ export function renderSatellites(ctx, card, hue) {
     let sx = cx + Math.cos(angle) * rxOut - outW / 2;
     let sy = cy + Math.sin(angle) * ryOut - outH / 2;
     const pad = ctx.s(10);
-    sx = Math.min(Math.max(sx, vr.left + pad), vr.left + vr.w - outW - pad);
-    sy = Math.min(Math.max(sy, vr.top + pad), vr.top + vr.h - outH - pad);
+    // ⚠️ `sx/sy` 是**屏幕坐标**（上面从 `holo.getBoundingClientRect()` 来的），
+    // 而这个元素住在被 `backdrop-filter` 变成包含块的那一层里——`style.left`
+    // 是**相对那一层**的。先换算成层内坐标，再夹（夹的边界也是层内的）。
+    // 全屏时 `vr.left/top` 是 0、`vr.w/h` 就是视口，与从前逐字相同。
+    sx -= vr.left;
+    sy -= vr.top;
+    sx = Math.min(Math.max(sx, pad), vr.w - outW - pad);
+    sy = Math.min(Math.max(sy, pad), vr.h - outH - pad);
     const el = EL("div", "kb-v13-satellite");
     el.style.left = sx + "px";
     el.style.top = sy + "px";
@@ -453,8 +459,11 @@ export function renderSatellites(ctx, card, hue) {
       let sx = cx + Math.cos(angle) * rxBack - backW / 2;
       let sy = cy + Math.sin(angle) * ryBack - backH / 2;
       const pad = ctx.s(10);
-      sx = Math.min(Math.max(sx, vr.left + pad), vr.left + vr.w - backW - pad);
-      sy = Math.min(Math.max(sy, vr.top + pad), vr.top + vr.h - backH - pad);
+      // 同上面那一处：屏幕坐标 → 层内坐标，再夹。
+      sx -= vr.left;
+      sy -= vr.top;
+      sx = Math.min(Math.max(sx, pad), vr.w - backW - pad);
+      sy = Math.min(Math.max(sy, pad), vr.h - backH - pad);
       const el = EL("div", "kb-v13-satellite kb-v13-sat-back");
       el.style.left = sx + "px";
       el.style.top = sy + "px";
