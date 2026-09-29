@@ -137,6 +137,44 @@ export function createObsidianAdapter({
     return app.vault.adapter.read(path);
   }
 
+  /** 这颗叶子是不是一个正常的 markdown 视图（插件自己那颗不是）。 */
+  function isMarkdownLeaf(leaf) {
+    try {
+      return !!(leaf && leaf.view && leaf.view.getViewType && leaf.view.getViewType() === "markdown");
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 3.0 刀 39：**最近用过的那个 markdown 叶子**（没有就 null）。
+   *
+   * 存在的理由见 `openNote` 里那段：晶体库在浮窗/嵌入档下**自己占着一颗叶子**，
+   * 而"当前活动的叶子"可能是它——拿它当基准去分屏，用户看到的是一颗空标签页。
+   * 这里挑一颗**真能装下笔记**的叶子。
+   *
+   * 先问 `getMostRecentLeaf()`（那正是"用户上一篇在看的"），没有再逐个找。
+   * 两步都包在 try 里：这两个 API 在某些宿主版本上可能不在，而没有它只是
+   * 退回老行为（`openNote` 那条兜底），不该把打开笔记这件事整个弄崩。
+   */
+  function markdownLeaf() {
+    try {
+      const recent = app.workspace.getMostRecentLeaf ? app.workspace.getMostRecentLeaf() : null;
+      if (isMarkdownLeaf(recent)) return recent;
+    } catch (e) {
+      /* 往下逐个找 */
+    }
+    let hit = null;
+    try {
+      app.workspace.iterateAllLeaves((l) => {
+        if (!hit && isMarkdownLeaf(l)) hit = l;
+      });
+    } catch (e) {
+      return null;
+    }
+    return hit;
+  }
+
   /**
    * 把一个 vault 文件读成契约里的 Card（见 adapter.js）。
    * **loadCards 与 watchCards 共用这一条读法**：两处要是各自拼一遍，
@@ -776,16 +814,39 @@ export function createObsidianAdapter({
     // 「宿主默认」换「我们猜的默认」，越界还会让 Obsidian 直接抛。
     // 拿不到文件或叶子时退回整页跳转：宁可是老行为，也不能点了没反应。
     async openNote(path, opts = {}) {
+      // ⚠️ 3.0 刀 39（用户 09-29 报的）：**split 的基准要自己挑，不能交给"当前活动的叶子"。**
+      //
+      // `app.workspace.getLeaf("split", "vertical")` 是从**当前活动的那颗叶子**
+      // 旁边裂一块。全屏档里活动叶子就是用户那篇笔记，一切正常；而**浮窗/嵌入档里
+      // 多了一颗属于插件自己的叶子**（全屏档那些层挂在 `document.body` 上，没这回事），
+      // 它可以是活动的那颗——于是裂出来的是**一颗空标签页旁边的一块**，
+      // 用户看到的就是「点编辑冒出一颗新标签页 / 直接读不出来」。
+      //
+      // 改法：**认一颗已有的 markdown 叶子当基准**，没有才退回老写法。
+      // ⚠️ 全屏档下这两条是**同一颗叶子**（最近用过的那颗就是用户那篇笔记），
+      //    所以这一改对现有一切逐字不变——和 `viewRect` 是同一个套路。
+      const file = app.vault.getAbstractFileByPath(path);
+      const at = opts.line > 0 ? { eState: { line: opts.line, ch: 0 } } : undefined;
+      const base = markdownLeaf();
       if (opts.split) {
         try {
-          const file = app.vault.getAbstractFileByPath(path);
-          const leaf = app.workspace.getLeaf("split", "vertical");
+          const leaf = base
+            ? app.workspace.createLeafBySplit(base, "vertical", false)
+            : app.workspace.getLeaf("split", "vertical");
           if (file && leaf) {
-            await leaf.openFile(file, opts.line > 0 ? { eState: { line: opts.line, ch: 0 } } : undefined);
+            await leaf.openFile(file, at);
             return;
           }
         } catch (e) {
           // 落到下面的整页跳转
+        }
+      }
+      if (file && base) {
+        try {
+          await base.openFile(file, at);
+          return;
+        } catch (e) {
+          /* 落到下面的整页跳转 */
         }
       }
       app.workspace.openLinkText(path, "", false);
