@@ -56,6 +56,10 @@ export function createFakeAdapter({
   // 3.0 刀 21：改名探针，语义同 onTrashFolder（记一笔，「改了哪个路径」才是要钉的）。
   onRenameFile,
   onMountEditor,
+  // 3.0 刀 35：收纳方框边车的读写探针，语义同 onWriteCard。
+  // 顺带也是**故障注入**——"边车读不出来 / 写不进去"这两条路必须有地方能演。
+  onReadTextFile,
+  onWriteTextFile,
   storageKey,
 } = {}) {
   const byName = new Map();
@@ -248,6 +252,35 @@ export function createFakeAdapter({
       }
       disk.set(path, content);
       return Promise.resolve({ ok: true, content });
+    },
+
+    // 3.0 刀 35：任意小文本文件的读写（收纳方框的边车）。
+    // 假盘就是一个 Map，**没有"索引"这一层**——所以真宿主那边"隐藏文件不在索引里、
+    // 要走裸文件 API"这件事在这里自动成立，两条路的语义正好对齐。
+    // 三态语义同契约：在 → 内容；不在 → null；**出错 → 抛**。
+    // 探针返回一个 Error 就等于注入"读失败"（那是最需要能演的一条路）。
+    readTextFile(path) {
+      if (onReadTextFile) {
+        const injected = onReadTextFile(path);
+        if (injected instanceof Error) return Promise.reject(injected);
+        if (injected !== undefined) return Promise.resolve(injected);
+      }
+      return Promise.resolve(disk.has(path) ? disk.get(path) : null);
+    },
+
+    writeTextFile(path, text) {
+      if (onWriteTextFile) {
+        const injected = onWriteTextFile(path, text);
+        if (injected !== undefined) return Promise.resolve(injected);
+      }
+      const p = String(path || "");
+      if (!p) return Promise.resolve({ ok: false, reason: "error", message: "空路径" });
+      // 父目录不存在就建（与真宿主那条 `adapter.mkdir` 对齐）。假盘的"目录"
+      // 就是 folders 那个 Set，和上面的 createFolder 共用。
+      const dir = p.split("/").slice(0, -1).join("/");
+      if (dir) folders.add(dir);
+      disk.set(p, text == null ? "" : String(text));
+      return Promise.resolve({ ok: true, path: p });
     },
 
     // ---- 3.0 刀 6 文献阅读器 ----

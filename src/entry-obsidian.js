@@ -558,6 +558,55 @@ export function createObsidianAdapter({
       return { ok: true, path: landed };
     },
 
+    // 3.0 刀 35：读写一个**任意的小文本文件**（收纳方框的边车）。
+    //
+    // ⚠️ **两条都走 `app.vault.adapter`，不走 vault 那套。** 边车是点开头的名字
+    // （`.crystal-boxes.json`），而 Obsidian **不索引隐藏文件**：
+    // `getAbstractFileByPath` 找不到它、`vault.create` 也建不出来。
+    // 裸文件 API 走的是文件系统那一层，隐藏文件照样读写。
+    // 顺带的好处正是我们要的——宿主索引里没有它，**不会变成一张卡片**、
+    // 也不会出现在文件列表里。
+    async readTextFile(path) {
+      const p = toStr(path);
+      if (!p) return null;
+      // ⚠️ **"文件不在"和"读的时候出错"是两件事，不能都塌成 null。**
+      // 调用方拿 null 当"这一层还没有边车"，会**拿本地那份去覆盖写**——
+      // 于是"打开 vault 时文件还没同步下来"或"一次瞬时读失败"，
+      // 就足以把另一台机器摆好的框整份盖掉，而且是在对方那台机器上才显形。
+      // 所以：不在 → `null`；出错 → **抛**（调用方当"不知道"处理，什么都不动）。
+      let exists = false;
+      try {
+        exists = typeof app.vault.adapter.exists === "function" ? await app.vault.adapter.exists(p) : true;
+      } catch (e) {
+        throw e;
+      }
+      if (!exists) return null;
+      return await app.vault.adapter.read(p);
+    },
+
+    async writeTextFile(path, text) {
+      const p = toStr(path);
+      if (!p) return { ok: false, reason: "error", message: "空路径" };
+      const body = text == null ? "" : String(text);
+      try {
+        // 父目录不存在就先建。`adapter.write` 不会替你建目录。
+        const dir = p.split("/").slice(0, -1).join("/");
+        if (dir) {
+          try {
+            if (typeof app.vault.adapter.exists !== "function" || !(await app.vault.adapter.exists(dir))) {
+              await app.vault.adapter.mkdir(dir);
+            }
+          } catch (e) {
+            /* 已经存在 / 建不了都往下走，让 write 自己去报错 */
+          }
+        }
+        await app.vault.adapter.write(p, body);
+        return { ok: true, path: p };
+      } catch (e) {
+        return { ok: false, reason: "error", message: errText(e) };
+      }
+    },
+
     async mountEditor(el, opts = {}) {
       const path = toStr(opts.path);
       const wantLine = Math.max(1, Math.round(Number(opts.line)) || 1);

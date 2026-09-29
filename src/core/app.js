@@ -108,6 +108,8 @@ import {
 import { viewportCenter } from "./storyspot.js";
 // 3.0 刀 34：卡片坐标写进它自己的 frontmatter（用户 09-29）。
 import { migrateCardPos, flushCardPos } from "./cardpos.js";
+// 3.0 刀 35：收纳方框的落盘（每颗晶体一个 `.crystal-boxes.json`）。
+import { loadBoxFiles, flushBoxFiles } from "./boxfile.js";
 // 3.0 刀 17：故事线的「写」。**和结构窗共用同一份**，不是各写一套——
 // 这套东西会改用户手写的笔记，两个实现迟早漂移。
 import { createStoryWrite } from "./storywrite.js";
@@ -900,6 +902,12 @@ export async function mount({
   if (win.__kbV13CardPosTimer) {
     clearTimeout(win.__kbV13CardPosTimer);
     win.__kbV13CardPosTimer = 0;
+  }
+  // 第四个：3.0 刀 35 那个「把收纳方框写进边车文件」的防抖。同理——它的回调
+  // 也会写盘，让一个拆掉的实例去写，写出去的可能是过期的框。
+  if (win.__kbV13BoxFileTimer) {
+    clearTimeout(win.__kbV13BoxFileTimer);
+    win.__kbV13BoxFileTimer = 0;
   }
 
   if (injectStyles) {
@@ -1790,6 +1798,11 @@ export async function mount({
     // （用户 09-29 要的"别人电脑上相对位置一样"）。一次开库最多搬一批，
     // 剩下的下次开接着搬——理由写在 `migrateCardPos` 顶上。
     migrateCardPos(ctx, ctx.state.view.crystalPos);
+    // 3.0 刀 35：把各层的收纳方框边车读回来。**异步、不挡着开库**——
+    // 读盘慢一点的话，框晚半拍出现，比整个库卡在那里强。读完了自己重画一次。
+    loadBoxFiles(ctx).then((changed) => {
+      if (changed && ctx.refreshStoryline) ctx.refreshStoryline();
+    });
     // #9 模式不落盘，所以每次打开都回到回忆模式。别让一次误切把自测变成看答案——
     // 代价只是多点一下，比"哪天打开发现答案全摊着"轻得多。
     applyMode(ctx, MODE_RECALL);
@@ -1823,6 +1836,8 @@ export async function mount({
     // 3.0 刀 34：**催一下还没写下去的坐标。** 它们是防抖写的（拖完停一会儿才落盘），
     // 关库正好卡在窗口期里的话，最后那一两次摆放就白摆了——而用户完全看不出来。
     flushCardPos(ctx);
+    // 3.0 刀 35：框的边车同一条理由（它也是防抖写的，关库正卡在窗口期里就白摆了）。
+    flushBoxFiles(ctx);
     // 关掉那一刻屏幕上是什么，就记什么：晶体环、某颗晶体的第几页、某张翻开着的卡。
     // 必须在收缩之前取下来——收缩会把运行时清零，那之后取到的只剩「晶体环」，
     // 于是一个从晶体里出来的用户，再打开会莫名其妙回到环上。

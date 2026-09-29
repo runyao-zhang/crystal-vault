@@ -123,7 +123,8 @@ The field looks like this; the unit is a grid square (the minimum unit is a tent
 > The `晶体` ("crystal") prefix is deliberate: this plugin gets installed in other people's vaults, and a bare `坐标` ("coordinate") is far too generic a name — anyone with a field of their own by that name would have it silently overwritten.
 
 > - **Gold boxes need nothing of their own:** their position and size are the bounding box of the cards inside, so they follow along automatically.
-> - **Manual boxes (the ones you drew) are not in the files** — their positions live only on this machine. "Whose box is this?" needs an answer of its own, and this round did not touch it.
+> - **Manual boxes have a file of their own too**: one `.crystal-boxes.json` per crystal, sitting in that crystal's folder. The leading dot means Obsidian's file list never shows it and it **never becomes a card** (the adapter separately only reads `.md` — two independent guards). It holds each box's **bottom-left** corner, name, size, **collapsed state** and members. Close Obsidian before editing it by hand.
+> - ⚠️ **Your sync channel has to carry dot-prefixed files.** FNS works on the filesystem layer, so it is fine; a channel that skips `.`-prefixed entries (Obsidian's own Sync, for instance) will not carry this file, and your boxes will then exist only on this machine — with no warning that it happened.
 > - **Imported cards (borrowed via 「导入卡片」) are not written either**: where it sits in *your* layer is a different thing from where it sits in its own crystal, and writing it would move it back home.
 > - Position writes are **debounced** — they land a moment after you stop dragging (you sync across devices, and a write per drag would set off a sync storm). Closing the vault flushes anything still pending, so nothing is lost.
 

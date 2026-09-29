@@ -21,6 +21,8 @@
 // 不这么做的话，收起等于「把线删了」——而用户明明没删，那读起来是「我的双链丢了」。
 
 import { importsUnder } from "./storyimports.js";
+// 3.0 刀 35：框的落盘（每颗晶体一个 `.crystal-boxes.json`）。见 boxfile.js 头上那段。
+import { queueBoxFile } from "./boxfile.js";
 
 const BOX_PAD = 22;
 /** 标题栏高度。收起时那个框就只剩这一条。 */
@@ -398,6 +400,13 @@ function writeBucket(ctx, path) {
 
 function afterWrite(ctx) {
   if (ctx.flushViewState) ctx.flushViewState();
+  // 3.0 刀 35：框变了就**排队把它那一层的边车写出去**（防抖，见 boxfile.js）。
+  // 建框 / 改名 / 收起 / 删框 / 改归属都汇到这里；**拖动和缩放走 `setBoxRect`，
+  // 那里自己排**（它有意不重画，见那条注释）。
+  //
+  // ⚠️ **收链数组，不是拼好的层键**——晶体文件夹名里可以带空格，
+  // 拼字符串再切会切错（见 `folderOfChain` 那段）。
+  queueBoxFile(ctx, ctx.state.crystalPath);
   if (ctx.refreshStoryline) ctx.refreshStoryline();
 }
 
@@ -472,6 +481,16 @@ export function setBoxRect(ctx, id, rect) {
   // 拖动过程中**不重画**（那一块可能正拿着指针捕获），所以这里只落盘，
   // 由调用方自己改 DOM。同 storyline 里那段框拖动。
   if (ctx.flushViewState) ctx.flushViewState();
+  // ⚠️ **3.0 刀 35 审查逮出来的致命一条：这里原来只有上面那一句。**
+  //
+  // `setBoxRect` 是**拖动和缩放一个框的唯一出口**（storyline 里那两处），
+  // 而它不排队写边车的话：拖一下框 → 只有本地视图状态变了 → 关库时
+  // `flushBoxFiles` 看到队是空的直接返回 → 下次开库读到的是边车里的旧矩形 →
+  // **框跳回原处**。同一台机器上、不需要任何巧合就会发生。
+  //
+  // 同一段拖动的收尾里，成员卡片是排了 `queueCardPos` 的（刀 34 那条），
+  // 方框这一半漏了——两个半张脸对不上，正是这一刀要防的那类事。
+  queueBoxFile(ctx, ctx.state.crystalPath);
 }
 
 export function renameBox(ctx, id, name) {
