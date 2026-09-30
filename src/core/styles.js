@@ -1993,7 +1993,26 @@ const READER = [
   "  background:var(--background-secondary, rgba(6,12,22,.75));",
   "}",
   ".kb-v13-reader-folderpick.open{display:flex;}",
-  ".kb-v13-reader-folderpick-hd{font-size:11px;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.7));}",
+  // 3.0 刀 42（用户 09-30 第 2 条）：这一行现在是「抬头 + 取消」两颗。
+  // `flex:1` 给 span：抬头字长（「引哪张卡进来（挑别的晶体里的）」）而面板窄，
+  // 不给它撑开的话取消会被挤出去；`min-width:0` 是省略号在 flex 里生效的前提。
+  ".kb-v13-reader-folderpick-hd{",
+  "  display:flex;align-items:center;gap:8px;",
+  "  font-size:11px;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.7));",
+  "}",
+  ".kb-v13-reader-folderpick-hd>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+  // 取消：**只是关面板，什么都不改**。所以它是中性色，不跟着右边那些
+  // 「会动你东西」的按钮用暖色描边。
+  ".kb-v13-reader-foldercancel{",
+  "  flex:none;cursor:pointer;border-radius:6px;padding:2px 9px;",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.28));",
+  "  font:inherit;font-size:11px;line-height:1.5;letter-spacing:.5px;",
+  "  color:var(--text-muted, rgba(160,195,220,.85))!important;background:none!important;",
+  "}",
+  ".kb-v13-reader-foldercancel:hover{",
+  "  color:var(--text-normal, rgba(228,240,255,.96))!important;",
+  "  border-color:var(--text-accent, rgba(0,200,255,.6));",
+  "}",
   ".kb-v13-reader-folderpick .kb-v13-op-body{max-height:280px;overflow-y:auto;}",
   // 搜索时把三角藏起来（结果一律摊开，点开三角那一步就多余了），并把组头往左
   // 挪回来补齐三角让出的那一截。`#kb-folders` 那一份写的是面板上的类，
@@ -2244,11 +2263,22 @@ const READER_DOCK = [
 // 故事线/结构窗里把几张卡收进一个可以命名、可以收起的框里。
 // 整块逻辑在 `storyboxes.js`，这里只负责长相。
 const STORY_BOXES = [
-  // ⚠️ **z-index:0 且 pointer-events:none**：框要压在卡片**下面**
-  // （DOM 里也确实排在卡片前面），所以它自己不能接事件——只有标题栏那一条
-  // 单独把 `pointer-events` 打开。不这么做的话，框会盖住卡片，点不着卡。
+  // ⚠️ **z-index:0**：框压在卡片**下面**（DOM 里也确实排在卡片前面）。
+  //
+  // 3.0 刀 42（用户 09-30 第 1 条）：**`pointer-events` 从 none 打开了。**
+  // 原来只有标题栏那一条能接事件，于是「拖动 = 只能抓顶上那 26px」；用户要的是
+  // **框里任何一块空白都能拖**。打开是安全的，靠的是**层级**而不是"框不接事件"：
+  //   · 卡片是 `z-index:1`、且是框的**兄弟节点**（两边都直接挂在 canvas 上，
+  //     见 renderStorylineStage 末尾那个循环），所以压在卡片上时指针落的是卡片——
+  //     「拖卡片区域不会拖框」这件事是层级给的，不用额外判一次。
+  //   · 只有落在框里**没有卡**的那块地方，指针才落到框自己身上。
+  //
+  // 代价（知道就好，不是 bug）：`panzoom.onPointerDown` 头一句是
+  // `if (e.target !== gesture) return;`，所以在框的空白处按下**不再平移画面**。
+  // 框里想推画面：拖框外面，或者用滚轮/触控板（滚轮走的是 gesture 上的监听，
+  // 从框冒泡上去照样收得到）。
   ".kb-v13-sbox{",
-  "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:0;pointer-events:none;",
+  "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:0;pointer-events:auto;",
   // ⚠️ 用户 09-27：「颜色太浅」。第一版是 .4 透明度的细虚线，在库自绘的深底上
   // 几乎看不见。**深色底上要看清，靠的是"亮 + 粗"，不是"淡 + 细"**——
   // 透明度提到 .85、线宽到 2px，底色也抬一档，让它一眼是一块地方而不是一道痕。
@@ -2279,7 +2309,9 @@ const STORY_BOXES = [
   "}",
   ".kb-v13-sbox-del:hover{color:#ff8a7a!important;}",
   // 手动框右下角的抓手（用户 09-27 拍板 B：框是你画的，大小得能自己定）。
-  // ⚠️ **必须 pointer-events:auto**——框整体是 `none`，只有标题栏和这一颗能接事件。
+  // 3.0 刀 42 起框整体已经能接事件了，这一句留着是**必须的**：抓手上那一下要
+  // 「改大小」，不能和整框拖动一起发生（storyline 里靠 `closest("[data-box-grip]")`
+  // 排在最前面抢先，CSS 这里保证它是个真能命中的目标）。
   ".kb-v13-sbox-grip{",
   "  position:absolute;right:0;bottom:0;width:18px;height:18px;",
   "  cursor:nwse-resize;pointer-events:auto;z-index:2;",

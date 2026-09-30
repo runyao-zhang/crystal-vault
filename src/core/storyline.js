@@ -42,9 +42,11 @@ import {
 // 3.0 刀 34：把卡片的坐标写进它自己的 frontmatter（用户 09-29 要的可移植）。
 import { gridToPixel, queueCardPos } from "./cardpos.js";
 // 3.0 刀 32「格点」。单位怎么算出来的、坐标以哪个角为准，全写在那份文件头上。
-// 3.0 刀 34：收纳方框不走格点了（用户 09-29），所以 `UNIT` / `snapX` / `snapY`
-// 从这里不再需要——**格点现在只管卡片**，用的是 `snapPos` 和那两步长。
-import { STEP_X, STEP_Y, snapPos } from "./storygrid.js";
+// 3.0 刀 42（用户 09-30 第 3 条）：**方框又把格点接回来了。**
+// 刀 34 撤过一次（用户 09-29），这一刀按他 09-30 的话装回去——所以 `UNIT`
+// 重新需要了（晶体框没有自己的坐标，只能吸附位移，见那一段）。
+// `snapX` / `snapY` 仍然不 export：吸一个点只走 `snapPos`，少一处漏吸的机会。
+import { STEP_X, STEP_Y, UNIT, snapPos } from "./storygrid.js";
 // 3.0 刀 34/38/39：新建的东西落在**你正看着的地方**。
 // ⚠️ 用的是 `viewportPoint`（**带相机换算**，屏幕上的比例 → 世界坐标），
 // 不是 `ctx.viewRect()` 那几个数——那是**屏幕**矩形，当世界坐标用会落到
@@ -446,7 +448,11 @@ export function renderStorylineStage(ctx, path) {
     );
   }
 
-  // 3.0 刀 25（用户 09-27 拍的 Q6=能）：**拖框的标题栏 = 整组一起挪**。
+  // 3.0 刀 25（用户 09-27 拍的 Q6=能）：**拖框 = 整组一起挪**。
+  //
+  // 3.0 刀 42（用户 09-30 第 1 条）：起手的地方从**只有标题栏**放宽成**框里任何
+  // 一块空白**。判据只有一句 `closest(".kb-v13-sbox")`——卡片是框的兄弟节点、
+  // 层级又更高，所以压在卡片上时指针根本落不到框上（见 styles.js 那条）。
   //
   // ⚠️ 拖动过程中**绝不能重画框**：那一块正拿着指针捕获，一换掉拖动当场断在半路
   //    （同 `paintStoryLines` 顶上那条「绝不能在这里重建节点」）。所以框自己挪自己，
@@ -506,13 +512,20 @@ export function renderStorylineStage(ctx, path) {
         ctx.canvas.addEventListener("pointercancel", rup, { once: true });
         return;
       }
-      const barEl = t.closest(".kb-v13-sbox-bar");
-      const node = barEl && barEl.closest(".kb-v13-sbox");
+      // 3.0 刀 42（用户 09-30 第 1 条）：**整框都能起手**，不再只认标题栏。
+      // 那几颗按钮在上面已经排除了（`closest("button")` 与抓手各一条），
+      // 卡片够不到这儿（它是兄弟节点，层级还更高）。
+      const node = t.closest(".kb-v13-sbox");
       const id = node && node.getAttribute("data-box");
       if (!id) return;
       const cp = ctx.state.crystalPath || [];
       const box = boxesOf(ctx, cp).find((b) => String(b.id) === String(id));
-      if (!box || !box.paths.length) return;
+      // ⚠️ **空的手动框也要能拖。** 原来这里写的是 `!box.paths.length` 就直接
+      // return，理由是"没成员的框拖它干什么"——可框是用户**自己画**的那个东西
+      // （刀 27 拍板的 B），拖进来一张卡之前先把它摆到位，是最自然的一步。
+      // 晶体框不一样：它的位置是成员包围盒算出来的，没成员根本画不出来，
+      // 走不到这一行（这个 return 留着）。
+      if (!box || (!box.paths.length && box.crystal)) return;
       e.preventDefault();
       e.stopPropagation();
       try {
@@ -551,30 +564,55 @@ export function renderStorylineStage(ctx, path) {
       const bx = parseFloat(node.style.left) || 0;
       const by = parseFloat(node.style.top) || 0;
 
+      // 3.0 刀 42（用户 09-30 第 3 条）：**两种方框都走格点。**
+      //
+      // 吸法不一样，因为它们的几何**来路**不一样（这是刀 23 就定下的分工）：
+      //   · **手动框**自己有记着的矩形 → 直接把 x/y 吸到格点上（`snapPos` 的判据
+      //     是**左下角**，和卡片同一把尺子）。框里每张卡再按**同一段位移**整体挪
+      //     ——相对位置一点不变，不会被挤到一起。
+      //   · **晶体框**的位置是成员包围盒**算出来**的，没有"框自己的坐标"可吸
+      //     → 退一步吸**位移**：取整成最小单位（21px）的整数倍。框和里面的卡
+      //     一起按整格走，同样是整体平移。
+      //
+      // ⚠️ 刀 34 撤过一次格点（用户 09-29 说「取消」），刀 42 又装回来了
+      //    （用户 09-30 说「采用格点移动」）。**别把其中任何一次当成笔误删掉**：
+      //    两次都是他明确要的，中间隔了一天。
+      const isManualBox = String(id).indexOf("m:") === 0;
+      const hasRect = isManualBox && Number.isFinite(mx) && Number.isFinite(my);
+      /** 把这一帧的原始位移吸成格点位移。 */
+      const snapDelta = (dx, dy) => {
+        // 没有自己的矩形（晶体框，或坐标坏掉的手动框）→ 只能吸位移。
+        // ⚠️ 坐标坏掉那一支不能顺手当成 0 去吸：`snapPos` 对非有限数是**回 0**，
+        //    于是 `0 - my` 会把框整个甩到世界的原点上，一下拖出屏幕。
+        if (!hasRect) {
+          return { x: Math.round(dx / UNIT) * UNIT, y: Math.round(dy / UNIT) * UNIT };
+        }
+        const to = snapPos(mx + dx, my + dy, Number(box.h) || 0);
+        return { x: to.x - mx, y: to.y - my };
+      };
+
       let lastDx = 0;
       let lastDy = 0;
       const move = (ev) => {
         const w1 = toWorld(ev.clientX, ev.clientY);
         const dx = w1.x - w0.x;
         const dy = w1.y - w0.y;
-        // 3.0 刀 34（用户 09-29）：「把收纳方框的格点移动取消」。
-        // **拖动不再吸附**——拖到哪停哪（下面写回模型时也是原样的 dx/dy）。
-        // 晶体框同理：它跟着成员走，成员怎么走它就怎么走。
-        //
-        // 为什么只取消框、卡片照旧：框是你**画**出来的自由容器，尺寸位置都该由你定；
-        // 卡片是一张一张要对齐的东西，格点在那儿才有用。两者的分工本来就不一样。
-        const sdx = dx;
-        const sdy = dy;
+        const at = snapDelta(dx, dy);
+        const sdx = at.x;
+        const sdy = at.y;
         lastDx = sdx;
         lastDy = sdy;
         // ⚠️ 3.0 刀 34：**一动没动就什么都不写。**
         //
         // 这条路没有 4px 阈值（它是 canvas 上的监听，不是 itemdrag），所以
-        // "按一下框的标题栏、手指抖了 0px"也会走到这儿。原来它会照写一遍
+        // "按一下框、手指抖了 0px"也会走到这儿。原来它会照写一遍
         // `crystalPos[p] = 原位`——把框里每张卡都标成"用户摆过"。
         // 那在刀 34 之后是有后果的：迁移只搬"用户摆过"的卡，于是**一次点击
         // 就能把排布算法算出来的位置固化进一堆文件的 frontmatter**。
-        if (!dx && !dy) return;
+        //
+        // ⚠️ 判据是**吸完之后**的位移（刀 42 起）。半格以内的抖动吸完就是 0，
+        //    于是它连"抖了一下"都不算——这正是格点该有的样子：不到半格不动。
+        if (!sdx && !sdy) return;
         // 卡片：晶体框和手动框都跟着走（用户 Q6 拍的是「框和里面的卡一起挪」）
         const l = layoutOf(ctx);
         if (!l.crystalPos) l.crystalPos = {};
@@ -607,8 +645,12 @@ export function renderStorylineStage(ctx, path) {
         // 收起态的条摆在**重心**上，拿它当原点的话：框的矩形会跳到一个完全不同的
         // 位置，而卡片只挪了 delta——**展开一看，卡片全跑到框外面**。
         // 用户 09-27 报的就是这个。
-        if (String(id).indexOf("m:") === 0 && (lastDx || lastDy) && Number.isFinite(mx)) {
-          setBoxRect(ctx, id, { x: mx + lastDx, y: (Number.isFinite(my) ? my : 0) + lastDy });
+        //
+        // 3.0 刀 42：判据换成 `hasRect`（= 手动框 **且** 坐标是有限数）。
+        // 刀 42 起 `lastDx/lastDy` 是**吸过格点**的位移，所以写回去的
+        // `mx + lastDx` 正好就是那个格点坐标——和拖动时看到的框是同一个数。
+        if (hasRect && (lastDx || lastDy)) {
+          setBoxRect(ctx, id, { x: mx + lastDx, y: my + lastDy });
         }
         // 3.0 刀 34：整框拖完，**把里面那几张原生卡的新坐标落进它们的 frontmatter**。
         // 拖动过程中不记（每一帧都记的话得写几百次），松手记一次就够——
@@ -1345,13 +1387,37 @@ function sideHintMap(ctx) {
   const v = layoutOf(ctx);
   const all = v.linkSides && typeof v.linkSides === "object" ? v.linkSides : {};
   const key = (ctx.state.crystalPath || []).join(" ");
-  const list = all[key];
-  if (!Array.isArray(list)) return out;
-  for (const l of list) {
-    if (!l || !l.from || !l.to) continue;
-    out.set(l.from + " " + l.to, { fromSide: l.fromSide, toSide: l.toSide });
-    out.set(l.to + " " + l.from, { fromSide: l.toSide, toSide: l.fromSide });
+  const put = (list) => {
+    if (!Array.isArray(list)) return;
+    for (const l of list) {
+      if (!l || !l.from || !l.to) continue;
+      out.set(l.from + " " + l.to, { fromSide: l.fromSide, toSide: l.toSide });
+      out.set(l.to + " " + l.from, { fromSide: l.toSide, toSide: l.fromSide });
+    }
+  };
+  // 3.0 刀 42（用户 09-30 第 4 条）：**别的层的接法也算数。**
+  //
+  // 原来这里只读 `all[key]`——就是当前这一层那一格。可「接法」是**一对卡片
+  // 之间**的事：`writeLinkSide` 拿层当键，只是因为"用户当时站在哪一层"是最省事
+  // 的写法，不是因为它俩的关系属于那一层。于是同一个文件夹里的两张卡：
+  //   · 进到那颗晶体里看 → 用他拖过的那套接法，线从他拖的那一边出去；
+  //   · 站在外面看那个金色方框 → 查不到提示，退回默认的"看谁在左谁在右"——
+  //     **同一对卡、同一根线，走线形状不一样**，而屏幕上没有任何东西解释这件事。
+  //
+  // 用户要的是"金色方框里面和文件夹内部一样"（09-30 第 4 条），所以把各层的
+  // 提示都收进来。
+  //
+  // ⚠️ **本层的最后放**：同一对卡在两个层都记过时以当前这一层为准——
+  //    他现在站在哪儿，看到的就该是哪儿的那一份。
+  // ⚠️ 键里的分隔符是**真的 NUL 字节**（\x00 那个字符本身），不是空格。它和
+  //    `mergePairs` / `edgesUnder` 用的是同一个字符，改一处就得改全部——
+  //    而这两边一旦不一致，表现是**接法静默失效**（查不到就是没提示），
+  //    不报错、也不是"接歪了"，是"我明明拖过它还是老样子"。
+  for (const k of Object.keys(all)) {
+    if (k === key) continue;
+    put(all[k]);
   }
+  put(all[key]);
   return out;
 }
 

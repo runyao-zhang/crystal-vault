@@ -82,6 +82,8 @@ The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically*
 
 A box made with 「**＋ 框**」 lands **where you are looking** (the middle of the viewport), not in some fixed corner of the world — boxes used to appear at a hard-coded (60, 60), so if you had panned away you had to pan back to find it. Same for a newly created card.
 
+**Any blank part of a box drags the whole box** (since 1.3.83) — not just the title bar. Grab the box's edge or any empty spot inside it and the box moves together with the cards in it. Pressing on a card still drags the card (cards sit higher), so: to move a card press the card, to move the whole box press the box's blank space. Dragging **follows the grid** — see "Placing cards by the square" below.
+
 Collapsing puts the cards inside away together with the lines running to them — **but "there is still something in there" is never lost**:
 
 - any outside card that still has a blue line into a collapsed box gets a **yellow filled dot** in its corner;
@@ -145,8 +147,8 @@ Cards in the storyline sit on a **grid**, anchored at the **bottom-left corner**
 
 Drag a card and it settles onto the nearest grid point; box some cards in and step them one square at a time with the arrow keys.
 
-> - **Manual boxes are not on the grid**: they go wherever you drag them and resize to whatever you pull. A box is a free container *you* draw; cards are the things that need to line up — the two jobs are not the same.
-> - **Gold boxes (the ones grown from folders) are not on it either.** Their position and size are **computed** from the cards inside, so they have no position of their own.
+> - **Manual boxes are on the grid too** (since 1.3.83): dragging snaps the box's **bottom-left corner** to the grid, and the cards inside move by **one and the same offset** — their relative positions do not change at all. **Resizing is still free** — a box is a container *you* draw and its size is yours to decide; only *where* it sits needs to line up.
+> - **Gold boxes (the ones grown from folders) move in whole squares.** Their position and size are **computed** from the cards inside, so they have no coordinates of their own to snap — what snaps is the **offset**: the box and its cards travel by a whole number of minimum units, which is still a plain translation.
 > - **Positions you already arranged are never mass-moved.** The grid only takes effect the next time you drag that card or press an arrow key — otherwise it would be a change nobody pressed a button for. The cost: a card you have never touched may sit off-grid until you move it once.
 
 ### Import a card: borrow one from another crystal
@@ -174,6 +176,7 @@ The column on the right of the reader. Fill in **name / concept / source / body*
 - **Changed your mind?** Hit **Back**: the card you just made is removed and its body moves, untouched, into a **scratch note**.
 - **Scratch notes** are a pad written in the native editor, dropped into a folder you choose — deliberately *not* a card.
 - **Card box**: search the vault's cards, click one to put it on the desk, and it leaves a line in that card linking back to **the exact page** you are reading.
+- **The folder picker's header has a 「取消」** (since 1.3.83). "Will be created in", new / delete / rename crystal, delete / rename card and the structure window's crystal picker all open that same panel, and **closing it is now this one button** — it puts the panel away and changes nothing else.
 - **Rename card / Rename crystal** live here too. They go through Obsidian's own rename channel, so **every `[[link]]` pointing at it is updated along with it**.
 
 ## The vault itself, when you are not reading
@@ -270,6 +273,16 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.83** · Four things, all in the storyline / structure window (user, 09-30).
+
+**A box is draggable by its whole body now.** Only the 26px title bar could be grabbed before; now **any blank part of the box** starts the drag. Pressing on a card still drags the card — cards sit above boxes, so that part is given by stacking order rather than by an extra check (which is why "dragging a card area never drags the box" comes for free). The cost, stated plainly: pressing on blank space inside a box **no longer pans the camera** — pan by dragging outside a box, or with the wheel. One thing fixed along the way: **an empty box used to be immovable**; it can be positioned now.
+
+**Lines inside a gold box now run the same way they do inside that folder.** The "attachment" (which side of a card a line leaves from, and how it bends) was recorded **per layer**, so looking at a gold box from the outside found no record and fell back to the default "whichever card is further left gets the left side" — the same pair of cards, the same single line, drawn differently in the two places, with nothing on screen explaining why. Now **every layer's record counts, with the current layer winning**.
+
+**Boxes are on the grid again.** A manual box snaps to the grid (same ruler as cards: the **bottom-left corner**), and the cards inside move by **one and the same offset** — their relative positions do not change at all, so they never collapse into each other. A gold box has no coordinates of its own, so it snaps by **whole squares** instead. **Resizing is still free** — only *where* a box sits needs to line up. (The grid was removed from boxes in 1.3.34; this version puts it back, as asked.)
+
+**The folder picker's header gained a 「取消」.** "Will be created in", new / delete / rename crystal, delete / rename card, and the structure window's crystal picker all open the same panel, so closing it is now one button for all of them. (Before, the only way out was clicking 「将建在」 again — a button whose label reads "will be created in", which does not look like a close.)
 
 **1.3.82** · New: **the structure window can now delete a whole batch of cards at once**. Once you have boxed some cards (「框：卡」 + 「选框」 in the top bar), a **red-outlined 「删除卡片 (n)」** appears — one click sends those cards to the **recycle bin together with their note files** (recoverable), leaving the **crystal they belonged to untouched**.
 What it deletes is a **file**, so the cost is stated in three places: the count on the button, the tooltip, and the hint line below. This window has **no confirmation dialog** by design (settled 09-20), so the hint line is the only notice it gives.

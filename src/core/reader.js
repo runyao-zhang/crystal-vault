@@ -495,7 +495,19 @@ export function createReader(ctx, opts = {}) {
     '<div class="kb-v13-reader-folderpick" id="kb-reader-folderpick">' +
     // 这句抬头两档共用（见 folderPick.purpose）：挑建卡的文件夹 / 挑看故事线的晶体。
     // 文案由 openFolderPick 每次改写，别在 HTML 里写死。
-    '<div class="kb-v13-reader-folderpick-hd" id="kb-reader-folderhd">存进哪个文件夹</div>' +
+    //
+    // ⚠️ 3.0 刀 42（用户 09-30 第 2 条）起这一行是**两个元素**：抬头 + 取消。
+    // 那句 `folderHd.textContent = text.hd` 改的必须只是里面那个 `<span>`——
+    // 写成整个 `.kb-v13-reader-folderpick-hd` 的话，每开一次面板都会把取消
+    // 那颗按钮**连同文字一起抹掉**，而且不报错。
+    '<div class="kb-v13-reader-folderpick-hd">' +
+    '<span id="kb-reader-folderhd">存进哪个文件夹</span>' +
+    // 「取消」那颗（用户 09-30）。**所有用途共用同一颗**：将建在、新建/删除/重命名
+    // 晶体、删除/重命名卡片、结构窗挑晶体——它们打开的都是这块面板，关法没理由
+    // 各是各的。关的是**面板**，不是那一屏（同 hideFolderPick 里那段）。
+    '<button type="button" class="kb-v13-reader-foldercancel" id="kb-reader-foldercancel"' +
+    ' title="收起这块面板，什么都不改。">取消</button>' +
+    "</div>" +
     '<input type="text" class="kb-v13-op-search" id="kb-reader-foldersearch"' +
     ' placeholder="搜文件夹" autocomplete="off" aria-label="搜文件夹">' +
     '<div class="kb-v13-op-body" id="kb-reader-folderbody"></div>' +
@@ -4565,6 +4577,12 @@ export function createReader(ctx, opts = {}) {
   folderPick.el = $("kb-reader-folderpick");
   folderPick.body = $("kb-reader-folderbody");
   targetBtn.addEventListener("click", () => toggleFolderPick());
+  // 3.0 刀 42（用户 09-30 第 2 条）：面板抬头那颗「取消」。
+  // 收尾交给 `hideFolderPick()`——它是**唯一**的关法，`aria-expanded`、还回
+  // 「边看边记」那一栏、把「选哪份文献」那层请回来，全在它里面。
+  // 自己写一遍 `classList.remove("open")` 的话，那颗「将建在」会永远停在
+  // 展开态（aria-expanded 还是 true），下次点它反而不开了。
+  $("kb-reader-foldercancel").addEventListener("click", () => hideFolderPick());
   $("kb-reader-nativeopen").addEventListener("click", () => openNativeCompose());
   // 草稿纸那两颗（宿主没给位置时那颗按钮压根不在，所以绑之前先问一句）
   if (scratchSpec) $("kb-reader-scratch").addEventListener("click", () => openScratchForm());
