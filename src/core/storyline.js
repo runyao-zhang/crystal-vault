@@ -528,11 +528,31 @@ export function renderStorylineStage(ctx, path) {
       if (!box || (!box.paths.length && box.crystal)) return;
       e.preventDefault();
       e.stopPropagation();
-      try {
-        node.setPointerCapture(e.pointerId);
-      } catch (err) {
-        /* 合成事件拿不到捕获，退化成普通监听也能用 */
-      }
+      // ⚠️⚠️ 3.0 刀 44：**按下的这一下，绝不 setPointerCapture。**
+      //
+      // 这是 holodrag.js / panzoom.js 都栽过的同一个坑，而 panzoom 里那句原话
+      // 就是解药：「阈值之内不要指针捕获：按下就捕获会把 click 吃掉」。
+      // 在这里它更隐蔽——**`click` 的目标是「按下点」和「松开点」的最近公共祖先**，
+      // 而捕获会把 pointerup 的目标改写成被捕获的那个元素。于是「按在名字上、
+      // 原地松手」那一下：down 落在 span 上、up 落到整个方框上 → click 也落到
+      // 方框上 → `closest("[data-box-name]")` 查不到 → **改名当场哑掉**。
+      //
+      // 用户 09-30 报的就是这个，而且是「有没有卡都不行」。1.3.83 之前它只在
+      // **空框**上是好的：那会儿空框在下面那个守卫上就 return 了，压根没捕获，
+      // click 照旧落在名字上——**「空框能拖」和「点名字改名」当时共用同一个早退**，
+      // 刀 42 把那个早退放开，顺手把改名也赔了进去。
+      //
+      // 改法照抄 panzoom：**过了阈值才捕获**。没真拖的那一下，从头到尾什么都没发生。
+      let captured = false;
+      const grabPointer = () => {
+        if (captured) return;
+        captured = true;
+        try {
+          node.setPointerCapture(e.pointerId);
+        } catch (err) {
+          /* 合成事件拿不到捕获，退化成普通监听也能用 */
+        }
+      };
 
       const layout = layoutFor(ctx, cp);
       const now = new Map();
@@ -594,6 +614,14 @@ export function renderStorylineStage(ctx, path) {
       let lastDx = 0;
       let lastDy = 0;
       const move = (ev) => {
+        // ⚠️ 3.0 刀 44：**过阈值才捕获**（见上面那段，这是改名能用的前提）。
+        // 阈值用**屏幕像素**，和 panzoom / itemdrag 同一把尺子——相机缩得很小时，
+        // "屏幕走了 10px"在世界里可能连一格都不到，拿世界坐标当阈值会变成
+        // "手感上拖不动"。
+        if (!captured) {
+          if (Math.abs(ev.clientX - e.clientX) < 4 && Math.abs(ev.clientY - e.clientY) < 4) return;
+          grabPointer();
+        }
         const w1 = toWorld(ev.clientX, ev.clientY);
         const dx = w1.x - w0.x;
         const dy = w1.y - w0.y;
