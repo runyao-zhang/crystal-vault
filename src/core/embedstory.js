@@ -84,6 +84,13 @@ export const EMBED_CSS =
   "  transform-origin:0 0;}" +
   ".kb-v13-embedbar{position:absolute;left:8px;top:8px;z-index:5;display:flex;" +
   "  align-items:center;gap:6px;padding:4px 6px;border-radius:7px;" +
+  // 3.0 刀 43（用户 09-30 第 2 条）：**换行 + 封顶。**
+  // 用户报的是「文件名太长，直接把后面的按钮挤出窗外」：这条栏原来是 flex
+  // **不换行**、也**没有宽度上限**，而晶体名是里面唯一会长的东西，于是它一路
+  // 往右顶，而窗的外层是 `overflow:hidden`——被顶出去的按钮就再也点不到了。
+  // 两道一起上：名字自己封顶（见下面 .kb-v13-embedcrystal），这条栏到边就换行。
+  // 换行是**兜底**（保证再也挤不出去）；平时靠那颗 ▲ 把名字收起来，不用真折行。
+  "  flex-wrap:wrap;max-width:calc(100% - 16px);" +
   "  background:rgba(8,16,30,.82);border:1px solid rgba(0,180,255,.22);}" +
   ".kb-v13-embedmode{cursor:pointer;font:inherit;font-size:11px;padding:3px 8px;" +
   "  border-radius:5px;border:1px solid rgba(0,200,255,.3);" +
@@ -96,6 +103,19 @@ export const EMBED_CSS =
   "  font:inherit;font-size:11px;" +
   "  padding:2px 7px;border-radius:5px;border:1px solid rgba(0,200,255,.28);" +
   "  background:none;color:rgba(190,220,245,.85);}" +
+  // 3.0 刀 43（用户 09-30 第 2 条）：晶体名是这条栏里**唯一会长**的东西，给它封顶。
+  // 超长用省略号（名字仍然读得到前半截），完整的那颗在 title 里。
+  ".kb-v13-embedcrystal{max-width:200px;overflow:hidden;text-overflow:ellipsis;" +
+  "  white-space:nowrap;}" +
+  // ▲ / ▼：把名字收起来 / 放出来。**两颗，不是一颗轮着切**——一颗按钮上塞两个
+  // 动作的话，"点下去是哪一个"没法从屏幕上读出来（09-20 那次「右键只有金色线」
+  // 栽的就是这一类）。摆在名字**左边**（用户点名要的位置）。
+  ".kb-v13-embedname{cursor:pointer;font:inherit;font-size:9px;line-height:1;" +
+  "  padding:2px 3px;border-radius:4px;border:1px solid rgba(0,200,255,.22);" +
+  "  background:none;color:rgba(170,205,230,.8);}" +
+  ".kb-v13-embedname:hover{color:rgba(224,240,255,1);border-color:rgba(0,200,255,.5);}" +
+  // `.on` 标的是**当前这一档**：收起时 ▲ 亮、展开时 ▼ 亮。看一眼就知道现在在哪一档。
+  ".kb-v13-embedname.on{background:rgba(0,140,220,.3);color:rgba(228,242,255,.95);}" +
   // 3.0 刀 16：这两颗「选框 / 删除」**开着的时候以前看不出来**——只有字变了。
   // `syncBar` 一直在加 `.on`，而这里从来只定义过 `.kb-v13-embedmode.on`。
   // 背后挂上"删掉笔记里的 [[链接]]"这种动作之后，「选框正开着」必须在屏幕上
@@ -306,6 +326,52 @@ export function createEmbedStory(ctx, opts = {}) {
     if (opts.onPickCrystal) opts.onPickCrystal();
   });
 
+  // 3.0 刀 43（用户 09-30 第 2 条）：晶体名太长会把后面的按钮**挤出窗外**
+  // （窗外层 overflow:hidden，顶出去就点不到了）。给一对 ▲ / ▼ 摆在名字
+  // **左边**——▲ 收起名字，▼ 放出来。
+  //
+  // ⚠️ **收的是名字，不是那颗按钮。** 换晶体是这扇窗唯一的入口（幽灵节点点的
+  //    也是它），顺手把入口一起藏掉，就是 09-20 那次「入口在需要它的那一刻恰好
+  //    不可见」——那一课在这扇窗里记着好几处。收起后按钮缩成「晶体」两个字。
+  //
+  // ⚠️ **状态落进偏好，不留在内存。** 这扇窗是**每次打开重建**的，留在内存里
+  //    等于"每开一次都要重收一次"，而用户收它正是因为名字**一直**很长。
+  const nameMinBtn = EL("button", "kb-v13-embedname", "▲");
+  nameMinBtn.type = "button";
+  nameMinBtn.title = "把晶体名收起来。名字太长会把后面的按钮挤出窗外。";
+  const nameMaxBtn = EL("button", "kb-v13-embedname", "▼");
+  nameMaxBtn.type = "button";
+  nameMaxBtn.title = "把晶体名放出来。";
+  // 默认**显示**：坏值一律当显示——少显示的代价是"我明明有名字却看不见"。
+  const nameShown = () =>
+    !(ctx.state && ctx.state.prefs && ctx.state.prefs.storyBarName === false);
+  /**
+   * 按当前偏好把名字重新写一遍。**在 render() 里调**（那里才知道这一屏看的是
+   * 哪颗晶体）。⚠️ 它读 `view.path`，而 `view` 是**这个作用域里后声明的 const**
+   * ——所以只能在 render() 里调，绝不能在按钮这一段就试调一次（TDZ，这个仓
+   * 栽过两次）。
+   */
+  function paintName() {
+    const on = nameShown();
+    const full = view.path && view.path.length ? view.path[view.path.length - 1] : "";
+    crystalBtn.textContent = on ? "晶体：" + (full || "?") : "晶体";
+    crystalBtn.title = on
+      ? "换一颗晶体看。结构窗固定看这颗，下次打开还是它。"
+      : "换一颗晶体看。现在是「" + (full || "?") + "」——名字收起来了，" +
+        "点左边那颗 ▼ 放出来。";
+    nameMinBtn.classList.toggle("on", !on);
+    nameMaxBtn.classList.toggle("on", on);
+  }
+  function setNameShown(on) {
+    // ⚠️ 写的是**真 ctx** 的 prefs。`fake` 只影子那几个单槽位字段，prefs 不在
+    //    名单里——写 fake.state 反而会造出一份只活在窗口生命周期里的副本。
+    if (ctx.state) ctx.state.prefs = { ...(ctx.state.prefs || {}), storyBarName: !!on };
+    if (ctx.savePrefs) ctx.savePrefs();
+    paintName();
+  }
+  nameMinBtn.addEventListener("click", () => setNameShown(false));
+  nameMaxBtn.addEventListener("click", () => setNameShown(true));
+
   // 3.0 刀 13：右键藏起来的卡，出口在这儿。
   // **只在真有东西可显的时候出现**（与「删除实线」同一条规矩）——摆一颗点了
   // 没反应的按钮比不摆更糟。不带计数：库那颗「删除实线（n）」的数说的是
@@ -364,6 +430,9 @@ export function createEmbedStory(ctx, opts = {}) {
   // `delCardBtn` 紧挨着 `delBtn`：两颗永不同时出现（一个管线、一个管卡），
   // 占的是同一个视觉位置——"框住之后能删什么"就在这一处。
   bar.append(
+    // ▲ / ▼ 排在名字**左边**（用户点名要的位置）——它们管的就是紧挨着的那三个字。
+    nameMinBtn,
+    nameMaxBtn,
     crystalBtn,
     modeBtn,
     kindBtn,
@@ -716,7 +785,9 @@ export function createEmbedStory(ctx, opts = {}) {
     view.path = Array.isArray(path) ? path.slice() : [];
     // 那把「金线记在哪颗名下」的钥匙跟着这一屏走（见 makeFacade 里的警告）。
     fake.state.crystalPath = view.path;
-    crystalBtn.textContent = "晶体：" + (view.path[view.path.length - 1] || "?");
+    // 3.0 刀 43：名字的写法收在 `paintName` 里——它要同时管那颗 ▲/▼ 的亮灭，
+    // 两处各写一遍的话，收起之后换一颗晶体就会自己"弹回来"。
+    paintName();
     if (!view.path.length) {
       world.textContent = "";
       say("还没选看哪颗晶体。");

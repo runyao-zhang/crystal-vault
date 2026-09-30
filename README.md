@@ -51,6 +51,7 @@ The annoying part of reading is *"what does this actually look like in my vault?
 
 - **A glance, not a departure.** Switching away is *leaving*; a window beside you is just a glance.
 - **Pin it to one crystal.** The 「晶体：…」 button in its top bar picks which crystal it watches, and it is still watching it next time.
+  When the name is too long, click the **▲** to its left to put the name away (the button shrinks to just 「晶体」); **▼** brings it back. That choice is remembered, so you do not have to re-collapse it on the next open.
 
 ### Draw: view / write
 
@@ -273,6 +274,9 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.84** · Fixes: **a long crystal name in the structure window's top bar pushed the buttons behind it out of the window**. The bar did not wrap and had no width cap, and the crystal name is the **only thing in it that grows** — so a long name shoved everything rightward, and since the window's outer element is `overflow:hidden`, **the pushed-out buttons could no longer be clicked**. The name is now capped (ellipsis when it overruns; the full one is in the tooltip) and the bar itself **wraps at the edge** — two guards, so a button can never leave the window again. A **▲ / ▼** pair now sits to the left of the name: **▲ puts the name away, ▼ brings it back** (collapsed, that button shrinks to just 「晶体」 — the way to switch crystals stays reachable). That choice is **remembered in your preferences**, so you do not have to re-collapse it every time you open the window.
+(One aside: if you still see the "an empty box cannot be dragged" bug that 1.3.83 fixed, your plugin probably did not reload — toggle it off and on again in *Settings → Community plugins*.)
 
 **1.3.83** · Four things, all in the storyline / structure window (user, 09-30).
 
