@@ -68,6 +68,7 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 ### Right-click: three places, three results
 
+- **Which side a blue line attaches to is decided from the geometry by default**: two cards stacked one above the other run bottom-to-top, two side by side run right-to-left. To route one differently, drag it from the side you want in **write** mode — **that one line then follows your choice** (anything dragged by hand always beats the default).
 - **Right-click a card → hide every link going into and out of it.**
   When one card has a dozen lines running through it, clearing them all out leaves the rest of the structure readable at a glance. **Right-click it again to bring them back.** While anything is hidden, a 「**显示全部**」 (Show all) button appears in the top bar and restores everything at once.
 - **Right-click on a gold line → enter link-edit mode.** Two buttons appear in the top bar, 「**选框：线**」 and 「**选框**」; drag to box in some lines, and a 「**删除实线（N）**」 (Delete lines) button appears. (Click the first one and it turns into 「**框：卡**」 — that mode is for **moving a batch of cards at once**, see below.)
@@ -274,6 +275,9 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.86** · Fixes: **a blue line always attached on the left and right sides, wherever the cards sat**. Two cards stacked one above the other still had their line leave the right edge and loop back into the left. The cause was the fallback used when nothing was set by hand: it was hard-wired to left/right (whichever card is further left gets the left side). It now **picks the facing side from the geometry**: cards stacked vertically run bottom-to-top, cards side by side run right-to-left.
+There is a second layer to this, and it is where switching computers comes in: **the attachment you set by hand lives in that machine's view state, not with the cards** — so carrying your material to another computer leaves every one of them behind, and the whole screen degrades to left/right. With the geometry-based default, **the default attachment is derived from the layout**, identical on any machine; the ones you dragged by hand still win over it (manual > automatic).
 
 **1.3.85** · Fixes: **clicking a box's name stopped renaming it**, introduced by 1.3.83. That version made **the whole box** start a drag, and the drag took pointer capture **the instant you pressed**. So on a press-and-release-in-place over the name: the **press targeted the name, the release targeted the whole box**, and since a `click` targets the **nearest common ancestor** of the two, it landed on the box — the name could not be found and renaming died on the spot. (Before 1.3.83 this only worked on **empty** boxes: those returned early and never captured. Opening that early return up also tore down a door that "empty boxes can be dragged" and "click the name to rename" were sharing.) The fix follows the lesson already written in panzoom / holodrag: **capture only after 4px**. A press that never really dragged changes nothing at all.
 
