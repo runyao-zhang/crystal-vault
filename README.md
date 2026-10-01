@@ -313,6 +313,19 @@ One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **
 > - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
 > - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
 
+**1.3.89** · Two fixes, both fallout from 1.3.88:
+
+**① Blue manual boxes still did not follow when you dragged a gold box.** In your words: *"by the time I open the structure window the cards have moved well outside the blue box, but the box still counts them as members — so moving the blue box drags along cards that aren't physically in it."*
+
+The cause was the test 1.3.88 used: it asked whether the blue box's **centre** fell inside the gold rectangle. But **a blue box is hand-drawn and is usually bigger than the tight gold box** — once it extends past one side, its centre lands outside, and that drag **found no followers at all**, silently.
+
+It now goes by **membership**: which gold box a blue box lives in is decided by whether **all the cards it holds** are inside that box. That has nothing to do with how you drew it. Two things come along with it:
+
+- **Dragging an outer gold box now carries blue boxes living further in** (dragging A moves the cards inside C too).
+- The "a blue box may not leave its gold box" rule uses the same test — it had exactly the same flaw, silently dropping the constraint once the blue box was drawn a little larger.
+
+**② A gold solid line now sits under a gold box's title bar.** With boxes nested, there was nothing separating a box's name from the data below it — you could not tell at a glance whether that line was *this* box's header or something belonging to a sub-box inside.
+
 **1.3.88** · **Gold boxes are split up, one level at a time.** A gold box used to swallow the folder's **entire subtree** — so when A contained B1 and B2, and B2 contained C, the screen showed one single box for A with all four levels of cards flattened together. **The hierarchy was invisible**, which is the one thing this window exists to show.
 
 Now **every folder in the subtree gets its own box**, so they nest naturally. Inside a box, the layout splits left to right the way you asked:

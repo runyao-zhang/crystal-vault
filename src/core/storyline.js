@@ -32,6 +32,10 @@ import {
   rectOf,
   innermostCrystalBox,
   clampInto,
+  // 3.0 刀 48：蓝框"住在哪个金框里"的判据——**看成员不看位置**（见那边）。
+  // 抽到 storyboxes.js 是为了能单独验：1.3.88 那版用位置判，用户一报就中。
+  crystalHomeOf,
+  isUnderBox,
   // 3.0 刀 30：归属判定整批走 `assignCards`——单张那条路已经并进去了
   // （"批里只有一张"是它的特例）。原来那三个单张的入口
   // （`boxOfPath` / `addCardToBox` / `removeCardFromBox`）已经删掉，
@@ -653,46 +657,66 @@ export function renderStorylineStage(ctx, path) {
 
       // 3.0 刀 47：两种框各自的"容器"关系（用户 10-01 第 3、4 条）。
       //
-      // 第 3 条「蓝色收纳方框不可以移出金色方框之外」→ `blueClamp`：
-      //   判据 = 蓝框**中心**落在哪个金框里（倒着扫 = 最里面那个）。一个都没落进
-      //   （比如它罩着的是**这一层自己的卡**，那本来就没有金框）就不设限——
-      //   那种蓝框本来就是自由的，硬塞一个约束反而拖不动。
-      //
+      // 第 3 条「蓝色收纳方框不可以移出金色方框之外」→ `blueClamp`。
       // 第 4 条「拖动金框，里面所有元素跟随移动」→ `followers`：
       //   卡片本来就跟着走（上面 `start` 是按 `paths` 拍的快照），漏的是
       //   **蓝色收纳方框**——它是个自己记着矩形的容器，不带它走的话，
       //   一拖金框，里面的卡全跑了、那个蓝框还钉在原地。
       //
       // 位置表用上面那份 `now`（就是这一帧屏幕上那些卡的位置），不重算。
+      //
+      // ⚠️ **1.3.89 修过一次，判据从"位置"换成"成员"。**
+      //
+      // 第一版问的是"蓝框的**中心**落不落在金框矩形里"。用户 10-01 报「拖金框，
+      // 蓝框没跟着走」——因为**蓝框是你手画的，常常比那个贴身的金框大**，
+      // 一边探出去之后**中心就跑到金框外面去了**，于是这一趟一个跟随者都找不到，
+      // 而且一声不响。
+      //
+      // 现在问的是**成员关系**：一个蓝框"住在"哪个金框里，看它收的那几张卡
+      // 是不是**全都在**那个金框的 `paths` 里（`paths` 是递归的，所以"全都在"
+      // 就等于"它是那颗文件夹（或它下面）的"）。这个判据**跟你怎么画无关**，
+      // 而且和归属判定（`hitBoxAt` / `assignCards`）天然一致。
       const allBoxes = boxesOf(ctx, cp);
-      const blueClamp = box.crystal
-        ? null
-        : (() => {
-            const me = rectOf(box, now, NODE_W, NODE_H);
-            if (!me) return null;
-            const c0 = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
-            for (let i = allBoxes.length - 1; i >= 0; i--) {
-              const b = allBoxes[i];
-              if (!b.crystal || b.collapsed) continue;
-              const r = rectOf(b, now, NODE_W, NODE_H);
-              if (!r) continue;
-              if (c0.x >= r.x && c0.x <= r.x + r.w && c0.y >= r.y && c0.y <= r.y + r.h) return r;
-            }
-            return null;
-          })();
+      /** 兜底判据（只在蓝框**一个成员都没有**时用）：中心落在金框里吗。 */
+      const centreInside = (mb, r) => {
+        const mr = rectOf(mb, now, NODE_W, NODE_H);
+        if (!mr) return false;
+        const fx = mr.x + mr.w / 2;
+        const fy = mr.y + mr.h / 2;
+        return fx >= r.x && fx <= r.x + r.w && fy >= r.y && fy <= r.y + r.h;
+      };
+
       const followers = [];
+      let blueClamp = null;
       if (box.crystal) {
         const r = rectOf(box, now, NODE_W, NODE_H);
-        const els = ctx._boxEls || new Map();
-        if (r) {
-          for (const mb of allBoxes) {
-            if (mb.crystal || mb.collapsed) continue;
-            const mr = rectOf(mb, now, NODE_W, NODE_H);
-            if (!mr) continue;
-            const fx = mr.x + mr.w / 2;
-            const fy = mr.y + mr.h / 2;
-            if (fx < r.x || fx > r.x + r.w || fy < r.y || fy > r.y + r.h) continue;
-            followers.push({ id: String(mb.id), x: mr.x, y: mr.y, node: els.get(String(mb.id)) });
+        for (const mb of allBoxes) {
+          if (mb.crystal || mb.collapsed) continue;
+          const home = crystalHomeOf(allBoxes, mb.paths);
+          // home 是这个金框自己、或它下面的某一层 → 里面所有卡都跟着这个框走，
+          // 所以这个蓝框也必须跟着走（**祖先也要跟**：拖 A 的时候 C 里的卡同样在动）。
+          if (!(home ? isUnderBox(allBoxes, home, box) : r && centreInside(mb, r))) continue;
+          const mr = rectOf(mb, now, NODE_W, NODE_H);
+          if (!mr) continue;
+          followers.push({
+            id: String(mb.id),
+            x: mr.x,
+            y: mr.y,
+            node: (ctx._boxEls || new Map()).get(String(mb.id)),
+          });
+        }
+      } else {
+        // 蓝框不许移出它所在的那个金框。**同一个成员判据**——位置判据在这边
+        // 一样会漏（蓝框画大一点就不再"落在"金框里了，于是约束静默失效）。
+        const target = crystalHomeOf(allBoxes, box.paths);
+        if (target) blueClamp = rectOf(target, now, NODE_W, NODE_H);
+        else if (!(Array.isArray(box.paths) ? box.paths.length : 0)) {
+          // 空框没成员可问，退回位置判据。
+          for (let i = allBoxes.length - 1; i >= 0 && !blueClamp; i--) {
+            const b = allBoxes[i];
+            if (!b.crystal || b.collapsed) continue;
+            const r = rectOf(b, now, NODE_W, NODE_H);
+            if (r && centreInside(box, r)) blueClamp = r;
           }
         }
       }

@@ -441,6 +441,48 @@ export function innermostCrystalBox(boxes, path) {
 }
 
 /**
+ * 「这几张卡**整个**住在哪个金框里」——**最深**那个装得下它们全部的金框。
+ *
+ * 用户 10-01 第 3、4 条的判据。**为什么不用位置判**：蓝框是用户**手画**的，
+ * 常常比那个贴身的金框大，一边探出去之后"中心落在金框里"就不再成立，
+ * 跟随和约束会**一声不响地失效**（1.3.88 就是这么错的）。成员关系跟你怎么画无关。
+ *
+ * `paths` 是递归的，所以"全都在里面"就等于"它是那颗文件夹（或它下面）的"。
+ *
+ * @param {Array} paths 这个蓝框收的卡片路径
+ * @returns {object|null} 一个都装不下（成员横跨两个文件夹、或者压根没成员）→ null
+ */
+export function crystalHomeOf(boxes, paths) {
+  const mine = Array.isArray(paths) ? paths : [];
+  if (!mine.length) return null;
+  let best = null;
+  for (const b of boxes) {
+    if (!b.crystal) continue;
+    if (!mine.every((p) => b.paths.indexOf(p) >= 0)) continue;
+    if (!best || (b.depth || 0) > (best.depth || 0)) best = b;
+  }
+  return best;
+}
+
+/**
+ * `G` 是不是 `home` 自己、或者它的**某一层祖先**。
+ *
+ * 跟随判据要放行祖先：拖 A 的时候 C 里的卡也在一起动，所以住在 C 的那个蓝框
+ * 同样得跟着走。只认"等于"的话，拖外层金框时内层的蓝框会留在原地。
+ *
+ * 圈数上限防数据里出现环（手改过视图状态就可能）——没有它就是一次死循环。
+ */
+export function isUnderBox(boxes, home, G) {
+  if (!home || !G) return false;
+  const byId = new Map(boxes.map((b) => [String(b.id), b]));
+  for (let cur = home, i = 0; cur && i < 64; i++) {
+    if (String(cur.id) === String(G.id)) return true;
+    cur = cur.parent == null ? null : byId.get(String(cur.parent));
+  }
+  return false;
+}
+
+/**
  * 把一个 `w×h` 的东西夹进矩形 `r` 里（用户 10-01 第 3 条：蓝框不许移出金框）。
  *
  * 东西**比框还大**时不去硬塞，就贴着左上角——"挪不动"读起来是对的，
