@@ -784,6 +784,18 @@ function writeBucket(ctx, path) {
   return v.boxes[k];
 }
 
+/**
+ * 3.0 刀 51：给一个框盖上「刚改过」的时间戳。
+ *
+ * 开库合并时**逐框比它**（`boxfile.js` 的 `loadBoxFiles`）：新的那份说了算。
+ * **凡是改到框上任何字段的地方都要盖**——位置、成员、名字、收起状态。
+ * 漏掉一处的表现是「那一种改动会被旧文件盖回去」，而且**只在重开之后**才显形。
+ */
+const touch = (b) => {
+  if (b) b.savedAt = Date.now();
+  return b;
+};
+
 function afterWrite(ctx) {
   if (ctx.flushViewState) ctx.flushViewState();
   // 3.0 刀 35：框变了就**排队把它那一层的边车写出去**（防抖，见 boxfile.js）。
@@ -848,6 +860,7 @@ export function createBox(ctx, paths, center) {
     y,
     w: DEFAULT_BOX_W,
     h: DEFAULT_BOX_H,
+    savedAt: Date.now(),
   });
   afterWrite(ctx);
   return id;
@@ -864,6 +877,7 @@ export function setBoxRect(ctx, id, rect) {
   if (rect && Number.isFinite(Number(rect.y))) b.y = Number(rect.y);
   if (rect && Number.isFinite(Number(rect.w))) b.w = Math.max(MIN_BOX_W, Number(rect.w));
   if (rect && Number.isFinite(Number(rect.h))) b.h = Math.max(MIN_BOX_H, Number(rect.h));
+  touch(b); // 位置变了 = 这一笔是新的（合并时靠它压过旧文件）
   // 拖动过程中**不重画**（那一块可能正拿着指针捕获），所以这里只落盘，
   // 由调用方自己改 DOM。同 storyline 里那段框拖动。
   if (ctx.flushViewState) ctx.flushViewState();
@@ -893,6 +907,8 @@ export function renameBox(ctx, id, name) {
   const n = String(name || "").trim().slice(0, 80);
   if (!n) return;
   v.boxNames[String(id)] = n;
+  // 名字也存在边车里，所以改名同样要盖戳（不然别的机器上改的名会被旧文件顶掉）。
+  touch(findBox(ctx, id));
   afterWrite(ctx);
 }
 
@@ -1014,6 +1030,7 @@ export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
     const keep = b.paths.filter((p) => !want.has(p) || want.get(p) === String(b.id));
     if (keep.length !== b.paths.length) {
       b.paths = keep;
+      touch(b);
       changed = true;
     }
   }
@@ -1025,6 +1042,7 @@ export function assignCards(ctx, targets, boxes, pos, NODE_W, NODE_H) {
     if (!box) continue;
     if (box.paths.indexOf(p) < 0) {
       box.paths.push(p);
+      touch(box);
       changed = true;
     }
   }
@@ -1039,6 +1057,7 @@ export function toggleBox(ctx, id) {
   const i = v.collapsedBoxes.indexOf(s);
   if (i >= 0) v.collapsedBoxes.splice(i, 1);
   else v.collapsedBoxes.push(s);
+  touch(findBox(ctx, id)); // 收起状态也在边车里
   afterWrite(ctx);
 }
 

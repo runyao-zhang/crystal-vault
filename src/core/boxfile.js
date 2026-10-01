@@ -93,6 +93,10 @@ export function serialize(list, names, collapsed) {
       w: Number(b.w) || 0,
       h,
       collapsed: col.has(id),
+      // 3.0 刀 51：**这一笔是什么时候改的。** 开库合并时逐框比它（见 `loadBoxFiles`）。
+      // 没有它的话，"文件优先"就是无条件的——而文件并不总是新的（写边车是异步的，
+      // 关库那条路还不保证跑完），旧文件会盖掉刚拖好的位置。
+      savedAt: Number(b.savedAt) || 0,
       // 成员是**卡片路径**（宿主里那个相对 vault 根的路径）。同一个库在另一台
       // 机器上路径一样，所以它跟着文件走是对的。
       paths: (Array.isArray(b.paths) ? b.paths : []).filter((p) => typeof p === "string" && p),
@@ -146,6 +150,8 @@ export function parse(text) {
       w: Number(b.w) || 0,
       h: Number.isFinite(h) ? h : 0,
       collapsed: !!b.collapsed,
+      // ⚠️ **键序要和 `createBox` / `serialize` 一致**（同上面那条警告）。
+      savedAt: Number(b.savedAt) || 0,
     });
   }
   return out;
@@ -350,34 +356,95 @@ export async function loadBoxFiles(ctx) {
     // 已经排进待写表的那一层跳过——不跳的话，刚摆好的框会被几百毫秒前
     // 读到的那份旧文件盖掉，而且**看不出来是谁盖的**。
     if (dirty.has(key)) continue;
-    const boxes = list.map((b) => ({ id: b.id, name: b.name, paths: b.paths, x: b.x, y: b.y, w: b.w, h: b.h }));
-    // 比较**走 `serialize`**，别拿 `JSON.stringify` 直接比两个对象：
-    // 键序不一样（`createBox` 造的和大括号里写的顺序不同）就永远判"变了"，
-    // 于是"文件优先"变成无条件的——本地那份再新也一定被盖掉，没有任何保护。
-    // `serialize` 两侧都过一遍，形状和键序就都统一了。
-    const same =
-      serialize(v.boxes[key], v.boxNames, v.collapsedBoxes) ===
-      serialize(boxes, v.boxNames, v.collapsedBoxes);
-    if (!same) {
-      v.boxes[key] = boxes;
+    const boxes = list.map((b) => ({
+      id: b.id,
+      name: b.name,
+      paths: b.paths,
+      x: b.x,
+      y: b.y,
+      w: b.w,
+      h: b.h,
+      savedAt: b.savedAt,
+    }));
+
+    // ---- 3.0 刀 51：**逐框比时间，谁新听谁的。** ----
+    //
+    // ⚠️⚠️ 原来是"**文件无条件优先**"。那条规矩有一个它自己写明了的前提：
+    //      **文件永远是较新的那一份**。而它不是——
+    //
+    //      写边车是**异步**的，而且关库那条路上 `flushBoxFiles(ctx)` **没有被 await**
+    //      （`closeFullscreen` 整个是同步函数，没地方 await）。只要那一笔没走完，
+    //      文件就停在旧值上；而**本地那份（视图状态）是同步写掉的，是新的**。
+    //
+    //      于是开库时旧文件盖掉新状态：**框跳回原处、卡片留在新位置**，
+    //      看上去就是「卡片跑到蓝框外面了」——而且**只在重开之后**才出现
+    //      （不关库时读的是内存里那份，一切正常）。用户 10-01 报的就是它。
+    //
+    // 现在每一笔都带 `savedAt`，合并时逐框取新的那个：
+    //   · 文件的不比我旧 → 听文件的（**平手也让文件赢**：它本来就是为跨机器
+    //     准备的那一份，没改过的时候以它为准最稳）；
+    //   · 我的严格更新 → 留着我的，并**把文件补写出去**（不然它永远追不上）。
+    //
+    // 这样"某一笔写丢了"不再会毁掉用户的摆法——不管它是为什么丢的。
+    const local = Array.isArray(v.boxes[key]) ? v.boxes[key] : [];
+    const localById = new Map(local.map((b) => [String(b.id), b]));
+    const merged = [];
+    let contentChanged = false;
+    let needWrite = false;
+    for (const fb of boxes) {
+      const lb = localById.get(String(fb.id));
+      if (!lb) {
+        merged.push(fb); // 文件里有、本地没有（别的机器新建的）
+        contentChanged = true;
+        continue;
+      }
+      localById.delete(String(fb.id));
+      const fa = Number(fb.savedAt) || 0;
+      const la = Number(lb.savedAt) || 0;
+      // ⚠️ **两边都是 0 = 升级上来的老数据，谁都没有戳**（1.3.93 之前写的）。
+      //    这时**听本地的**：本地那份是这台机器上一眼看到的样子（视图状态是
+      //    同步写掉的），而文件恰恰可能是**写丢了的那一份**——用户报的正是这个。
+      //    代价说清楚：两台机器都还是老数据、又同时升上来时，这一下是**一次硬币**
+      //    （本地赢、文件被覆盖）。之后任何一次改动都会盖上戳，就再不会走到这一支。
+      const fileWins = fa > la || (fa === la && fa > 0);
+      if (fileWins) {
+        merged.push(fb);
+        // 比较**走 `serialize`**，别拿 `JSON.stringify` 直接比两个对象：
+        // 键序不一样（`createBox` 造的和大括号里写的顺序不同）就永远判"变了"。
+        if (
+          serialize([lb], v.boxNames, v.collapsedBoxes) !==
+          serialize([fb], v.boxNames, v.collapsedBoxes)
+        ) {
+          contentChanged = true;
+        }
+        // 名字和收起状态是**按 id 索引的全局表**（id 全局唯一），文件赢了才并进去。
+        if (fb.name && v.boxNames[fb.id] !== fb.name) {
+          v.boxNames[fb.id] = fb.name;
+          changed = true;
+        }
+        const at = v.collapsedBoxes.indexOf(fb.id);
+        if (fb.collapsed && at < 0) {
+          v.collapsedBoxes.push(fb.id);
+          changed = true;
+        } else if (!fb.collapsed && at >= 0) {
+          v.collapsedBoxes.splice(at, 1);
+          changed = true;
+        }
+      } else {
+        merged.push(lb); // 本地更新：留着，等下把文件补上
+        needWrite = true;
+      }
+    }
+    // 本地有、文件里没有的（这一轮还没写出去 / 文件被手删过）
+    for (const [, lb] of localById) {
+      merged.push(lb);
+      needWrite = true;
+    }
+    if (contentChanged || merged.length !== local.length) {
+      v.boxes[key] = merged;
       changed = true;
     }
-    // 名字和收起状态是**按 id 索引的全局表**（id 全局唯一，见 createBox），
-    // 所以这两样直接并进去，与"文件优先"同一条规矩。
-    for (const b of list) {
-      if (b.name && v.boxNames[b.id] !== b.name) {
-        v.boxNames[b.id] = b.name;
-        changed = true;
-      }
-      const at = v.collapsedBoxes.indexOf(b.id);
-      if (b.collapsed && at < 0) {
-        v.collapsedBoxes.push(b.id);
-        changed = true;
-      } else if (!b.collapsed && at >= 0) {
-        v.collapsedBoxes.splice(at, 1);
-        changed = true;
-      }
-    }
+    if (needWrite) queueBoxFile(ctx, chain);
   }
   return changed;
 }

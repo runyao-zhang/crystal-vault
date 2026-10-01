@@ -347,6 +347,10 @@ function sanitizeOneBox(b, seenIds, out) {
     // 手动框的大小是**用户自己定的**（拍板的 B），所以它和 x/y 一样必须活着。
     w: num(b.w, 360),
     h: num(b.h, 260),
+    // ⚠️ 3.0 刀 51：**这一条不加，下面那套「谁新听谁的」整个是死的。**
+    //    `sanitizeOneBox` 是**逐个字段重建**的（同 `normalizeCard` 那个老坑），
+    //    漏掉它 = 每次开库都把时间戳抹成 0，于是合并时永远判「文件更新」。
+    savedAt: num(b.savedAt, 0),
   });
 }
 

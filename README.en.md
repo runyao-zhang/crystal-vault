@@ -305,6 +305,25 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.93** · Fixes **a blue manual box jumping back to an old position when you quit Obsidian and reopen** — while everything looks correct as long as Obsidian stays open.
+
+In your words: *"as long as I do not close Obsidian everything is fine; close it and open it again and the bug is back."* Those two halves pin it down: **the follow was not broken, the write never reached the file.**
+
+The cause is the persistence rule itself: the sidecar (`.crystal-boxes.json`) was **"the file always wins"**. That rule carries its own stated precondition — **the file is always the newer of the two**. It is not:
+
+> Writing the sidecar is **asynchronous**, and the flush on the close path **is never awaited** (`closeFullscreen` is an entirely synchronous function). If that write does not finish, the file stays at its old value — while **the view state is written synchronously, and is newer**.
+
+So on open the stale file overwrites the newer state: **the box jumps back, the cards stay where they were**, which reads as *"the cards are outside the blue box"* — **and only after a restart**.
+
+Every box now carries a timestamp, and opening the vault **compares them box by box — newest wins**:
+
+- the file is not older than mine → the file wins (**on a tie the file wins too**; it is the copy meant to travel between machines);
+- mine is strictly newer → mine stays, **and the file is rewritten to match** (otherwise it would never catch up);
+- neither side has a timestamp (data written before 1.3.93) → **mine wins**. Mine is what you last saw on this machine, and the file is precisely the copy that may have lost a write.
+
+> **A lost write can no longer destroy your layout** — whatever the reason it was lost.
+> The box in your vault (m:6) is right now in exactly that state — view state says 2667, sidecar says 2730 — and **this version will simply take the newer one on open.** You do not have to drag it again.
+
 **1.3.92** · **Dragging a gold box now carries blue boxes stored on deeper layers.** (This is the one the previous versions kept missing.)
 
 **Blue boxes are stored per layer** — wherever you drew it is where it is recorded. Gold boxes, since 1.3.88, exist **on every layer**. Put those two together and you get a shape you hit constantly:
