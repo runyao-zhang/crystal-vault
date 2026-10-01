@@ -1,503 +1,726 @@
-# Crystal Vault
+# Crystal Vault（晶体库）
 
-Turn a folder of Markdown cards into a **living crystal vault** — a place where you can see the structure of what you know, follow the links between ideas, and test yourself on what you wrote.
+把一文件夹的 Markdown 卡片变成一座**能看的知识晶体库**。
 
-<!-- ⚠️ **Do not put a `height` attribute on this image.**
-     GitHub's web editor always inserts both `width="…" height="…"` when you drag
-     an image in. With both present the browser treats them as the *display* size,
-     and Obsidian's plugin detail pane only clamps the width (`max-width:100%`) —
-     nothing resets the height — so the height stays pinned at 1016px while the
-     width shrinks and the picture comes out **squashed**.
-     Width alone: the browser derives the height from the intrinsic ratio, so it
-     scales cleanly at any container size. -->
-<img width="1917" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/54550694-81b4-418f-a394-efd485701c1a" />
+截图预览：
 
-Its real home, though, is the **literature reader**: read PDFs, images and Markdown on one side, and build the structure out of what you read on the other. Finish a chapter and the chapter's structure is already there. The reader's **desk** lays it out as draggable, resizable windows; the **Structure window** keeps the vault's structure beside the page you are reading, so you never have to leave it.
+<!-- ⚠️ **不要给这张图写 `height` 属性。**
+     GitHub 的网页编辑器拖图进来时会自动塞上 `width="…" height="…"` 两个；
+     两个都给的话，浏览器把它们当成**显示尺寸**，而 Obsidian 的插件详情页只用
+     `max-width:100%` 压宽度、没有任何规则去动 height——于是高度死守原值
+     （1016px）、宽度被压窄，图当场被**压扁**。
+     只给 width：高度由浏览器按原图比例算出来，容器怎么窄都不变形。 -->
+<img width="1917" alt="晶体库概览" src="https://github.com/user-attachments/assets/0a4f224e-f3fc-4a80-8a1e-ea524075750f" />
 
-Your cards stay plain Markdown in plain folders. Nothing is locked in a database, and nothing leaves your vault.
+而它真正的战场是**文献模式**：一边读 PDF / 图片 / Markdown，一边把读到的东西当场立成结构——
+读完一章，那一章的结构也就搭好了。**桌面**把这些摆成一桌能拖能缩的窗，
+**结构窗**让库的结构跟你正在读的那一页并排待着，不用切走。
 
-> 中文说明见 [README.zh.md](README.zh.md)。
+卡片就是普通的 Markdown，文件夹就是文件夹。没有任何东西被锁进数据库，也不出你的 vault。
 
-> **Note on the interface:** the plugin's UI labels are currently **Chinese only** (the reader button says 文献, the structure window says 结构窗, and so on). This README names those labels verbatim so you can find them. Localisation has not been done yet.
+> English: [README.en.md](README.en.md)。
 
 ---
 
-## The main thing: the reader's desk
+## 主功能：文献模式 · 桌面
 
-The reader has two layouts. **Grid** spreads N pages across one screen (for scanning). **Desk** gives each page its own window — and Desk is the one you will live in, because it hands the *"I want to see several things at once"* problem back to you.
+阅读器有两种版式：**网格**是一屏摊开 N 页（翻页扫读用），**桌面**是一页一扇窗
+——后者是主力，因为它把「我要同时看几样东西」这件事交回给你自己。
 
-- **One page, one window, arranged by you.** Drag the title bar to move it, the corner grip to resize it — and **the layout is still there next time you open the reader**.
-- **Not just document pages.** Cards, structure and web pages are all the same kind of window, sharing the same drag / resize / stow. A card window shows that card's **concept** across the top, formulas and all.
-- **The dock** (button in the top bar). A strip slides out on the left and acts as the rack for those windows: drag a window onto it — or press its **收纳 / Stow** button — and it is put away with an entry left behind. Click the entry to bring it back. **Stowed windows survive closing the reader.**
-- **External tabs** (the `+` at the top of the dock). Type a URL and a course site or docs page sits beside the page you are reading, draggable and stowable like any other window.
+- **一页一扇窗，摆法自己定。** 拖标题栏挪位置、拉右下角改大小，
+  **关掉阅读器再打开，摆法原样还在**。
+- **桌上不只有文献页。** 卡片、结构、网页都是同一种窗，共用同一套拖、缩、收。
+  卡片窗顶上会显示这张卡的**概念**，那行里的公式照常渲染。
+- **收纳栏**（顶栏那颗按钮）。左边出来一条竖栏，是这些窗的架子：把窗拖到栏上，
+  或者按窗上的「收纳」，它就收起来、栏里留一条，点一下再拿出来。
+  **收着的窗，关掉阅读器也还在库里。**
+- **外部标签页**（收纳栏最上面那颗 `+`）。填一条网址，网课、文档站就挂在你正读的
+  那一页旁边，和别的窗一样能拖能收。
 
-  > ⚠️ Whether a site *can* be embedded is decided by that site, not by this plugin — sites may refuse to be framed (Google does, across the board). That is a browser rule and there is no way around it. So the window always carries an **Open in browser** button: embeddable sites work as windows, and non-embeddable ones still have a way out. You never get a dead white box.
+  > ⚠️ 网页**嵌不嵌得进来由那个站说了算**，不是这个插件说了算：站点可以用响应头
+  > 拒绝被别的页面嵌（Google 系一律拒绝），这是浏览器的规矩，绕不过去。
+  > 所以那扇窗里常驻一颗「**用系统浏览器打开**」——嵌得进去当窗用，嵌不进去也始终有出路，
+  > 不会给你一个白框。
 
-- **The right-hand column tucks away too.** The same button squeezes the notes column out of the way when you want to read wider.
+- **右栏也能收。** 同一颗「收纳栏」按钮还能把右边「边看边记」那一栏**挤回去**，读宽一点。
 
-### ＋ 页: Markdown documents are paginated by line
+### ＋ 页：Markdown 是按行分页的
 
-Each press of 「**＋ 页**」 (Add page) puts the **next slice** of the document on the desk. For a Markdown document a "slice" is a **range of lines** — it picks up at the last window's ending line and runs 40 lines further.
+顶栏那颗「**＋ 页**」每按一次，就把这份文献的**下一段**摆到桌面上。
+对 Markdown 来说「一段」是**行数**——接着桌上最后一扇的结束行，往下 40 行。
 
-To change which lines a given window shows, edit the two boxes in its title bar — 「**起始行**」 (start line) and 「**结束行**」 (end line) — and **press Enter when you are done**. The 「共 N 行」 label next to them is the file's current total line count; use it as your ruler when picking a range.
+想改某一扇看的是哪几行，就改它标题栏里那两个框：「**起始行**」和「**结束行**」，
+**改完按回车**。旁边那颗「共 N 行」是这份文件今天的总行数，挑区间时拿它当尺子。
 
-> The same rule applies to the PDF / image windows: their title-bar box is a **page number**, and it is **also Enter-to-commit**.
+> 同样的规矩也适用于 PDF / 图片那一档：它标题栏里那个框是**页码**，**也是改完按回车**。
 
-## The Structure window: build structure while you read
+这是和桌面配着用的那一半。
 
-This is the half that pairs with the desk.
+读文献最烦的是「这块东西在库里到底长什么样」——切过去看一眼，回来就得重新找刚才那行。
+结构窗把这层结构开成**你桌上的一扇窗**，和正在读的那一页并排：
 
-The annoying part of reading is *"what does this actually look like in my vault?"* — switch away to check, and you come back having lost your line. The Structure window puts that structure in **a window on the same desk**, right beside the page:
+- **看一眼，不是离开。** 切走是「离开」；一扇窗只是瞥一眼。
+- **固定看一颗。** 顶栏那颗「晶体：…」换看哪颗，下次打开还是它。
+- **顶栏挡着就收起来。** 顶栏最左边那颗 **▲** 是整条栏的开关，**颜色就是状态**：
+  **蓝** = 按钮都摆着；**白** = 全收起来了，屏幕上只剩这一颗。再点一下全回来。
+  收没收起记着，下次开窗不用重收。
 
-- **A glance, not a departure.** Switching away is *leaving*; a window beside you is just a glance.
-- **Pin it to one crystal.** The 「晶体：…」 button in its top bar picks which crystal it watches, and it is still watching it next time.
-- **If the bar is in your way, fold it.** The **▲** at the far left of the bar is a master switch, and **its colour is the state**: **blue** = the buttons are all out; **white** = they are all folded away and only that one button is left. Click again and they all come back. Whether it is folded is remembered, so you do not have to fold it on the next open.
+### 画线：看 / 写
 
-### Draw: view / write
+顶栏那颗「**画线：看 / 写**」管的是**拖一根线的后果**：
 
-The 「**画线：看 / 写**」 toggle in the top bar decides **what dragging a line actually does**:
-
-| Mode | What dragging a line does |
+| 档位 | 拖一根线，会发生什么 |
 | --- | --- |
-| **看 (view)** — default | Draws a **gold** line. It lives in the library's own view state and **does not touch your notes at all**. |
-| **写 (write)** | Writes a **real `[[target card]]`** into the source card's body — the note changes. The line is **blue**. |
+| **看**（默认） | 画一根**金线**。它存在库里，**一个字都不碰你的笔记**。 |
+| **写** | 往起点那张卡的正文里**真写**一条 `[[目标卡]]`——笔记跟着变。线是**蓝**的。 |
 
-That is what the two colours mean: **a gold line is a way of looking; a blue line is something that genuinely exists in your notes.**
+蓝跟金的区别说的就是这件事：**金线是一种看法，蓝线是笔记里真有的东西。**
 
-Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in the card's body**, not something drawn on screen. Get it wrong and there is one undo (the same undo as the card editor's).
+你亲手拖过连接点的那一根线，**接法会写进这张卡自己的 frontmatter**（字段
+`晶体接法`）——所以它跟着笔记文件走：改名、搬到别的文件夹、**压缩发给别人**，
+都还在。没过手的那些不写，它们按位置算就够了。
 
-### Right-click: three places, three results
+蓝线接在卡片的哪一边，**默认按位置算**：上下叠着的两张走「下→上」，左右摆的走
+「右→左」。想改成别的走法，在**写**模式下从你要的那条边拖一次，**那一根就按你拖的走**
+（手动拖过的永远压过默认）。
 
-- **A line you routed by hand is written into that card's own frontmatter** (a field called `晶体接法`) — so it travels with the note: renaming it, moving it to another folder, or **zipping it up and sending it to someone** all keep it. Lines you never touched are not written; for those, geometry is enough.
-- **Which side a blue line attaches to is decided from the geometry by default**: two cards stacked one above the other run bottom-to-top, two side by side run right-to-left. To route one differently, drag it from the side you want in **write** mode — **that one line then follows your choice** (anything dragged by hand always beats the default).
-- **Right-click a card → hide every link going into and out of it.**
-  When one card has a dozen lines running through it, clearing them all out leaves the rest of the structure readable at a glance. **Right-click it again to bring them back.** While anything is hidden, a 「**显示全部**」 (Show all) button appears in the top bar and restores everything at once.
-- **Right-click on a gold line → enter link-edit mode.** Two buttons appear in the top bar, 「**选框：线**」 and 「**选框**」; drag to box in some lines, and a 「**删除实线（N）**」 (Delete lines) button appears. (Click the first one and it turns into 「**框：卡**」 — that mode is for **moving a batch of cards at once**, see below.)
-- **Right-click empty space (in 写 mode) → the same 「选框」 button, but this one boxes *blue* lines.** What appears then is 「**删除蓝线（N）**」 — and pressing it removes the matching `[[link]]` **from the card's body**.
+在**写**模式下把蓝线框住删掉，删的是**卡片正文里那条 `[[链接]]`**，不是画在屏幕上的东西。
+删错了可以撤销一次（和卡片编辑那条撤销同一套）。
 
-> One detail: the **card right-click is opened by 写 mode**. In 看 mode, right-clicking a card still does the old thing (enters link mode). But **once a card is hidden, right-clicking it works in either mode** — otherwise switching back to 看 would leave the hidden state reachable only from the top-bar button.
+### 右键：三种落点，三种结果
 
-### Boxes: tidy a region away without pretending the links are gone
+- **对着卡片右键 → 隐藏这张卡片所有的入链和出链。**
+  一张卡连进连出十几根线的时候，把它整个收干净、只留别的，
+  一眼就能看清剩下的结构。**再右键一次就放回来**；
+  只要有东西藏着，顶栏就会出现一颗「**显示全部**」，一下全放回来。
+- **右键落在金线上 → 进连线编辑模式。** 顶栏出现「**选框：线**」和「**选框**」两颗，
+  拖鼠标就能框住几根线；框住之后出现「**删除实线（N）**」。
+  （右边那颗「选框：线」点一下会变成「框：卡」，那是**整批挪卡片**用的，见下一节。）
+- **右键空白处（在「写」档下）→ 也出现「选框」，但这一档框的是蓝线。**
+  框住之后是「**删除蓝线（N）**」——按下去会**从卡片正文里**把对应的那条 `[[链接]]` 删掉。
 
-The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically**, named after its folder; a box can be **renamed** (click the name) and **collapsed** (click the little triangle on its left).
+> 一个细节：**「对着卡片右键」这个入口是由「写」档开的**——在「看」档下，
+> 右键卡片仍然是老行为（进连接模式）。但**已经藏起来的卡，两种档位下右键它都管用**，
+> 不然你一切回「看」，藏起来的东西就只剩顶栏那颗按钮能救了。
 
-There are two colours of box, and they mean different things:
+### 收纳方框：把一片收干净，但线不算断
 
-| | What it is | Container? |
+画面上那些虚线框是**收纳方框**。**每个子晶体自动一个**，名字就是文件夹名；
+框可以**改名**（点名字）也可以**收起**（点左边那个小三角）。
+
+框有两种颜色，含义不一样：
+
+| | 是什么 | 是容器吗 |
 | --- | --- | --- |
-| **Gold** (dotted, warm) | a **sub-crystal** — grown from a folder | **yes** — see below |
-| **Blue** (dashed, cool) | a box **you drew** with 「＋ 框」 | no — cards move in and out freely |
+| **金色**（点线，暖） | **子晶体**——文件夹长出来的 | **是**，见下 |
+| **蓝色**（虚线，冷） | 你用「**＋ 框**」**自己画的** | 不是，卡片随便进出 |
 
-**Gold boxes nest, one per level** (since 1.3.88). A folder's box contains that folder's own cards *and* a box for each of its subfolders, so the hierarchy is visible all the way down. Inside a box:
+**金框一层一个、层层套起来**（1.3.88 起）。一个文件夹的框里，装着它**自己的卡**，
+外加它**每个子文件夹各自的框**，所以整棵树的层级一路看得见。框内部横着切：
 
 ```
 ┌ A ─────────────────────────────────┐
-│  [A's own cards]  ┃  [B1's cards]  ┊  [B2's cards] │
-└───────────────────┸───────────────┸────────────────┘
-          coral line ↑        gold line ↑
-      (this level ↔ subfolders)  (sibling ↔ sibling)
+│  [A 自己的卡]  ┃  [B1 的卡]  ┊  [B2 的卡] │
+└────────────────┸────────────┸──────┘
+        珊瑚橙竖线 ↑      金色竖线 ↑
+      （本级 ↔ 子文件夹）  （同级 ↔ 同级）
 ```
 
-- **Coral `#FF6B6B`** separates a folder's **own cards** from its **subfolders**.
-- **Gold** separates two **sibling** subfolders from each other.
+- **珊瑚橙 `#FF6B6B`** 分的是这个文件夹**自己的卡**和它的**子文件夹**；
+- **金色**分的是两个**同级**子文件夹。
 
-**A gold box is a container.** Cards inside it cannot be dragged into another gold box, nor across the coral line into the parent's own cards; the card **stops at the boundary**. A **blue box cannot be moved or resized out of the gold box it sits in** — but it is not a container itself, so cards still move in and out of it. **Dragging a gold box carries everything inside it**, blue boxes included.
+**金框是容器。** 里面的卡拖不进别的金框，也拖不过那条珊瑚橙线到上一级"自己的卡"里
+——**卡片停在边界上**。**蓝框不能移出它所在的那个金框**（拖和拉大小都出不去），
+但蓝框本身**不是**容器，卡片照样进出。**拖金框时里面所有东西跟着走**，蓝框也跟。
 
-> **A blue box you drew belongs to the layer you drew it on.** Make one inside 「Python/数据分析」 and it is not there when you switch to 「Python/爬虫」 — go back and it is exactly as you left it. It did not used to work that way: boxes were global, so switching folders left the other layer's boxes sitting on screen.
+> **你画的框属于你画它的那一层。** 在「Python/数据分析」里建的框，切到
+> 「Python/爬虫」就看不见了——回到那一层它原样还在。以前不是这样：框是全局的，
+> 换一个文件夹看，别的层画的框还在原地摆着。
 
-A box made with 「**＋ 框**」 lands **where you are looking** (the middle of the viewport), not in some fixed corner of the world — boxes used to appear at a hard-coded (60, 60), so if you had panned away you had to pan back to find it. Same for a newly created card.
+点「**＋ 框**」建出来的框落在**你正看着的地方**（视口正中），而不是世界的某个固定角落
+——以前框建在固定的 (60,60)，视口推远了就得先推回去找它。新建的卡片同理。
 
-**Any blank part of a box drags the whole box** (since 1.3.83) — not just the title bar. Grab the box's edge or any empty spot inside it and the box moves together with the cards in it. Pressing on a card still drags the card (cards sit higher), so: to move a card press the card, to move the whole box press the box's blank space. Dragging **follows the grid** — see "Placing cards by the square" below.
+**框里任何一块空白都能拖动整框**（1.3.83 起），不只是顶上那条标题栏——按住框的边、
+框的空处都行，框和里面的卡一起挪。压在卡片上时拖的仍然是卡片（卡片层级更高），
+所以想挪卡片就按卡片，想挪整框就按框的空白处。拖动**按格点走**，见下面
+「一格一格地摆」。
 
-Collapsing puts the cards inside away together with the lines running to them — **but "there is still something in there" is never lost**:
+收起之后，框里的卡和连着它们的线一起收起来——**但「那边还有东西」这件事不会丢**：
 
-- any outside card that still has a blue line into a collapsed box gets a **yellow filled dot** in its corner;
-- hover that card and the collapsed boxes it relates to **flash around their edge**.
+- 外面凡是**有蓝线连进去**的卡，右上角点一个**黄色实心圆点**；
+- 鼠标悬停那张卡，和它有关联的、正收着的框会**绕边闪一圈**。
 
-Without that, collapsing would read as *"my links are gone"* when you never deleted anything. While a box is open, the cards inside link outward with blue lines as usual — **across levels included**.
+不这么做的话，收起读起来就是「我的双链丢了」，而你明明没删。
+框展开着的时候，里面的卡照常可以往外连蓝线——**跨级连也没问题**。
 
-### 框：卡 — move a whole batch at once
+### 框：卡 —— 一次挪好几张
 
-Two buttons sit next to each other in the structure window's top bar, and they **do two different jobs**:
+结构窗顶栏有两颗挨着的按钮，**各管一件事**，别混：
 
-| Button | What it tells you |
+| 按钮 | 它说的是 |
 | --- | --- |
-| **选框：线** ⇄ **框：卡** | **what** the marquee catches |
-| **选框** ⇄ **退出选框** | **whether** you can marquee right now |
+| **选框：线** ⇄ **框：卡** | 框住的**东西是什么** |
+| **选框** ⇄ **退出选框** | 现在**能不能框** |
 
-The default is 「选框：线」: right-click to enter link-edit mode, drag a box around some lines, then hit 「删除实线 / 删除蓝线」. Click 「选框：线」 and it becomes 「**框：卡**」 — now the box you drag **catches cards**:
+默认是「选框：线」：右键进连线编辑模式之后，拖鼠标框住几根线，再点「删除实线 / 删除蓝线」。
+点一下「选框：线」，它变成「**框：卡**」——这时拖出来的方框**框的是卡片**：
 
-1. box in a few cards and they **light up with a cyan edge**;
-2. **drag any one of them and the whole batch moves**;
-3. on release the whole batch is re-checked for membership: **drop it inside a box and it joins; drop it outside and it leaves**;
-4. to get rid of them, hit the **red-outlined 「删除卡片 (n)」** in the top bar — they **go to the recycle bin along with their note files**.
+1. 框住几张卡，它们会**亮起青边**；
+2. **按住其中任意一张拖走 = 整批一起动**；
+3. 松手时整批一起判归属：**拖进收纳方框就归它，拖到框外就移出来**；
+4. 想清掉它们：点顶栏那颗**红框的「删除卡片（n）」**——**连笔记文件一起**进回收站。
 
-Without this, filing a dozen cards into one box meant dragging them **one at a time** — and
-clearing a batch meant going back to the vault and deleting them one at a time.
+少了这一条，把十几张卡收进一个框就只能**一张一张拖**；要清掉一批，就只能切回库里
+一张一张走「删除卡片」。
 
-> - Press on a card that is **not** in the selection and only that card moves — after boxing an area, reaching for a different card clearly means "move *this* one", not "and those five as well".
-> - **「删除卡片」 removes the card files themselves** — not an unlink, not a hide. The note goes to the **recycle bin** with it and can be recovered, and the **crystal it belonged to is untouched**. The button only appears when cards are actually boxed, and the count is written on it: this window has **no confirmation dialog**, so the count on the button, the tooltip, and the hint line below are the whole warning.
-> - **The D key does not delete cards here**: one bare keystroke putting several files in the recycle bin is far too easy to trigger — especially with your hand on the arrow keys nudging cards. Deleting goes through that button.
-> - The boxing itself **does not touch a single word of your notes** — the 「删除实线 / 删除蓝线」 button hides itself in card mode, because there are no lines to delete there.
-> - To un-highlight them, **click empty space** or press **Esc**.
+> - 按住**没被框住**的那张，只挪它自己——框选之后顺手拖一张别的，
+>   意思显然是「我要挪这一张」，不是「顺便把刚才那几张也带上」。
+> - **「删除卡片」删的是卡片文件本身**（不是解绑、不是隐藏）：它连那张笔记一起进
+>   **回收站**，能捡回来；那张卡所在的**晶体不动**。它只在真有卡被框住时才出现，
+>   张数写在按钮上——这扇窗没有确认弹窗，**按钮上的数、悬停那句话、底下那条说明
+>   就是全部的告知**。
+> - **按 D 在卡档里不删卡**：一个裸按键就能把好几个文件扔进回收站太容易误触
+>   （那会儿手正放在方向键上挪卡片）。要删就走那颗按钮。
+> - 框选本身**不动你的笔记一个字**——「删除实线 / 删除蓝线」那颗按钮在卡档里会
+>   自己收起来，因为卡档里没有线可删。
+> - 框选完之后想让它们不亮：**点一下空白**，或者按 **Esc**。
 
-### Card positions travel with your notes
+### 卡片的位置会跟着笔记走
 
-**Where a card sits is written into that card's own frontmatter** (a field called `晶体坐标`). So open the same vault on another machine with the same plugin and **every card sits exactly where you left it** — the view state is per-machine, and only what is written into the files travels.
+**卡片摆在哪儿，写进卡片自己的 frontmatter 里**（字段叫 `晶体坐标`）。所以换一台电脑、
+装同一个插件、打开同一个库，**卡片的相对摆放位置和你这台机器上一模一样**——
+视图状态是每台机器各存各的，只有写进文件才跟着走。
 
-The field looks like this; the unit is a grid square (the minimum unit is a tenth of a card's width, 21px), anchored at the **bottom-left corner**:
+字段长这样，单位是「格」（最小单位 = 卡片宽的 1/10 = 21px），**以左下角为准**：
 
 ```yaml
 晶体坐标: [3, 5]
 ```
 
-> The `晶体` ("crystal") prefix is deliberate: this plugin gets installed in other people's vaults, and a bare `坐标` ("coordinate") is far too generic a name — anyone with a field of their own by that name would have it silently overwritten.
+> 字段名带「晶体」前缀是**故意的**：这个插件装在别人的库里，而 `坐标` 是个
+> 太通用的名字——谁要是有个自用的同名字段，会被静默顶掉。
 
-> - **Gold boxes need nothing of their own:** their position and size are the bounding box of the cards inside, so they follow along automatically.
-> - **Manual boxes have a file of their own too**: one `.crystal-boxes.json` per crystal, sitting in that crystal's folder. The leading dot means Obsidian's file list never shows it and it **never becomes a card** (the adapter separately only reads `.md` — two independent guards). It holds each box's **bottom-left** corner, name, size, **collapsed state** and members. Close Obsidian before editing it by hand.
-> - ⚠️ **Your sync channel has to carry dot-prefixed files.** FNS works on the filesystem layer, so it is fine; a channel that skips `.`-prefixed entries (Obsidian's own Sync, for instance) will not carry this file, and your boxes will then exist only on this machine — with no warning that it happened.
-> - **Imported cards (borrowed via 「导入卡片」) are not written either**: where it sits in *your* layer is a different thing from where it sits in its own crystal, and writing it would move it back home.
-> - Position writes are **debounced** — they land a moment after you stop dragging (you sync across devices, and a write per drag would set off a sync storm). Closing the vault flushes anything still pending, so nothing is lost.
+> - **金色方框不用单独存**：它的位置和大小就是里面卡片的包围盒，卡片跟着文件走，
+>   它自然跟着走。
+> - **收纳方框也有自己的文件**：每颗晶体一个 `.crystal-boxes.json`，就放在那颗晶体的
+>   文件夹里。点开头 → Obsidian 的文件列表里看不见，也**不会变成一张卡片**
+>   （适配层另外只认 `.md`，两道都挡得住）。里面存的是框的**左下角**坐标、
+>   名字、大小、**收起状态**和成员。手改前先关掉 Obsidian。
+> - ⚠️ **同步通道必须带点开头的文件**。FNS 走文件系统那一层，没问题；
+>   换成会跳过 `.` 开头的通道（Obsidian 自带的 Sync 就是），这个文件传不过去，
+>   框就只在你这台机器上——那种情况下你不会收到任何提示。
+> - **外来卡（「导入卡片」引过来的）也不写**：它在你这层的落点和它在自己晶体里的
+>   位置是两回事，写进去就等于改了它老家的位置。
+> - 写盘是**拖完停一小会儿**才做的（你有多端同步，拖几下就写几次会引发同步风暴）。
+>   写完之前关掉库也会催一下，不会白摆。
 
-### Placing cards by the square: the grid and the arrow keys
+### 一格一格地摆：卡片的格点与方向键
 
-Cards in the storyline sit on a **grid**, anchored at the **bottom-left corner** — so two cards side by side line up along their **bottom edge**.
+卡片在故事线里落在一层**格点**上，坐标以**左下角**为准——两张卡并排时，是**下边对齐**。
 
-| Key | One step |
+| 按键 | 一步走多远 |
 | --- | --- |
-| **← →** | **42px** (twice the minimum unit — five steps is exactly one card wide) |
-| **↑ ↓** | **21px** (the minimum unit) |
+| **← →** | **42px**（最小单位的 2 倍，5 步正好一张卡宽） |
+| **↑ ↓** | **21px**（最小单位） |
 
-**The minimum unit is a tenth of a card's width: 21px.** That is where it comes from — every card is the same size, so using it as the ruler makes the whole picture line up.
+**最小单位 = 卡片宽的 1/10 = 21px。** 就是这么算出来的：每张卡大小一样，拿它当尺子，
+整张图自然就对得齐。
 
-Drag a card and it settles onto the nearest grid point; box some cards in and step them one square at a time with the arrow keys.
+拖一张卡，停在哪儿就自动落到最近的格点上；框选之后按方向键，一格一格挪。
 
-> - **Manual boxes are on the grid too** (since 1.3.83): dragging snaps the box's **bottom-left corner** to the grid, and the cards inside move by **one and the same offset** — their relative positions do not change at all. **Resizing is still free** — a box is a container *you* draw and its size is yours to decide; only *where* it sits needs to line up.
-> - **Gold boxes (the ones grown from folders) move in whole squares.** Their position and size are **computed** from the cards inside, so they have no coordinates of their own to snap — what snaps is the **offset**: the box and its cards travel by a whole number of minimum units, which is still a plain translation.
-> - **Positions you already arranged are never mass-moved.** The grid only takes effect the next time you drag that card or press an arrow key — otherwise it would be a change nobody pressed a button for. The cost: a card you have never touched may sit off-grid until you move it once.
+> - **收纳方框也走格点**（1.3.83 起）：拖动时**框的左下角**吸到格点上，框里的卡按
+>   **同一段位移整体挪**，它们之间的相对位置一点不变。**大小仍然随你拉**——
+>   框是你**画**出来的容器，多大由你定，只有摆在哪儿才需要对齐。
+> - **金色方框（文件夹长出来的那个）按整格移动。** 它的位置和大小是从里面的卡片
+>   **算出来的**，自己没有坐标可吸，所以吸的是**位移**：框和里面的卡一起按整格的
+>   整数倍走，同样是整体平移。
+> - **已经摆好的旧位置不会被集体挪动。** 格点只在你下一次拖它 / 按方向键时生效
+>   ——不然那是一次没人按过按钮的破坏。代价是一张从没被碰过的老卡可能停在格外，
+>   动它一下就归位。
 
-### Import a card: borrow one from another crystal
+### 导入卡片：把别的晶体里的卡借过来
 
-A crystal only ever draws the cards **in its own folder**. But you often want a card in crystal A to link to a card in crystal B — so hit 「**导入卡片**」 (Import card) in the structure window's top bar and pick one:
+一颗晶体只画得下**它自己文件夹里**的卡。可你常常想让 A 晶体的卡去连 B 晶体的卡——
+这时候点结构窗顶栏的「**导入卡片**」，从别的晶体挑一张进来：
 
-1. it **lands in the middle of the window** (it does not tuck itself into a corner — you need to see that it arrived);
-2. drag it into any box and it belongs there, so **cross-level blue links** work from then on;
-3. to get rid of it, click the **✕ in its top-right corner**.
+1. 它**落在窗的正中间**（不是自动排到某个角落——你看得见，才知道它进来了）；
+2. 拖它进任意一个收纳方框就归它，**跨级连蓝线**从此成立；
+3. 不想要了，点它**右上角那颗 ✕**。
 
-Imported cards are drawn as **dotted purple rectangles**, so they never read as belonging to this layer. **The card itself is not touched at all**: it stays in its own folder and every `[[link]]` pointing at it is intact. Take it away and import it again later and even the position you gave it is still there.
+引进来的卡是**点线紫框**，一眼能和本层的卡分开。**它本身一个字都不动**：
+还在原来那个文件夹里，别人指向它的双链也都在。拿走再引回来，连你给它摆的位置都还在。
 
-> - Importing a card that is **already in this crystal** is refused, and it tells you why.
-> - Only the **structure window** can import; once imported, the card also shows up if you open the same crystal's storyline in the vault itself.
-> - 「删除实线 / 删除蓝线」 has nothing to do with it — **importing never deletes anything**.
-> - One crystal can hold at most 500 imports (a guard against corrupt saves, not a limit you will ever meet).
-> - An imported card **cannot join a sub-crystal box** — those boxes draw their membership from folders. Dropping one there tells you so; use 「＋ 框」 to make a manual box instead.
-> - Clicking a **folder name** in the picker expands it (it does not mean "pick this folder"). That is the feel in all three card-picking modes (import / delete card / rename card).
+> - 引一张**本来就在这颗晶体里**的卡会被挡下来，并告诉你为什么。
+> - 只有**结构窗**里能引；引进来之后，在晶体库的故事线上看同一颗晶体，它也在那儿。
+> - 「删除实线 / 删除蓝线」和它无关——**引卡不会删任何东西**。
+> - 一颗晶体最多引 500 张（这只是一个防坏存档的上限，正常用不到）。
+> - 引来的卡**进不了子晶体框**——那种框的成员是文件夹长出来的。拖进去它会告诉你
+>   一句，要给它分组请用「＋ 框」建一个手动框。
+> - 选择器里点**文件夹名**是展开它（不是"就选这个文件夹"）。挑卡片的三档
+>   （导入 / 删除卡 / 重命名卡）都是这个手感。
 
-## Read-and-jot: turn what you read into a card on the spot
+## 边看边记：读到什么，当场立成卡
 
-The column on the right of the reader. Fill in **name / concept / source / body** and you have a card — without leaving the page.
+阅读器右边那一栏。填**卡片名 / 概念 / 来源 / 正文**就能建卡，不用离开这一页。
 
-- **Prefer a real editor?** Hit **✎ Write in editor**: it creates the card first, then swaps the body field for Obsidian's own live-preview editor (renders as you type, saves automatically).
-- **Changed your mind?** Hit **Back**: the card you just made is removed and its body moves, untouched, into a **scratch note**.
-- **Scratch notes** are a pad written in the native editor, dropped into a folder you choose — deliberately *not* a card.
-- **Card box**: search the vault's cards, click one to put it on the desk, and it leaves a line in that card linking back to **the exact page** you are reading.
-- **The folder picker's header has a 「取消」** (since 1.3.83). "Will be created in", new / delete / rename crystal, delete / rename card and the structure window's crystal picker all open that same panel, and **closing it is now this one button** — it puts the panel away and changes nothing else.
-- **Rename card / Rename crystal** live here too. They go through Obsidian's own rename channel, so **every `[[link]]` pointing at it is updated along with it**.
+- **想用真编辑器写**：点「✎ 在编辑器里写」，它先把卡建出来，正文改用 Obsidian 自己的
+  实时渲染编辑器（边写边渲染、自动存盘）。
+- **反悔了**：点「返回」，刚建的那张卡撤掉，正文原封不动转进**草稿纸**。
+- **草稿纸**：一块用原生编辑器写的便签，落在你指定的文件夹里，**不建成卡片**。
+- **卡片盒**：搜库里的卡片，点一张就摆到桌面上，并在那张卡里留一行**指回这一页**的链接。
+- **重命名卡片 / 重命名晶体**就在这一栏。走的是 Obsidian 自己的改名通道，
+  所以**全库指向它的 `[[双链]]` 会一起跟着改**。
+- **挑文件夹那块面板抬头有一颗「取消」**（1.3.83 起）。「将建在」、新建 / 删除 /
+  重命名晶体、删除 / 重命名卡片、结构窗挑晶体，打开的都是这块面板，**关闭统一走
+  这一颗**——它只收起面板，什么都不改。
 
-## The vault itself, when you are not reading
+## 晶体库：不读文献的时候
 
-- **A folder is a crystal.** Every subfolder under your card folder becomes one crystal on the ring. Nested folders become nested crystals — drill in and out, and the breadcrumb always tells you where you are.
-- **Links become shape.** Write `[[another card]]` in a card's body and a line appears between them. The storyline view lays every card out by link topology. Links `A → B` and `B → A` are drawn as **one line with arrows at both ends** — one arrow means one-way, two means mutual.
-- **Orphans are a signal, not an error.** A card nobody links to and that links to nobody is flagged. It is not a mistake; it is a card that has not been connected to anything yet.
-- **Recall before you peek.** In recall mode every card's content is hidden until you click. Say it to yourself first, then check. Switch to review mode when you just want to read through.
-- **Edit in place.** The pencil in the panel's top-right turns it into a form — concept / source / tags / body — without navigating away or opening a new tab.
-- **Deleting goes to the bin.** Deleting a crystal or a card respects whatever you chose under *Files & Links → Deleted files*, so you can get it back.
+- **一个文件夹 = 一颗晶体**。卡片目录下的每个子文件夹在环上就是一颗晶体，可以一层层钻进去，
+  面包屑随时告诉你站在哪儿。
+- **双链变成形状**。正文里写 `[[另一张卡]]`，两张卡之间就出现一根线。故事线按连线拓扑
+  把整颗晶体铺开。A→B 与 B→A **合成一条、两头带箭头**：一个箭头是单向，两个是互相。
+- **孤岛是信号，不是错误**。既没链出去也没人链它的卡会被标出来——那是还没接进任何脉络的卡。
+- **先想再看**。回忆模式下卡片内容默认遮住，点一下才显示；复习模式全部摊开。
+- **就地改**。点面板右上角那颗笔，原地改概念 / 来源 / 标签 / 正文——不跳转、不开新标签页。
+- **删除走回收站**。删晶体、删卡片，都按你在「文件与链接 → 删除的文件」里选的那一档，能捡回来。
 
-## Why not just the graph view?
+## 为什么不直接用图谱？
 
-The graph view answers **"what is this note connected to?"** It starts from notes, the links are the subject — and **folders do not appear in it at all**. If you organise your knowledge by subject and chapter, the graph mixes all of it into one cloud. That is why so many people find it beautiful and useless: they cannot find the line they organised their knowledge along.
+图谱回答的是「**这张笔记和谁有关系**」——它以笔记为起点、连线是主角，**而文件夹根本不在图里**。
+如果你的知识是按科目和章节组织的，图谱会把你所有东西搅成一团。
+这正是很多人觉得它「好看但没用」的原因：**他们找不到自己组织知识的那条线。**
 
-Crystal Vault answers a different question: **"what is in this collection, and how far along is it?"** It starts from folders. The structure *is* the subject.
+晶体库问的是另一个问题：「**这一块知识里有什么、长到什么程度了**」。它以文件夹为起点，
+**结构本身就是主角**。
 
-It is not a better graph. It is a different starting point.
+它不是更好的图谱，是**不同的起点**。
 
-## Three ways to open it: full screen / floating window / embedded
+## 三种打开方式：全屏 / 浮窗 / 嵌入
 
-Opening the vault from the ribbon icon gives you the **full screen** by default — it fills the window and covers your note. The other two live in the plugin's 「**打开方式**」 (how it opens) setting, and the button in the vault's own top bar cycles through all three (**the label names the mode you will get**):
+点侧边栏图标打开晶体库，默认是**全屏**——铺满整个窗口、盖在笔记上。
+另外两档在插件设置的「**打开方式**」里选，库里顶栏那颗按钮也能随时**循环切**
+（全屏 → 浮窗 → 嵌入，**按钮上写的就是下一档叫什么**）：
 
-| | What it looks like |
+| | 长什么样 |
 | --- | --- |
-| **Full screen** | Fills the whole window, over your note. The old behaviour, and the default. |
-| **Floating window** | Shrinks to a rectangle **floating over your note** — read and use the vault at the same time. |
-| **Embedded** | **Lives inside its own Obsidian tab**, covering nothing. Can sit side by side with other tabs. |
+| **全屏** | 铺满整个窗口，盖在笔记上。老行为，也是出厂默认。 |
+| **浮窗** | 收成屏幕上一块矩形，**浮在笔记上**——一边看笔记一边用库。 |
+| **嵌入** | **就长在它那颗 Obsidian 标签页里**，不盖任何东西。可以和别的标签页左右分屏。 |
 
-**Floating window**: drag its top bar to move it, drag the bottom-right corner to resize it; the position and size **travel with the vault**, so it opens where you left it on another machine.
+**浮窗**：拖顶栏挪位置、拖右下角改大小；位置和大小**跟着 vault 走**，
+换台机器打开也在你放的地方。
 
-> - Switching between the three **reopens the view** (whatever you had open in the reader, and the windows on the desk, are dropped). The mode changes the vault's *geometry*, and patching that in place always leaves something stale.
-> - **The reader and the card panel stay inside whichever mode you are in** — in a floating window, clicking a card does not cover your note; embedded, they only occupy that tab.
-> - **Embedded mode does not lock your note's scrolling** (the other two do — they sit over the note, so it should not scroll behind them).
-> - **The dataviewjs form has none of this** (it already lives inside a note), so that button never appears there.
+> - 三档切换都会**重开一次视图**（阅读器里开着的文献、桌面上的窗会没）。这一档换的是
+>   库的几何，原地改总有一块不跟着变。
+> - **文献阅读器、卡片面板这些也都待在当前这一档里**——浮窗里点开一张卡，
+>   面板不会盖住你的笔记；嵌入模式下它也只占这颗标签页。
+> - **嵌入模式不锁笔记的滚动**（另外两档会——它们盖在笔记上，背后不该跟着滚）。
+> - **dataviewjs 那种用法没有这几档**（它本来就嵌在笔记里），所以那颗按钮不会出现。
 
-## Install
+## 安装
 
-### From the community directory
+在 *设置 → 第三方插件 → 浏览* 里搜 **Crystal Vault**。
 
-Search for **Crystal Vault** in *Settings → Community plugins → Browse*.
+手动装：从 [最新 Release](https://github.com/runyao-zhang/crystal-vault/releases/latest) 下载
+`main.js` / `manifest.json` / `styles.css`，放进 `<你的 vault>/.obsidian/plugins/crystal-vault/`，
+然后在 *设置 → 第三方插件* 里启用。
 
-### Manually
+### 遇到问题 / 想提意见
 
-Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/runyao-zhang/crystal-vault/releases/latest) and put them in `<your vault>/.obsidian/plugins/crystal-vault/`, then enable the plugin in *Settings → Community plugins*.
+**QQ 群：831440768**
 
-### Problems, questions, requests
+装不上、用着哪儿不对劲、想要个什么功能，都可以直接进来说。
+（在 GitHub 上开 [Issue](https://github.com/runyao-zhang/crystal-vault/issues) 也一样，
+只是群里问一句通常快得多。）
 
-**QQ group: 831440768** — a Chinese-language group; it is where this plugin's users actually are, so it is usually the fastest place to get an answer.
+## 上手
 
-You can also open an [issue](https://github.com/runyao-zhang/crystal-vault/issues) on GitHub.
+1. 在插件设置里把**卡片目录**指到你放笔记的那个文件夹。默认是 `cards`——
+   还没有的话，在 vault 里建一个叫这个名字的文件夹就行。
+   设置页会**当场**告诉你这个路径在不在、里面有几颗晶体。
+2. **往卡片目录里放一份能读的东西**——你在看的那本书、那门课的讲义、那份论文。
+   PDF 最好（图片也行）。**别放一个空文件进去**：阅读器只会说一句
+   「这份文献里没有可显示的内容」。放进去之后它就会出现在阅读器的文献清单里，
+   第 6 步要用。
+3. 点侧边栏那颗宝石图标（或运行命令 **Crystal Vault: Open**）。
+4. 在卡片目录里建一个子文件夹——那就是一颗晶体。
+5. 按下面的格式写一张卡，再用 `[[双链]]` 把它连出去。
+6. 点顶栏的「**文献**」进阅读器，选刚才放进去的那一份，开始读；
+   切到「**桌面**」，再点「**结构窗**」——这就是它日常的样子。
 
-## Getting started
-
-1. Open the plugin settings and point **Card folder** at the folder you keep your notes in. It defaults to `cards` — if you do not have one yet, create a folder with that name in your vault. The settings pane tells you right away whether that path exists and how many crystals are in it.
-2. **Drop something readable into the card folder** — the book you are reading, a course handout, a paper. **A PDF is best** (images work too). **Do not put an empty file in** — the reader will just say *"this document has nothing to display"*. Once it is in there it shows up in the reader's document list, which step 6 needs.
-3. Click the gem icon in the ribbon (or run the command **Crystal Vault: Open**).
-4. Make a subfolder inside your card folder. That is a crystal.
-5. Write a card. See the format below.
-6. Link cards to each other with `[[double brackets]]` and watch the structure appear.
-7. Hit **文献 / Reader** in the top bar, pick the file you just dropped in — then switch to **Desk** and open a **Structure window**. That is what using this thing actually looks like day to day.
-
-> **Which formats work:** the reader accepts **PDF / images (png, jpg, jpeg, gif, webp, bmp, svg, avif) / Markdown**.
-> **PPTX is not among them and will not be** — export it to PDF first.
+> **放什么格式**：阅读器认 **PDF / 图片（png、jpg、jpeg、gif、webp、bmp、svg、avif）/ Markdown**。
+> **PPTX 不在里面，也加不了**——先自己导出成 PDF 再放进来。
 >
-> ⚠️ A `.md` dropped into the card folder is **also a card** (a subfolder is a crystal, a `.md` is a card), so that markdown will show up in the vault too. Keep it simple and use a PDF.
+> ⚠️ 放进卡片目录的 `.md` 会**同时是一张卡片**（子文件夹 = 晶体，`.md` = 卡片），
+> 也就是说那份 markdown 会一起出现在库里。想图干净就放 PDF。
 
-## The card format
-
-A card is a Markdown file. Three frontmatter fields are read; everything else is yours.
+## 卡片格式
 
 ```markdown
 ---
-概念: One sentence saying what this is
-来源: Which book / lecture / paper it came from
-tags: [subject, type]
+概念: 一句话说清它是什么
+来源: 哪本书 / 哪节课 / 哪份文献
+tags: [科目, 类型]
 ---
 
-Say what it is in your own words…
+先用自己的话说清它是什么……
 
-Then link onward: [[02-Next card]] and say why you are linking
+接着看 [[02-下一张]] 连过去的原因就写在后面
 
-==Highlight== the part you want to be quizzed on.
+==高亮== 的部分会被抽成自测点。
 ```
 
-| Field | Where it shows up |
+| 字段 | 在库里长什么样 |
 | --- | --- |
-| (the filename) | The card's title. A `card-` / `card_` prefix is stripped automatically |
-| `概念` | The line at the top of the card panel |
-| `来源` | The "source" line in the hover card |
-| `tags` | Up to six shown on the card face |
+| （文件名） | 卡片的标题，`卡片-` / `卡片_` 前缀会自动剥掉 |
+| `概念` | 面板顶部那一行 |
+| `来源` | 悬停浮层里的「来源」 |
+| `tags` | 卡面上最多显示前 6 个 |
 
-**Four habits that make the vault come alive:**
+**四条让库活起来的习惯**：至少连一次（不然是孤岛）· 连的时候写下理由 ·
+用编号前缀控制顺序（`01-` `02-`）· 想自测的地方用 `==高亮==`。
 
-1. **Link at least once** — a card with no links either way is an orphan.
-2. **Write the reason** — text after `]]` on the same line is shown on the connecting line.
-3. **Number the filename** (`01-`, `02-`, …) to control ordering. Cards are sorted by filename.
-4. **Use `==highlight==`** for anything you want turned into a quiz point.
+## 更新记录
 
-## Changelog
+新的在上。这一份跟着每一版一起改，**只记用户看得见的东西**。
 
-Newest first. Kept current with every release, and it **only records things you can see**.
+**1.3.92** · **跨层拖金框，蓝框现在跟着走了。**（这一条是前几版都没接住的那个。）
 
-**1.3.92** · **Dragging a gold box now carries blue boxes stored on deeper layers.** (This is the one the previous versions kept missing.)
+**蓝框是按层存的**——你在哪一层画的，它就记在哪一层。而金框从 1.3.88 起
+**逐层都有**。这两件事撞在一起就是一个天天会踩的形状：
 
-**Blue boxes are stored per layer** — wherever you drew it is where it is recorded. Gold boxes, since 1.3.88, exist **on every layer**. Put those two together and you get a shape you hit constantly:
-
-> You are on a **shallow layer** (say 「机器学习」) and drag the gold box of a **deeper folder** (say 「…/准确度的陷阱与混沌矩阵」). That moves the cards in that folder — but the blue box you drew for that folder is stored **on the deeper layer** (that is where you went in to draw it), so it is not on this screen at all and **nothing follows it**.
+> 你站在**浅层**（比如「机器学习」），拖**某个深文件夹**（比如
+> 「…/准确度的陷阱与混沌矩阵」）的金框。这个动作会带动那个文件夹里的卡——
+> 可你给那个文件夹画的蓝框，存在**更深那一层**（你是进去画的），
+> 它压根不在这一屏上，于是**一个都不跟**。
 >
-> Then you open the structure window (pinned to that deepest layer) — and **the cards are already well outside the blue box**.
+> 然后你打开结构窗（钉着最深那层）——**卡片已经在蓝框外面好一段距离了**。
 
-It now goes by **folder containment**: drag a gold box and every blue box drawn **inside it** — on its own layer or any layer beneath — follows, as long as any of its member cards moves in that drag.
+现在按**文件夹的包含关系**去找：拖一个金框，凡是**在里面**（它自己那层、
+以及它下面任何一层）画的蓝框，只要有成员卡在这一趟里动，就一起跟着走。
 
-> Those boxes are **not drawn** on the shallow layer (they belong to another layer; drawing them would be ghosts), so you do not see them move — but **they are already in the right place** when you open the structure window, which is what matters. The write-back was fixed along the way too: on a cross-layer drag the sidecar goes to **the box's own layer**, not to the one you happen to be standing on.
+> 那些框在浅层**不画**（它们属于别的层，画出来就是幽灵），所以你看不到它们动
+> ——但你打开结构窗时它们**已经在正确的位置上了**，这才是要紧的。
+> 顺带修了落盘：跨层拖动时，边车写的是**框自己那一层**，不是"你站在哪一层"。
 
-**1.3.91** · Three fixes, all around dragging a gold box:
+**1.3.91** · 修三条，都跟「拖动金色方框」有关：
 
-**① Blue manual boxes still did not follow a dragged gold box.** The test had been wrong all along, and wrong in exactly your case:
+**① 拖金框时，蓝色收纳方框还是不跟。** 判据一直是错的，而且正好错在你这一类上：
 
-It asked *"are **all** of my members inside you?"* But when a blue box spans **two sibling sub-folders**, its common ancestor **is the layer you are standing on** — and by your own decision the current layer gets no gold box. So no box can hold it, the test answers false, and the code falls back to an even older rule that looks at *where the blue box is drawn*. **Your hand-drawn box is bigger than the tight gold box, so its centre lands outside** — and it silently doesn't follow. A blue box holding one **imported** card lands in the same place.
+原来问的是「**我这个蓝框的全部成员是不是都在你里面**」。可是一个蓝框**跨两个同级
+子文件夹**的时候，它的共同祖先**正是你当时站的那一层**——而按你拍板的「本级不画框」，
+那一层根本不长金框。于是哪个框都装不下它，判据回 false，代码就退回一条更老的、
+「看蓝框画出来的中心落在哪」的位置判据——**而你手画的框比贴身的金框大，中心落在
+外面**，于是**静默不跟**。框里混一张**引进来的外来卡**也是同一个下场。
 
-It is now one **exact** sentence: **the cards that move in this drag are precisely the ones under that gold box.** If **any** of the blue box's cards is among them, it follows; if none is, it stays put. Nothing about how you drew it, how big it is, or whether it is collapsed.
+现在换成一句**充要**的话：**这一趟要动的卡，恰好就是那个金框底下的所有卡。
+蓝框里只要有**任何一张**在里面，它就得跟；一张都不在，它就该留在原地。**
+跟你怎么画、画多大、收没收起，全都无关。
 
-> Along the way: **a collapsed blue box now follows too** (its bar sits at the centroid, so the offset has to come from where it actually is — it used to be skipped entirely).
+> 顺带：**收起来的蓝框现在也跟着走了**（它那条标题栏摆在重心上，位移得从它真正的
+> 位置加起，以前干脆跳过了它）。
 
-**② Gold boxes were getting a doubled identity.** The same folder produced **a different id depending on which layer you were looking from** — and a box's name and collapsed state are two global tables keyed by id. So *"I collapsed it on this layer and it unfolded itself on the next one"*, and the same for renaming — with nothing said. The cause was the recursive box walk appending the full path to the parent path a second time.
+**② 金框的身份被拼重复了。** 同一个文件夹，**站在不同层看会拿到不同的 id**——而框的
+名字和收起状态是按 id 存的两张全局表。所以「我在这一层把它收起来了，换一层它又自己
+展开了」，改名同理，而且不报错。根因是递归发框时把完整路径又和父路径拼了一遍。
 
-**③ The file that holds box positions silently drops a write.** This one came out of **your own vault's data**:
+**③ 边框位置的那个文件，会被静默丢掉一笔。** 这个是从**你库里真实的数据**里查出来的：
 
 ```
-data.json (view state, written on every drag)   m:6  x=3003  bottom=294
-.crystal-boxes.json (sidecar, 11:55:52)         m:6  x=2709  bottom=252
+data.json（视图状态，每次拖动同步写）  m:6  x=3003  bottom=294
+.crystal-boxes.json（边车，11:55:52）  m:6  x=2709  bottom=252
 ```
 
-The two disagree, and the rule is **the file wins** — so the next time the vault opens that box **jumps back** while the cards stay where they are, which reads as *"the cards are outside the blue box"* **whether or not you dragged anything**. The cause: the close path's flush **is never awaited** (`closeFullscreen` is an entirely synchronous function), and the pending-write queue was emptied *before* the write landed. It now **only leaves the queue once the write succeeds**, and the coalescing window went from a 700 ms debounce to **a single tick** (several writes from one release merge; anything across ticks goes out immediately).
+两份对不上，而落盘规则是**文件优先**——所以下次开库那个框会**跳回旧位置**、卡片却
+留在新的地方，看就是「卡片跑到蓝框外面去了」，**跟你拖不拖没关系**。根因是关库那条
+路上催写盘的调用**没有被等待**（`closeFullscreen` 整个是同步函数），而排队表又在写
+成之前就被清空了。现在改成**写成了才出队**，并把合并窗口从一个 700ms 的防抖压到
+**一个 tick**（同一次松手里的几笔合并，跨 tick 立刻写）——窗口小到几乎没有。
 
-**1.3.90** · **The structure window's top bar can now be folded away entirely.** The **▲** at its far left is a single two-state button, and **its colour is the state**:
+**1.3.90** · **结构窗顶栏能整条收起来了。** 最左边那颗 **▲** 现在是**一颗按钮两种状态，
+颜色就是状态**：
 
-- **Blue** = every button in the bar is out (the default, same as before);
-- **White** = **all of them are folded away**, leaving only that one ▲; click again and they all come back.
+- **蓝** = 顶栏所有按钮都摆着（默认，和以前一样）；
+- **白** = **全收起来**，屏幕上只剩这一颗 ▲；再点一下全回来。
 
-Whether it is folded is **remembered**, so you do not have to fold it again on the next open. (This replaces the 1.3.84 ▲/▼ pair, which folded only the crystal name — that was finer-grained, but this one button now takes the name and the buttons together, so ▼ is gone.)
+收没收起**记着**，下次开窗不用重收。（它顶替了 1.3.84 那对只收晶体名的 ▲/▼——
+那把粒度更细，但现在这一颗一次就把名字和按钮一起收了，所以 ▼ 撤掉了。）
 
-> **Why folding away the crystal switcher is allowed here** (an earlier version's comments forbade it outright): **the way back is in the same place** — the same ▲ restores everything. What that rule was guarding against was an entry point that is invisible exactly when you need it **with no way back**; this is not that. The floor is unchanged: **this ▲ is never itself folded away**, because it is the only way to bring the bar back.
+> **为什么这回敢连"换晶体"那颗入口一起收**（上一版的注释里明令禁止过）：**出口就在
+> 原地**——同一颗 ▲ 再点一下全回来。原来那条禁令防的是"入口在需要它的那一刻恰好
+> 不可见，而且**没有回头路**"，这两件事不一样。底线没松：**收起态下这颗 ▲ 永远
+> 留在屏幕上**，它是唯一能把顶栏叫回来的东西。
 
-**1.3.89** · Two fixes, both fallout from 1.3.88:
+**1.3.89** · 修两条（都是 1.3.88 带出来的）：
 
-**① Blue manual boxes still did not follow when you dragged a gold box.** In your words: *"by the time I open the structure window the cards have moved well outside the blue box, but the box still counts them as members — so moving the blue box drags along cards that aren't physically in it."*
+**① 拖金色方框时，里面的蓝色收纳方框还是不跟着走。** 你报的原话是「打开结构窗时候，
+卡片已经移出蓝色方框之外好一段距离了，但是这个蓝色方框里面仍然算着这些卡片，
+然后移动蓝色方框，就连同这些物理位置上不在这个方框里面的卡片一起移动」。
 
-The cause was the test 1.3.88 used: it asked whether the blue box's **centre** fell inside the gold rectangle. But **a blue box is hand-drawn and is usually bigger than the tight gold box** — once it extends past one side, its centre lands outside, and that drag **found no followers at all**, silently.
+根因是 1.3.88 那条跟随的判据写错了：它问的是「蓝框的**中心**落不落在金框矩形里」。
+而**蓝框是你手画的，通常比那个贴身的金框大**——往一边探出去之后中心就跑到金框外面，
+于是这一趟**一个跟随者都找不到**，一声不响。
 
-It now goes by **membership**: which gold box a blue box lives in is decided by whether **all the cards it holds** are inside that box. That has nothing to do with how you drew it. Two things come along with it:
+现在改成**看成员**：一个蓝框"住在"哪个金框里，看它收的那几张卡**是不是全都在**那个
+金框里。这个判据**跟你怎么画无关**。顺带两条：
 
-- **Dragging an outer gold box now carries blue boxes living further in** (dragging A moves the cards inside C too).
-- The "a blue box may not leave its gold box" rule uses the same test — it had exactly the same flaw, silently dropping the constraint once the blue box was drawn a little larger.
+- **拖外层的金框，住在里层的蓝框也跟着**（拖 A 的时候 C 里的卡同样在动）；
+- 蓝框"不许移出金框"那条约束用的是同一个判据——它原来有一模一样的毛病，
+  蓝框画大一点约束就静默失效了。
 
-**② A gold solid line now sits under a gold box's title bar.** With boxes nested, there was nothing separating a box's name from the data below it — you could not tell at a glance whether that line was *this* box's header or something belonging to a sub-box inside.
+**② 金色方框的标题栏下面，加了一条金色实线。** 金框现在一层层套着，抬头和数据之间
+没有分界，一眼看不出"这一条是这个框的名字"还是"里面某个子框的东西"。
 
-**1.3.88** · **Gold boxes are split up, one level at a time.** A gold box used to swallow the folder's **entire subtree** — so when A contained B1 and B2, and B2 contained C, the screen showed one single box for A with all four levels of cards flattened together. **The hierarchy was invisible**, which is the one thing this window exists to show.
+**1.3.88** · **金色方框一层一层地分开了。** 以前一个文件夹长出来的金框，会把它**整棵
+子树**的卡全摊平吞进去——A 里面嵌着 B1、B2，B2 里面又嵌着 C 的时候，屏幕上只有 A 一个
+框，四层的卡混在一起，**层级完全看不出来**，而那正是结构窗存在的意义。
 
-Now **every folder in the subtree gets its own box**, so they nest naturally. Inside a box, the layout splits left to right the way you asked:
+现在**每一层文件夹都发一个框**，框就自然套起来了，一个框内部按你拍板的方式横着切：
 
 ```
 ┌ A ─────────────────────────────────┐
-│  [A's own cards]  ┃  [B1's cards]  ┊  [B2's cards] │
-└───────────────────┸───────────────┸────────────────┘
-          coral line ↑        gold line ↑
-      (this level ↔ subfolders)  (sibling ↔ sibling)
+│  [A 自己的卡]  ┃  [B1 的卡]  ┊  [B2 的卡] │
+└────────────────┸────────────┸──────┘
+        珊瑚橙竖线 ↑      金色竖线 ↑
+      （本级 ↔ 子文件夹）  （同级 ↔ 同级）
 ```
 
-- The **coral `#FF6B6B` line** marks a **change of level**: this folder's own cards ↔ its subfolders.
-- The **gold line** (the same gold as the boxes) marks **siblings**: two subfolders side by side. Deeper levels work the same way — C inside B2 gives B2 an internal "B2's own cards ┃ C", again coral.
+- **珊瑚橙 `#FF6B6B` 实线**分的是**跨层**：这个文件夹自己的卡 ↔ 它的子文件夹；
+- **金色实线**（和框同一个金）分的是**同级**：两个兄弟子文件夹之间。
+  再深一层也一样——C 在 B2 里，B2 内部又是「B2 自己的卡 ┃ C」，还是珊瑚橙。
 
-Three more things came with it, all from the same report:
+另外三条一起改了（都是同一次报告的）：
 
-- **Blue manual boxes now sit above gold boxes.** With gold boxes nesting, a blue box is usually inside several of them; without a higher layer it gets covered by the inner ones.
-- **A gold box is a container: cards inside it cannot be dragged into another gold box**, nor into the parent's "own cards" zone (the other side of the coral line). The card **stops at the boundary** rather than sliding in and bouncing back. **A blue manual box cannot leave the gold box it sits in either** — neither by dragging nor by resizing. A blue box is *not* a container, though: cards still move in and out of it freely.
-- **Dragging a gold box carries everything inside it.** Cards already did; what was missing was **blue manual boxes** — they store their own rectangle, so they used to stay pinned in place while the cards moved out from under them.
+- **蓝色收纳方框现在压在金色方框上面。** 金框变成嵌套的之后，一个蓝框常常嵌在好几层
+  金框里面，不给它一个更高的层级就会被内层金框盖住。
+- **金框是容器了：里面的卡拖不进别的金框**，也不能拖进上一级"自己的卡"那一块
+  （就是珊瑚橙线的另一边）。拖动时**卡片停在那条边界上**，不是滑进去再弹回来。
+  **蓝色收纳方框也不能移出它所在的那个金框**——拖和拉大小都出不去。
+  而蓝框**不是**容器：卡片照样可以拖进拖出。
+- **拖金框，里面所有元素跟着走。** 卡片本来就跟着；这次补上的是**蓝色收纳方框**
+  ——它是个自己记着矩形的容器，以前拖金框时它钉在原地不动。
 
-**1.3.87** · **Link attachments now travel with your cards** — zip up a crystal and send it to someone, and the lines run exactly the way they do on your machine. (Reported 10-01: "I zipped it and sent it to a friend; on his side every line is left-right.")
+**1.3.87** · **连线接法现在跟着卡片走**——把一颗晶体压缩发给别人，对方打开时线的
+走向和你这边一模一样。（用户 10-01 报：「压缩发给朋友，他那边只有左右连线」。）
 
-The cause was that **the attachment had always lived on your machine**: it sat in the view state, keyed by *which layer you happened to be standing on*. So a different computer starts empty, and copying the folder elsewhere in your own vault breaks the key too — **the zip never carried it**. It is now written into each card's own frontmatter:
+根因是**接法一直存在本机**：它在视图状态里，而且键是"你当时站在哪一层"。所以
+换台电脑是空的、把文件夹复制到库里别处键也对不上——**压缩包本身没带走它**。
+现在它写进卡片自己的 frontmatter：
 
 ```yaml
 晶体接法: ["[[02-中继]] b t"]
 ```
 
-One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **top**" (`t/r/b/l` = top/right/bottom/left). Only lines you **dragged by hand** are written; anything you never touched is left alone (the default attachment is computed from the layout, so it already comes out the same on any machine). A card with ten hand-routed lines gains roughly 250 bytes.
+一条 = 「往 `02-中继` 那根线，从我的**下**边出去、进它的**上**边」（`t/r/b/l` 是上下右左）。
+只在**你亲手拖过连接点**的那些线才写，没动过的一律不写（默认接法是按位置算出来的，
+本来就换哪台电脑都一样）。一张卡手动调过 10 根线，也就多约 250 字节。
 
-> - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
-> - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
-> - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
+> - **目标写成 `[[双链]]` 的形状**，所以给那张卡改名时 Obsidian 会连它一起改，
+>   接法不会失联。
+> - **老接法会在开库时自动搬进文件**（一次最多搬一批，剩下的下次开接着搬）。
+> - 顺手把「写进文件却读不回来」那条路堵了：解析器原来被调两道，第二道拿到的
+>   已经是对象，被当成字符串整表丢掉——文件里写着、屏幕上却没生效，一声不响。
 
-**1.3.86** · Fixes: **a blue line always attached on the left and right sides, wherever the cards sat**. Two cards stacked one above the other still had their line leave the right edge and loop back into the left. The cause was the fallback used when nothing was set by hand: it was hard-wired to left/right (whichever card is further left gets the left side). It now **picks the facing side from the geometry**: cards stacked vertically run bottom-to-top, cards side by side run right-to-left.
-There is a second layer to this, and it is where switching computers comes in: **the attachment you set by hand lives in that machine's view state, not with the cards** — so carrying your material to another computer leaves every one of them behind, and the whole screen degrades to left/right. With the geometry-based default, **the default attachment is derived from the layout**, identical on any machine; the ones you dragged by hand still win over it (manual > automatic).
+**1.3.86** · 修：**蓝色连线不管卡片怎么摆，永远从左右两边接**。上下叠着的两张卡，
+线也是从右边出去、绕一圈回到左边。根因是"没有手工指定时"的兜底判据写死了左右
+（只看谁在左谁在右）。现在改成**按位置挑面对面的一边**：上下叠着的走「下→上」，
+左右摆的走「右→左」。
+这件事跟换电脑还有一层关系：**你亲手拖过的接法是存在本机视图状态里的，不跟着
+卡片走**——所以你把资料搬到别人电脑上一跑，一条接法都不在，整屏退化成清一色左右。
+改成按位置算之后，**默认接法是从排布推出来的**，哪台电脑都一样；你亲手拖过的那根
+仍然以你拖的为准（手动 > 自动）。
 
-**1.3.85** · Fixes: **clicking a box's name stopped renaming it**, introduced by 1.3.83. That version made **the whole box** start a drag, and the drag took pointer capture **the instant you pressed**. So on a press-and-release-in-place over the name: the **press targeted the name, the release targeted the whole box**, and since a `click` targets the **nearest common ancestor** of the two, it landed on the box — the name could not be found and renaming died on the spot. (Before 1.3.83 this only worked on **empty** boxes: those returned early and never captured. Opening that early return up also tore down a door that "empty boxes can be dragged" and "click the name to rename" were sharing.) The fix follows the lesson already written in panzoom / holodrag: **capture only after 4px**. A press that never really dragged changes nothing at all.
+**1.3.85** · 修：**点方框的名字改不了名了**——1.3.83 带进来的。1.3.83 让**整个方框**
+都能起手拖动，而拖动在**按下的那一刻**就把指针抓走了。于是「按在名字上、原地松手」
+那一下：**按下的目标是名字、松开的目标变成了整个方框**，而 `click` 的目标是这两者的
+**最近公共祖先**——落到方框上，那就查不到名字了，改名当场哑掉。
+（1.3.83 之前它只在**空框**上是好的：那会儿空框在守卫上直接早退，压根没抓指针。
+我放开那道早退的时候，把「空框能拖」和「点名字改名」共用的一扇门一起拆了。）
+改法和 panzoom / holodrag 里早就写着的那条一致：**过了 4px 才抓指针**。
+没真拖的那一下，从头到尾什么都没发生。
 
-**1.3.84** · Fixes: **a long crystal name in the structure window's top bar pushed the buttons behind it out of the window**. The bar did not wrap and had no width cap, and the crystal name is the **only thing in it that grows** — so a long name shoved everything rightward, and since the window's outer element is `overflow:hidden`, **the pushed-out buttons could no longer be clicked**. The name is now capped (ellipsis when it overruns; the full one is in the tooltip) and the bar itself **wraps at the edge** — two guards, so a button can never leave the window again. A **▲ / ▼** pair now sits to the left of the name: **▲ puts the name away, ▼ brings it back** (collapsed, that button shrinks to just 「晶体」 — the way to switch crystals stays reachable). That choice is **remembered in your preferences**, so you do not have to re-collapse it every time you open the window.
-(One aside: if you still see the "an empty box cannot be dragged" bug that 1.3.83 fixed, your plugin probably did not reload — toggle it off and on again in *Settings → Community plugins*.)
+**1.3.84** · 修：**结构窗顶栏的晶体名太长，会把后面的按钮挤出窗外**。那条栏是
+不换行、也没有宽度上限的，而晶体名是里面**唯一会长的东西**——名字一长，它一路
+往右顶，而窗的外层是 `overflow:hidden`，**被顶出去的按钮就再也点不到了**。
+现在给名字封了顶（超长用省略号，完整的那颗在悬停提示里），顶栏本身也改成**到边
+换行**——两道一起上，按钮再也不会跑出窗外。名字左边多了一对 **▲ / ▼**：
+**▲ 收起名字，▼ 放出来**（收起后那颗按钮缩成「晶体」两个字，换晶体的入口还在）。
+收起来的这件事**记进偏好**，下次开窗不用重收。
+（顺带一句：上一版 1.3.83 修好的「空方框拖不动」，要是你还看得到，多半是插件
+没重载——在 *设置 → 第三方插件* 里把它关掉再打开一次。）
 
-**1.3.83** · Four things, all in the storyline / structure window (user, 09-30).
+**1.3.83** · 四条，都在故事线 / 结构窗里（用户 09-30）。
 
-**A box is draggable by its whole body now.** Only the 26px title bar could be grabbed before; now **any blank part of the box** starts the drag. Pressing on a card still drags the card — cards sit above boxes, so that part is given by stacking order rather than by an extra check (which is why "dragging a card area never drags the box" comes for free). The cost, stated plainly: pressing on blank space inside a box **no longer pans the camera** — pan by dragging outside a box, or with the wheel. One thing fixed along the way: **an empty box used to be immovable**; it can be positioned now.
+**方框整块都能拖了。** 以前只有顶上那条 26px 的标题栏能抓，现在框里**任何一块空白**
+都能起手。压在卡片上时拖的仍然是卡片——卡片层级比框高，这一条是层级给的，不用额外判
+（所以「拖卡片区域不会拖框」是白拿的）。代价说清楚：在框的空白处按下**不再平移画面**，
+推画面请拖框外面，或者用滚轮。顺带修好一条：**一个还没装卡的框以前拖不动**，
+现在也能摆了。
 
-**Lines inside a gold box now run the same way they do inside that folder.** The "attachment" (which side of a card a line leaves from, and how it bends) was recorded **per layer**, so looking at a gold box from the outside found no record and fell back to the default "whichever card is further left gets the left side" — the same pair of cards, the same single line, drawn differently in the two places, with nothing on screen explaining why. Now **every layer's record counts, with the current layer winning**.
+**金色方框里的连线，走线方式和进到那个文件夹里一样了。** 「接法」（这根线从卡片的
+哪一边出去、怎么拐）是**按层**记的，站在外面看金色方框时查不到那一份，就退回默认的
+「看谁在左谁在右」——同一对卡、同一根线，两个地方长得不一样，而屏幕上没有任何东西
+解释这件事。现在**各层的接法都算数，当前这一层优先**。
 
-**Boxes are on the grid again.** A manual box snaps to the grid (same ruler as cards: the **bottom-left corner**), and the cards inside move by **one and the same offset** — their relative positions do not change at all, so they never collapse into each other. A gold box has no coordinates of its own, so it snaps by **whole squares** instead. **Resizing is still free** — only *where* a box sits needs to line up. (The grid was removed from boxes in 1.3.34; this version puts it back, as asked.)
+**方框也走格点了。** 手动框吸到格点上（判据和卡片同一把尺子，**左下角**），框里的卡
+按**同一段位移整体挪**——相对位置一点不变，不会被挤到一起；金色方框没有自己的坐标，
+退一步按整格移动。**大小仍然随你拉**，只有摆在哪才需要对齐。
+（格点 1.3.34 撤过一次，这一版按你的要求装回来。）
 
-**The folder picker's header gained a 「取消」.** "Will be created in", new / delete / rename crystal, delete / rename card, and the structure window's crystal picker all open the same panel, so closing it is now one button for all of them. (Before, the only way out was clicking 「将建在」 again — a button whose label reads "will be created in", which does not look like a close.)
+**挑文件夹那块面板的抬头多了一颗「取消」。** 将建在、新建 / 删除 / 重命名晶体、
+删除 / 重命名卡片、结构窗挑晶体——它们打开的都是这块面板，关法从这一版起统一成
+这一颗（以前只能再点一次「将建在」把它收起来，那颗按钮叫「将建在」，不像一个"关"）。
 
-**1.3.82** · New: **the structure window can now delete a whole batch of cards at once**. Once you have boxed some cards (「框：卡」 + 「选框」 in the top bar), a **red-outlined 「删除卡片 (n)」** appears — one click sends those cards to the **recycle bin together with their note files** (recoverable), leaving the **crystal they belonged to untouched**.
-What it deletes is a **file**, so the cost is stated in three places: the count on the button, the tooltip, and the hint line below. This window has **no confirmation dialog** by design (settled 09-20), so the hint line is the only notice it gives.
-**D does not delete cards**: a single bare keystroke putting several files in the recycle bin is far too easy to trigger, especially with your hand on the arrow keys nudging cards. Deleting goes through that button.
-(The vault's own story view still only moves cards in card mode — there is no such button there.)
+**1.3.82** · 新增：**结构窗里可以一次删掉一批卡片**。框选卡片（顶栏「框：卡」＋「选框」，
+框住几张）之后，顶栏多出一颗**红框的「删除卡片（n）」**——点一下，这几张
+**连笔记文件一起进回收站**（能捡回来），卡片所在的**晶体不动**。
+删的是**文件**，所以代价写了三处：按钮上的张数、悬停那句话、底下那条说明条
+——这扇窗**没有确认弹窗**是既定的规矩（09-20 定的），说明条就是仅有的告知。
+**按 D 不删卡**：一个裸按键就能把好几个文件扔进回收站，太容易误触
+（那会儿手正放在方向键上挪卡片）。要删就走那颗按钮。
+（库那一屏的卡档仍然只有移动——那边没有这颗按钮。）
 
-**1.3.81** · Fixes: **clicking "Edit" left a stray blank tab behind** (full screen, floating window and embedded alike). The plugin asked the host to "reuse an existing tab" with `getLeaf(false)`, and that call **does not** mean "reuse one" — internally the host runs `getUnpinnedLeaf()`, which asks for **an unpinned** tab and **creates a fresh empty one** whenever the active tab happens to be pinned. While you are in the reader, the active tab is **the vault's own**, so every ✎ click added one. The proof: a probe in the host console printed the call stack at the moment a tab was inserted into the DOM (`mountEditor → getLeaf → getUnpinnedLeaf → setActiveLeaf → … → insertBefore`). The fix: that spot **needs the class, not a real tab** — it now takes the constructor from an already-known markdown tab, which is a lookup: no activation, no creation.
+**1.3.81** · 修：**点「编辑」会凭空多出一个空白标签页**（全屏 / 浮窗 / 嵌入都中）。
+根因是插件向宿主"借一颗现成的标签页"时用的是 `getLeaf(false)`，而那句话的语义
+**不是**"拿一颗现成的"——宿主内部走的是 `getUnpinnedLeaf()`：**"拿一颗没被钉住的"**，
+当前活动的那颗要是钉住的，它就**当场造一个新的空页**。你在阅读器里时，活动的那颗
+正是**晶体库自己**，于是每点一次 ✎ 就多一个。
+实证是往宿主 Console 挂了个探针，在标签页被插进 DOM 的那一刻打出了调用栈
+（`mountEditor → getLeaf → getUnpinnedLeaf → setActiveLeaf → … → insertBefore`）。
+改法：那个位置**根本不需要一颗真标签页，只需要它的"类"**——改成从已经查到的
+markdown 标签页上取构造器，只是查表，不激活、不新建。
 
-**1.3.80** · Fixes: **a card changed on another machine had not been picked up here since 1.3.59**. When sync brought over new body text, concept, source, tags or position, **none of it changed** and the screen did nothing — it looked as if the notification never arrived. The cause: when the position field was added, the call **shifted its arguments by one**, so the card object was squeezed out; a second thing of the same name was in scope, so **nothing threw**. The tests caught 2 cases; what was broken was the whole sync path.
+**1.3.80** · 修：**别的机器改过的卡，这边从 1.3.59 起就没跟上过**。多设备同步把
+改好的正文、概念、来源、标签、坐标传过来时，**一样都不会变**，屏幕上什么都不发生——
+看着像通知根本没送到。根因是加「晶体坐标」那一次，调用**参数错位了一格**，
+卡片对象被挤掉；而那个名字在作用域里正好还有一份，于是**不报错**。
+测试只逮到 2 条，实际断掉的是整条同步链路。
 
-**1.3.79** · Fixes: new cards still landed at the "default coordinates". In 1.3.77 I had used **screen coordinates** where **world coordinates** were needed, and the two **only coincide when the camera sits at the origin with zoom 1** — so a new card always landed somewhere **with no relation to where you had panned**. The conversion now happens first: **the "current viewport" you meant is wherever the camera is right now**, so a new card really does land **5% in from the right edge of the screen you are looking at, vertically centred**.
+**1.3.79** · 修：新卡还是落在"默认坐标"。1.3.77 里我拿**屏幕坐标**当**世界坐标**用了，
+而这两者**只在"相机停在原点、缩放 1"时才重合**——所以新卡永远落在一个
+**和你推到哪儿毫无关系**的固定地方。现在先换算再落座：**你说的"当前视口"就是相机
+此刻的位置**，新卡因而真的落在你正看着的那一屏**右边 5%、上下居中**。
 
-**1.3.78** · Fixes: **in windowed and embedded modes, "Edit" opened your note beside an empty tab**. The cause was not "Edit" itself but the assumption under it: split away from "the currently active leaf" — and those two modes **have a leaf of the plugin's own**, which can be the active one. The split now picks an existing markdown leaf itself. **Full-screen mode is unchanged word for word** (there, "the most recently used leaf" was your note all along).
+**1.3.78** · 修：**浮窗 / 嵌入档下点「编辑」会把笔记开到一颗空标签页旁边**。
+根因不在"编辑"本身，在它依赖的那个前提：从"当前活动的那颗叶子"裂一半——
+而这两档**多了一颗属于插件自己的标签页**，它完全可以就是活动的那颗。
+现在 split 的基准自己挑一颗已有的 markdown 叶子。**全屏档逐字不变**
+（那两档下"最近用过的那颗"本来就是你的笔记）。
 
-**1.3.77** · Fixes: **a card created inside a sub-folder still landed at the default position** — there are two ways to create a card and I had only placed one of them, while you were using the other ("✎ write it in the editor"). Both are "create a card", so the position had to behave the same. The landing formula is now the one you specified: **5% in from the right of the viewport** (the card's **right edge** sits at "right edge minus 5% of the width", vertically centred), and it is **not snapped to the grid** — you gave an exact formula, and snapping would knock it half a square off.
+**1.3.77** · 修：**建在子文件夹里的新卡还是落在默认坐标**——建卡有两条路，
+我只在其中一条里摆了位，而你走的恰好是另一条（「✎ 在编辑器里写」）。
+两条路都是"建一张卡"，位置这件事只能一样。落点也按你定的公式改成
+**视口右侧 5%**（卡片**右边缘**落在"右边减 5% 宽"上，纵向居中），
+**不吸附格点**——你给的是具体公式，硬吸反而会差半格。
 
-**1.3.76** · Fixes: **a card created inside a sub-folder was not placed in the structure window's viewport** (it fell back to the default position). The test used to be "the card's crystal chain must equal the layer you are looking at exactly", but **cards are usually created in a deeper folder** — it is plainly drawn on that screen (card lookup is recursive) and was still being rejected.
+**1.3.76** · 修：**建在子文件夹里的新卡不会被摆进结构窗的视口**（落回默认位置）。
+判据原来写的是"卡片所属晶体的链必须和你看着的那一层完全相等"，而**卡片常常建在
+更深的子文件夹里**——它明明画在这一屏上（取卡片是递归的），却被这条判据挡掉了。
 
-**1.3.75** · The reader's top bar can be **collapsed**: a new icon at its right end squashes it down to that one icon, freeing a strip the desk can use — the structure window and page windows can now sit where the bar used to be. **The icon rotates 180° between the two states** (arrow up when expanded, meaning pressing moves things up; arrow down when collapsed, meaning pressing brings them back), and it is **always the same glyph** — the tooltip is what explains the state. Expanding again **pushes down** any window that had moved under the bar.
+**1.3.75** · 阅读器顶栏可以**收起来**了：顶栏最右端多一颗图标，点一下把它压成一颗图标，
+桌面就多出一条——结构窗和页面窗能摆到原先顶栏占的位置上。**图标两档之间转 180°**
+（展开态箭头朝上＝按下去内容往上走，收起态朝下＝按下去挤回来），
+**图形始终是同一个**，状态的差别由鼠标悬停那句话讲清楚。展开时被压在顶栏下面的窗
+会**跟着往下让**。
 
-**1.3.74** · Four fixes to 1.3.73 plus one you reported: the embedded mode's resize observer **was never created at all** — a declaration-order error, swallowed by a `catch` that left no trace; embedded mode scaled the vault to the whole screen instead of the tab (card rows overflowed a half-width split); double-clicking the mode button skipped a mode; and that button's refresh missed the re-layout. **And: a card saved into the vault now appears in the structure window immediately** — it used to need closing and reopening (the refresh is now wired to "the vault redrew" instead of being added to each entry point).
+**1.3.74** · 修 1.3.73 的四处 + 一处你报的：嵌入档那个"跟着标签页大小走"的观察器
+**因为一个声明顺序错误从来没建起来过**（而且被一个 catch 吞掉了，没留任何痕迹）；
+嵌入档按整块屏幕而不是标签页缩放（卡片会撑出半宽的分屏）；连点两下切换按钮会跳档；
+顶栏那颗按钮的刷新漏了重排。**另外：把卡片存进晶体库之后，结构窗现在会实时显示**
+——以前要关一次再打开（刷新的收口从"逐个入口"移到了"库重画就刷窗"）。
 
-**1.3.73** · A third mode, 「**嵌入**」 (embedded): the vault lives inside its own Obsidian tab, covering nothing, and can sit side by side with other tabs. The top-bar button now **cycles through all three** (full screen → floating window → embedded) and names the one you will get. Embedded mode **does not lock your note's scrolling** (the other two do — they sit over the note).
+**1.3.73** · 新增第三档「**嵌入**」：库就长在它那颗 Obsidian 标签页里，不盖任何东西，
+可以和别的标签页分屏。顶栏那颗按钮变成**三档循环**（全屏 → 浮窗 → 嵌入），
+按钮上写的就是下一档叫什么。嵌入模式**不锁笔记的滚动**（另外两档会，它们盖在笔记上）。
 
-**1.3.72** · Six fixes to windowed mode: **satellites and floating windows were offset** (their coordinates come from the screen, but the layer they live in uses layer-local coordinates — the two differ by the window's origin once it is not fullscreen); **the resize grip stayed on your note after closing the vault** (and only ever accumulated); drag listeners were never unbound (six leaked per open); **the card panel could be taller than the window** (`vh` always measures the viewport) — the CSS now asks how big *this layer* is; **the toolbar was clipped in a narrow window** (✕ included) — it wraps now; and a window wider than the screen could put the grip out of reach.
+**1.3.72** · 浮窗模式的六处修正：**卫星和悬浮窗跑偏**（它们的坐标是屏幕坐标，
+而它们住的那一层是"层内坐标"，浮窗时差一个窗口原点）；**右下角抓手关库后还留在笔记上**
+（而且只增不减）；拖拽监听没摘（每开一次漏六个）；**卡片面板会高于窗口**
+（`vh` 量的永远是视口）→ 现在 CSS 改问"这一层多大"；**顶栏在窄窗口里被裁掉**
+（连 ✕ 都点不到）→ 改成可换行；窗口比屏幕宽时抓手跑到屏幕外。
 
-**1.3.71** · Fixes a fatal bug in 1.3.70: **the vault would not open at all** (`Cannot access 'j' before initialization`). I had declared `viewBox` *after* the line that reads it — a temporal-dead-zone error — and in the production bundle the variable is minified to a single letter, so the message names nothing recognisable. The declaration now comes first.
+**1.3.71** · 修 1.3.70 的致命错误：**晶体库打不开**（报 `Cannot access 'j' before initialization`）。
+原因是我把 `viewBox` 的声明放在了用到它的那行**之后**（一个 TDZ 错误），而生产包里变量名被压成
+一个字母，从报错上完全看不出是谁。现在声明挪到了使用之前。
 
-**1.3.70** · **Windowed mode**: the vault no longer has to fill the screen — it can shrink to a draggable, resizable rectangle floating over your note, so you can read and use the vault at the same time. Pick the default in the plugin settings, or flip it any time with the button in the vault's top bar. (The version jumps from 1.3.60 because this is an architectural change: the vault gained a notion of *how much screen it occupies*, and every piece of coordinate maths that assumed "the viewport" now asks "this layer" instead.)
+**1.3.70** · **浮窗模式**：库可以不占满屏，收成一块可拖可缩的矩形浮在笔记上方，
+一边看笔记一边用库。插件设置里选默认档，库里顶栏那颗按钮随时切。
+（版本号从 1.3.60 跳到这里：这是一次架构调整——库第一次有了"占多少屏幕"这个概念，
+所有"拿视口当边界"的坐标计算都改成了"拿这一层界面当边界"。）
 
-**1.3.60** · Boxes are written to disk: one `.crystal-boxes.json` per crystal (dot-prefixed, so Obsidian never shows it), holding each box's name, size, collapsed state and members. Positions that only ever lived on this machine are moved in automatically the first time you open the vault after upgrading.
+**1.3.60** · 收纳方框落盘：每颗晶体一个 `.crystal-boxes.json`（点开头，Obsidian 里看不见），
+名字、大小、收起状态、成员都在里面。老版本里只存在本机的位置，升级后第一次开库会自动搬进去。
 
-**1.3.59** · Card positions are written into the card's own frontmatter (`晶体坐标: [3, 5]`, anchored at the **bottom-left corner**) — so the same vault on another machine has the same arrangement. Also: manual boxes are **off the grid** (they go wherever you drag them), and new cards and 「＋ 框」 **land where you are looking** instead of in a fixed corner of the world you have to pan back to.
+**1.3.59** · 卡片坐标写进卡片自己的 frontmatter（`晶体坐标: [3, 5]`，以**左下角**为准）
+——换台电脑打开，相对摆放位置一样。同时：收纳方框**取消格点**（拖到哪停哪），
+新建的卡片和 `＋ 框` **落在你正看着的地方**（以前建在世界的固定角落，视口推远了得推回去找）。
 
-**1.3.58** · Manual boxes are **scoped to their crystal**. They used to be global — switch to another folder and the other layer's boxes were still sitting there.
+**1.3.58** · 收纳方框**按晶体分层**。以前它是全局的——换一个文件夹看，别的层画的框还在原地摆着。
 
-**1.3.57** · Cards get a **grid and arrow keys**: drags snap to the grid, and arrow keys step a selection one square at a time. The minimum unit is a tenth of a card's width, anchored at the **bottom-left corner**.
+**1.3.57** · 卡片的**格点与方向键**：拖动吸附到格点，选中后方向键一格一格挪。
+最小单位 = 卡片宽的 1/10，坐标以**左下角**为准。
 
-**1.3.56** · Four fixes to Import card. Two matter: clicking a **folder name** in the card picker silently changed your "create cards in" setting, and dropping an imported card onto a sub-crystal box did nothing at all (it now tells you to use 「＋ 框」).
+**1.3.56** · 修「导入卡片」的四件事。其中两件要紧的：在挑卡片的选择器里点**文件夹名**
+会静默改掉你的「将建在」；外来卡拖进子晶体框时一声不响（现在会告诉你去用「＋ 框」）。
 
-**1.3.55** · **Import a card**: pull a card in from another crystal, drop it into a box, and **cross-level blue links** work from then on. The card itself is not touched.
+**1.3.55** · **导入卡片**：从别的晶体引一张卡到这一屏上来，拖进收纳方框，
+**跨级连蓝线**从此成立。卡片本身一个字都不动。
 
-**1.3.54** · **Box cards in and move the whole batch**. A 「框：卡」 button joins the top bar — box a few cards, drag any one of them and the batch moves, and on release the whole batch is re-filed. Before this, filing a dozen cards into a box meant dragging them one at a time.
+**1.3.54** · **框选卡片、整批拖走**。顶栏多一颗「框：卡」——框住几张，按住其中任意一张
+整批一起动，松手整批判归属。在这之前，把十几张卡收进一个框只能一张一张拖。
 
-**1.3.53** · Fixed: a dragged box moved a different distance from a dragged card (whenever the camera was zoomed), and dragging a collapsed box flung its cards outside it.
+**1.3.53** · 修：拖框走的世界距离和卡片不一致（相机会缩放时框走得短）；收起态的框一拖就把卡片甩到框外。
 
-**1.3.52** · Manual boxes became **boxes you draw yourself**: draggable, resizable, no longer just a computed shell around cards. And when collapsed, an outside card with a blue line into it gets a **yellow dot**; hover it and the related boxes **flash around their edge**.
+**1.3.52** · 收纳方框改成「**你自己画的框**」：可以拖、可以拉大小，不再只是卡片周围一圈算出来的外壳。
+收起之后外面有蓝线连进来的卡会点一个**黄点**，鼠标悬停它，相关的框**边框闪一圈**。
 
-**1.3.51** · Box colour darkened. The first pass was so faint it was invisible on the library's own dark background.
+**1.3.51** · 收纳方框的颜色加深。第一版太浅，在库自绘的深底上几乎看不见。
 
-**1.3.50** · Fixed: empty boxes were not drawn, so 「＋ 框」 looked like it did nothing. You have to be able to *see* a box before you can drag cards into it.
+**1.3.50** · 修：空框不画 → 「点了 ＋ 框 一点反应都没有」。建完框要能把卡拖进去，而拖进去的前提是**屏幕上看得见那个框**。
 
-**1.3.49** · Dragging a box's **title bar moves the whole group of cards** with it.
+**1.3.49** · 拖收纳方框的**标题栏 = 整组卡片一起挪**。
 
-**1.3.48** · The 「**＋ 框**」 entry point for manual boxes; drag cards in and out; delete a box (a box is just a grouping — deleting one does not touch your cards).
+**1.3.48** · 手动收纳方框的入口「**＋ 框**」；卡片拖进拖出；删框（框只是分组，删框不动你的卡）。
 
-**1.3.47** · Fixed: boxes were not being cleared from the stage, so they stacked up one layer per redraw.
+**1.3.47** · 修：方框没被清场，每重画一次就叠一层。
 
-**1.3.46** · **Boxes** in the structure window: one per sub-crystal, renameable and collapsible. Collapsing puts the cards and their lines away — but "there is still something in there" is never lost.
+**1.3.46** · 结构窗的**收纳方框**：每个子晶体自动一个，可改名、可收起；收起后里面的卡和线一起收起来，
+但「那边还有东西」这件事不丢。
 
-**1.3.45** · A 「concept」 line on the desk's card windows.
+**1.3.45** · 桌面卡片窗顶上补一行「概念」。
 
-**1.3.44** · The structure window section filled in (**view / write** modes, the three right-click targets); ＋ pages paginate markdown **by line, and take effect on Enter**; getting started gained a step about putting something readable into the cards folder. The README was rewritten in this version to put **文献模式 · 桌面 (the reader's desk)** front and centre.
+**1.3.44** · 结构窗那一节补全（**看 / 写**模式、右键三种落点）；＋页的 markdown **按行分页、改完按回车**；
+上手补一步「往卡片目录里放一份能读的东西」。README 在这版重写过一次——把**文献模式 · 桌面**提到主功能位置。
 
-**1.3.43** · **Rename card / Rename crystal** buttons; and a fix for "somebody renamed a file in Obsidian and the plugin never noticed" — which used to leave a grey card on the graph that opened to nothing.
+**1.3.43** · **重命名卡片 / 重命名晶体**两颗按钮；修「别人在 Obsidian 里改了名，插件不知道」——
+以前会在图上留下一张灰色的、点进去什么都没有的卡。
 
-**1.3.42** · Every window gets a 「收纳」 (dock) button, unconditionally.
+**1.3.42** · 每一扇窗都有一颗「收纳」，不带条件。
 
-**1.3.41** · The `+` at the top of the dock: **external tabs**, so you can keep deepseek, Google and the like open inside the reader.
+**1.3.41** · 收纳栏最上面那颗 `+`：**外部标签页**，可以内嵌 deepseek、Google 这些站点。
 
-**1.3.40** · The reader's **dock**, and the toggle for the 「边看边记」 column.
+**1.3.40** · 阅读器的**收纳栏**，以及「边看边记」那一栏的开关。
 
-**1.3.39** · The storyline gets its own **view / write** modes: in write mode dragging a line really writes a `[[link]]`, the marquee deletes blue lines, and there is one undo.
+**1.3.39** · 故事线也有「看 / 写」两档了：写模式下拖线真写 `[[双链]]`、选框删蓝线、一层撤销。
 
-**1.3.38** · Removed the "why does this link exist?" box in write mode — it interrupted you once per line while you were drawing several. You can still hand-write the reason after the `]]`; the plugin just no longer asks.
+**1.3.38** · 去掉写模式里那个「为什么连过去？」输入框——连着拖几根线时每根都被它截一下。
+理由照样可以手写在 `]]` 后面，只是不再由插件代劳。
 
-**1.3.37** · A 「**选框**」 (marquee) in write mode to delete blue lines: box in a few and the matching `[[link]]` is cut out of the card body — both directions, byte-exact, one undo.
+**1.3.37** · 写模式下多一颗「**选框**」删蓝线：框住几根，从卡片正文里精确挖掉那条 `[[链接]]`
+（两个方向一起删、逐字节可还原、一次撤销）。
 
-**1.3.36** · Blue lines became **orthogonal polylines** like the gold ones (straight runs with rounded corners) instead of bezier arcs — an arc cuts across the middle of cards, and two of them crossing makes it impossible to tell which connects to which.
+**1.3.36** · 蓝线改成和金线一样的**折线**（直线 + 圆弧拐角），不再是贝塞尔弧
+——弧线从卡片中段穿过去，两根一交就看不出谁接谁。
 
-**1.3.35** · Blue lines can attach from top / bottom / left / right (it honours the port you dragged from); in write mode, **right-clicking a card hides every link into and out of it**, with a 「显示全部」 button to bring them all back; the rubber-band preview is now the same shape and colour as what you get on release.
+**1.3.35** · 蓝线能从上 / 下 / 左 / 右接（认你拖的那个连接点）；
+写模式下**右键一张卡就藏掉它所有入链出链**，顶栏「显示全部」一键收回；橡皮筋预览和落地同形同色。
 
-**1.1.31 / 1.1.3 / 1.1.2 / 1.1.1 / 1.1.0** · Scratch notes, the "back" button in read-and-jot, delete a card; and scratch notes went from a pile of text to **a real card placed on the desk**. The odd patch numbers are because a published version number can never be reused.
+**1.1.31 / 1.1.3 / 1.1.2 / 1.1.1 / 1.1.0** · 草稿纸、边看边记的「返回」、删除卡片；
+草稿纸从一堆文字改成**摆到桌面上的一张真卡**。几个补丁版本号是因为发过的号不能复用。
 
-**1.0.2 / 1.0.1 / 1.0.0** · Default card folder became the neutral `cards`; three fixes from the automated review; first commit.
+**1.0.2 / 1.0.1 / 1.0.0** · 默认卡片目录改成中性的 `cards`；按自动审查改三处；首次提交。
 
-## Licence
+## 许可
 
-[GPL-3.0](LICENSE).
+[GPL-3.0](LICENSE)。
