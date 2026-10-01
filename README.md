@@ -299,20 +299,6 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
-**1.3.87** · **Link attachments now travel with your cards** — zip up a crystal and send it to someone, and the lines run exactly the way they do on your machine. (Reported 10-01: "I zipped it and sent it to a friend; on his side every line is left-right.")
-
-The cause was that **the attachment had always lived on your machine**: it sat in the view state, keyed by *which layer you happened to be standing on*. So a different computer starts empty, and copying the folder elsewhere in your own vault breaks the key too — **the zip never carried it**. It is now written into each card's own frontmatter:
-
-```yaml
-晶体接法: ["[[02-中继]] b t"]
-```
-
-One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **top**" (`t/r/b/l` = top/right/bottom/left). Only lines you **dragged by hand** are written; anything you never touched is left alone (the default attachment is computed from the layout, so it already comes out the same on any machine). A card with ten hand-routed lines gains roughly 250 bytes.
-
-> - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
-> - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
-> - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
-
 **1.3.92** · **Dragging a gold box now carries blue boxes stored on deeper layers.** (This is the one the previous versions kept missing.)
 
 **Blue boxes are stored per layer** — wherever you drew it is where it is recorded. Gold boxes, since 1.3.88, exist **on every layer**. Put those two together and you get a shape you hit constantly:
@@ -388,6 +374,20 @@ Three more things came with it, all from the same report:
 - **Blue manual boxes now sit above gold boxes.** With gold boxes nesting, a blue box is usually inside several of them; without a higher layer it gets covered by the inner ones.
 - **A gold box is a container: cards inside it cannot be dragged into another gold box**, nor into the parent's "own cards" zone (the other side of the coral line). The card **stops at the boundary** rather than sliding in and bouncing back. **A blue manual box cannot leave the gold box it sits in either** — neither by dragging nor by resizing. A blue box is *not* a container, though: cards still move in and out of it freely.
 - **Dragging a gold box carries everything inside it.** Cards already did; what was missing was **blue manual boxes** — they store their own rectangle, so they used to stay pinned in place while the cards moved out from under them.
+
+**1.3.87** · **Link attachments now travel with your cards** — zip up a crystal and send it to someone, and the lines run exactly the way they do on your machine. (Reported 10-01: "I zipped it and sent it to a friend; on his side every line is left-right.")
+
+The cause was that **the attachment had always lived on your machine**: it sat in the view state, keyed by *which layer you happened to be standing on*. So a different computer starts empty, and copying the folder elsewhere in your own vault breaks the key too — **the zip never carried it**. It is now written into each card's own frontmatter:
+
+```yaml
+晶体接法: ["[[02-中继]] b t"]
+```
+
+One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **top**" (`t/r/b/l` = top/right/bottom/left). Only lines you **dragged by hand** are written; anything you never touched is left alone (the default attachment is computed from the layout, so it already comes out the same on any machine). A card with ten hand-routed lines gains roughly 250 bytes.
+
+> - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
+> - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
+> - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
 
 **1.3.86** · Fixes: **a blue line always attached on the left and right sides, wherever the cards sat**. Two cards stacked one above the other still had their line leave the right edge and loop back into the left. The cause was the fallback used when nothing was set by hand: it was hard-wired to left/right (whichever card is further left gets the left side). It now **picks the facing side from the geometry**: cards stacked vertically run bottom-to-top, cards side by side run right-to-left.
 There is a second layer to this, and it is where switching computers comes in: **the attachment you set by hand lives in that machine's view state, not with the cards** — so carrying your material to another computer leaves every one of them behind, and the whole screen degrades to left/right. With the geometry-based default, **the default attachment is derived from the layout**, identical on any machine; the ones you dragged by hand still win over it (manual > automatic).
