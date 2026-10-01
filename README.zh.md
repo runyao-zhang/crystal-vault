@@ -324,6 +324,14 @@
 `main.js` / `manifest.json` / `styles.css`，放进 `<你的 vault>/.obsidian/plugins/crystal-vault/`，
 然后在 *设置 → 第三方插件* 里启用。
 
+### 遇到问题 / 想提意见
+
+**QQ 群：831440768**
+
+装不上、用着哪儿不对劲、想要个什么功能，都可以直接进来说。
+（在 GitHub 上开 [Issue](https://github.com/runyao-zhang/crystal-vault/issues) 也一样，
+只是群里问一句通常快得多。）
+
 ## 上手
 
 1. 在插件设置里把**卡片目录**指到你放笔记的那个文件夹。默认是 `cards`——

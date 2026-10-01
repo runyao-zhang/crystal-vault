@@ -248,6 +248,12 @@ Search for **Crystal Vault** in *Settings → Community plugins → Browse*.
 
 Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/runyao-zhang/crystal-vault/releases/latest) and put them in `<your vault>/.obsidian/plugins/crystal-vault/`, then enable the plugin in *Settings → Community plugins*.
 
+### Problems, questions, requests
+
+**QQ group: 831440768** — a Chinese-language group; it is where this plugin's users actually are, so it is usually the fastest place to get an answer.
+
+You can also open an [issue](https://github.com/runyao-zhang/crystal-vault/issues) on GitHub.
+
 ## Getting started
 
 1. Open the plugin settings and point **Card folder** at the folder you keep your notes in. It defaults to `cards` — if you do not have one yet, create a folder with that name in your vault. The settings pane tells you right away whether that path exists and how many crystals are in it.
