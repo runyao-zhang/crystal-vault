@@ -34,8 +34,12 @@ import {
   clampInto,
   // 3.0 刀 48：蓝框"住在哪个金框里"的判据——**看成员不看位置**（见那边）。
   // 抽到 storyboxes.js 是为了能单独验：1.3.88 那版用位置判，用户一报就中。
+  //
+  // ⚠️ 1.3.90 起它**只给"蓝框不许移出金框"那条约束用了**。跟随那条换成了
+  //    `box.paths ∩ mb.paths ≠ ∅`（见 `followers` 那段）——那个判据是充要的。
+  //    原来还有个 `isUnderBox`（"G 是不是 home 的祖先"），随那条一起删了：
+  //    它服务的那个判据本身是错的，留着只会是下一个人踩进去的第二种规矩。
   crystalHomeOf,
-  isUnderBox,
   // 3.0 刀 30：归属判定整批走 `assignCards`——单张那条路已经并进去了
   // （"批里只有一张"是它的特例）。原来那三个单张的入口
   // （`boxOfPath` / `addCardToBox` / `removeCardFromBox`）已经删掉，
@@ -685,29 +689,56 @@ export function renderStorylineStage(ctx, path) {
         const fy = mr.y + mr.h / 2;
         return fx >= r.x && fx <= r.x + r.w && fy >= r.y && fy <= r.y + r.h;
       };
-
       const followers = [];
       let blueClamp = null;
       if (box.crystal) {
-        const r = rectOf(box, now, NODE_W, NODE_H);
+        // **跟随判据：这张蓝框里有没有"这一趟真的会动的卡"。**
+        //
+        // 拖金框时动的卡**恰好**是 `box.paths`——上面那个 `start` 就是按它拍的
+        // 快照（`paths` 是递归的，而且**不含外来卡**；外来卡本来就不跟着金框走，
+        // 所以这里用同一个集合是**充要**的）。于是：
+        //   · 有交集 → 它有一部分卡在动 → 框必须跟，否则那部分卡当场跑到框外面；
+        //   · 没交集 → 它一张卡都没动 → 框**必须留在原地**。
+        //
+        // 这个判据**完全不看几何**——跟你把框画多大、画在哪、收没收起都无关。
+        //
+        // ⚠️⚠️ **1.3.89 用的是「我的全部成员是不是都在你里面」（`crystalHomeOf`），
+        //       那是错的，而且正好错在用户这一例上**：
+        //       一个蓝框**跨两个同级子文件夹**时，它的共同祖先就是**当前这一层**，
+        //       而当前这一层按用户拍板**不长金框** → 哪个框都装不下它 → 返回 null
+        //       → 退回"框中心落在金框矩形里吗"那条位置判据（1.3.88 的老路）
+        //       → 用户手画的框比金框大，中心落在外面 → **静默不跟**。
+        //       表现就是用户报的：「卡片移出蓝框好一段距离，框还留在原地」。
+        const moving = new Set(box.paths);
         for (const mb of allBoxes) {
-          if (mb.crystal || mb.collapsed) continue;
-          const home = crystalHomeOf(allBoxes, mb.paths);
-          // home 是这个金框自己、或它下面的某一层 → 里面所有卡都跟着这个框走，
-          // 所以这个蓝框也必须跟着走（**祖先也要跟**：拖 A 的时候 C 里的卡同样在动）。
-          if (!(home ? isUnderBox(allBoxes, home, box) : r && centreInside(mb, r))) continue;
+          if (mb.crystal) continue;
+          const mine = Array.isArray(mb.paths) ? mb.paths : [];
+          if (!mine.some((p) => moving.has(p))) continue;
           const mr = rectOf(mb, now, NODE_W, NODE_H);
           if (!mr) continue;
+          const el = (ctx._boxEls || new Map()).get(String(mb.id));
+          // ⚠️ 位移要从**它此刻真正的 DOM 原点**加起，不能从模型 x/y 加起。
+          //    收起态的框，那条标题栏摆在**重心**上而不是矩形左上角
+          //    （见 renderBoxes），拿模型 x/y 当原点的话，一拖金框，
+          //    里面收着的蓝框会当场跳到别处。**这一条也是"收起的框原来干脆不跟"
+          //    那个省略的代价**——现在它跟着走了，所以原点必须取对。
+          const ox = el ? parseFloat(el.style.left) : NaN;
+          const oy = el ? parseFloat(el.style.top) : NaN;
           followers.push({
             id: String(mb.id),
             x: mr.x,
             y: mr.y,
-            node: (ctx._boxEls || new Map()).get(String(mb.id)),
+            ox: Number.isFinite(ox) ? ox : mr.x,
+            oy: Number.isFinite(oy) ? oy : mr.y,
+            node: el,
           });
         }
       } else {
-        // 蓝框不许移出它所在的那个金框。**同一个成员判据**——位置判据在这边
-        // 一样会漏（蓝框画大一点就不再"落在"金框里了，于是约束静默失效）。
+        // 蓝框不许移出它所在的那个金框。判据仍然走**成员**（位置判据在这边一样会漏：
+        // 蓝框画大一点就不再"落在"金框里了，于是约束静默失效）。
+        //
+        // ⚠️ 跨文件夹的蓝框**故意不设限**：它确实不属于任何单独一个金框
+        //    （共同祖先正是当前这一层，不长金框）。硬塞一个约束反而让它拖不动。
         const target = crystalHomeOf(allBoxes, box.paths);
         if (target) blueClamp = rectOf(target, now, NODE_W, NODE_H);
         else if (!(Array.isArray(box.paths) ? box.paths.length : 0)) {
@@ -796,8 +827,8 @@ export function renderStorylineStage(ctx, path) {
         // （和这个框自己一样），落盘在 `up` 里——拖动过程中每帧写一次状态没有意义。
         for (const f of followers) {
           if (!f.node) continue;
-          f.node.style.left = f.x + sdx + "px";
-          f.node.style.top = f.y + sdy + "px";
+          f.node.style.left = f.ox + sdx + "px";
+          f.node.style.top = f.oy + sdy + "px";
         }
         applyStorylinePositions(ctx, cp);
         redrawStoryLines(ctx);

@@ -32,8 +32,23 @@
 export const SIDE_CAR = ".crystal-boxes.json";
 /** 文件格式版本。形状对不上（不是 1）就整份丢掉，宁可回默认也不猜。 */
 const FILE_VERSION = 1;
-/** 写盘防抖。**比卡片坐标长**：框是"画完就完了"的东西，不像拖卡片那样连着动。 */
-const FLUSH_MS = 700;
+/**
+ * 合并窗口：**只合并"同一个 tick 里排的几笔"，跨 tick 立刻写。**
+ *
+ * 原来是 700ms 的防抖。它每长一毫秒就多一毫秒的窗口：**用户正好在这段时间里
+ * 关掉库，最后那一笔就得靠关库那条不保证走完的 flush 去救**
+ * （`closeFullscreen` 整个是同步函数，`flushBoxFiles(ctx)` 根本没被 await）。
+ *
+ * 而防抖在这里本来就没多少活干：框的每一次手势（拖完 / 拉完大小）只在**松手**
+ * 时调一次 `setBoxRect`，没有"一帧一笔"要合并。真正需要合并的是
+ * **同一个 tick 里的连着几笔**——比如拖一个金框时，它下面那几个蓝框会各自
+ * `setBoxRect` 一次。`setTimeout(…, 0)` 正好干这件事：同 tick 的合成一笔，
+ * 跨 tick 的当场写掉，窗口缩到"一个宏任务"。
+ *
+ * 代价：拖一下写一次盘。写的是一个几百字节的小 JSON——换掉"用户的框在关库
+ * 那一刻无声地退回去"，这个价钱不值一提。
+ */
+const FLUSH_MS = 0;
 
 function isObj(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -230,7 +245,21 @@ function schedule(ctx) {
 export async function flushBoxFiles(fallbackCtx) {
   if (!dirty.size) return;
   const batch = [...dirty];
-  dirty.clear();
+  // ⚠️⚠️ **不再"先把队清空、再逐笔写"。**
+  //
+  // 原来头一句是 `dirty.clear()`，于是只要这一趟没走到底——拿不到路径、
+  // 写失败、或者**宿主在 `await` 期间就被关掉了**——那一笔就**永远消失**，
+  // 而用户那边一点异样都看不出来。
+  //
+  // 这不是理论，是用户库里真实坏掉的一笔：视图状态（每次拖动同步写）停在
+  // (3003, 294)，边车停在 (2709, 252)，而落盘规则是**文件优先**——于是下次
+  // 开库框跳回旧位置、卡片留在新的地方，看起来就是「卡片跑到蓝框外面去了」。
+  // 关库那条路上 `flushBoxFiles(ctx)` 是**没有被 await** 的
+  // （`closeFullscreen` 整个是同步函数，没地方 await），所以"这一趟会不会
+  // 走到底"根本不由我们决定——**只能保证走不到底时那笔还在队里**。
+  //
+  // 现在的规矩：**写成了才 `delete`**。没写成的（含拿不到路径、没适配层）
+  // 一律留在队里，下一次框动一下、或者下一次关库，会接着再试。
   for (const [key, ent] of batch) {
     // 用**排队时那个 ctx**，不是当下这个。见 `dirty` 上面那段。
     const ctx = ent.ctx || fallbackCtx;
@@ -249,13 +278,11 @@ export async function flushBoxFiles(fallbackCtx) {
     } catch (e) {
       ok = false;
     }
-    // 写失败**放回队里**：只读 vault、目录建不出来、同步中途——这些都会失败，
-    // 而失败了就永久丢掉的话，用户是在"换台电脑"那一刻才发现，那时他能做的
-    // 只有重摆一遍。留在队里，下一次框动一下就会再试。
-    if (!ok && !dirty.has(key)) dirty.set(key, ent);
-    // 失败本身不弹提示：边车写不进去顶多是"别的机器上对不上"，
-    // 而把它说成"出错了"会让人以为他的框要没了。真要诊断看这一行。
-    if (!ok) console.warn("[crystal-vault] 收纳方框边车写失败：" + path);
+    // 写成了才出队；没写成留在队里（见上面那段）。**失败本身不弹提示**：
+    // 边车写不进去顶多是"别的机器上对不上"，而把它说成"出错了"会让人以为
+    // 他的框要没了。真要诊断看这一行。
+    if (ok) dirty.delete(key);
+    else console.warn("[crystal-vault] 收纳方框边车写失败：" + path);
   }
 }
 

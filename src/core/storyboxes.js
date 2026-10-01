@@ -186,7 +186,23 @@ function emitCrystalBoxes(ctx, path, parentId, names, collapsed, out) {
     // 一个空框在屏幕上是个没有解释的方印。但**"自己没卡、下面有卡"的文件夹
     // 照样要发**——`kids` 是递归的，已经把它算进来了，它就是有内容的那一层。
     if (!kids.length) continue;
-    const id = crystalBoxId(sub.join("/"));
+    // ⚠️⚠️ **`k` 自己就是完整的 key，不要再和 `path` 拼一遍。**
+    //
+    // `model.keysAt()` 返回的是 `n.key`（`Python/数据分析` 这种**全路径 key**），
+    // 不是末段名字——`model.js` 的 `nodeAt` 明写着「**只认路径的最后一段**，
+    // key 全局唯一、而且它自己就是那条路径，所以从根一路走下来是白走」。
+    //
+    // 这里原来写的是 `sub.join("/")`（`sub = path.concat([k])`），于是每深一层
+    // 就多拼一截：在 `["Python"]` 这一层看「数据分析」得到的是
+    // `c:Python/Python/数据分析`。**同一个文件夹在不同层看，id 不一样**——
+    // 而 `boxNames` / `collapsedBoxes` 是**按 id 索引**的两张全局表：
+    // 于是"我在这一层把它收起来了，换一层它又自己展开了"，改名同理。
+    // 不报错，只是状态对不上。
+    //
+    // （`sub` 拿去问 model 是对的——`nodeAt` 只认最后一段，所以
+    //  `["Python","Python/数据分析"]` 和 `["Python/数据分析"]` 同一个意思。
+    //  **只有 id 不能这么拼。**）
+    const id = crystalBoxId(k);
     out.push({
       id,
       name: names[id] || String(k),
@@ -453,7 +469,14 @@ export function innermostCrystalBox(boxes, path) {
  * @returns {object|null} 一个都装不下（成员横跨两个文件夹、或者压根没成员）→ null
  */
 export function crystalHomeOf(boxes, paths) {
-  const mine = Array.isArray(paths) ? paths : [];
+  const all = Array.isArray(paths) ? paths : [];
+  // ⚠️ **先剔掉"一张金框都装不下"的成员**（典型是**引进来的外来卡**：它不属于
+  //    这颗晶体的任何文件夹，所以哪个金框的 `paths` 里都没有它）。
+  //
+  // 不剔的话，一个蓝框里只要有**一张**外来卡，`every` 就永远不成立、`home` 恒为
+  // null，于是调用方退回**位置判据**——而那正是 1.3.88 漏判的那条老路。
+  // 表现就是用户报的「有时候跟、有时候不跟」，而触发条件只是"框里混了一张外来卡"。
+  const mine = all.filter((p) => boxes.some((b) => b.crystal && b.paths.indexOf(p) >= 0));
   if (!mine.length) return null;
   let best = null;
   for (const b of boxes) {
@@ -462,24 +485,6 @@ export function crystalHomeOf(boxes, paths) {
     if (!best || (b.depth || 0) > (best.depth || 0)) best = b;
   }
   return best;
-}
-
-/**
- * `G` 是不是 `home` 自己、或者它的**某一层祖先**。
- *
- * 跟随判据要放行祖先：拖 A 的时候 C 里的卡也在一起动，所以住在 C 的那个蓝框
- * 同样得跟着走。只认"等于"的话，拖外层金框时内层的蓝框会留在原地。
- *
- * 圈数上限防数据里出现环（手改过视图状态就可能）——没有它就是一次死循环。
- */
-export function isUnderBox(boxes, home, G) {
-  if (!home || !G) return false;
-  const byId = new Map(boxes.map((b) => [String(b.id), b]));
-  for (let cur = home, i = 0; cur && i < 64; i++) {
-    if (String(cur.id) === String(G.id)) return true;
-    cur = cur.parent == null ? null : byId.get(String(cur.parent));
-  }
-  return false;
 }
 
 /**

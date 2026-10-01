@@ -313,6 +313,27 @@ One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **
 > - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
 > - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
 
+**1.3.91** · Three fixes, all around dragging a gold box:
+
+**① Blue manual boxes still did not follow a dragged gold box.** The test had been wrong all along, and wrong in exactly your case:
+
+It asked *"are **all** of my members inside you?"* But when a blue box spans **two sibling sub-folders**, its common ancestor **is the layer you are standing on** — and by your own decision the current layer gets no gold box. So no box can hold it, the test answers false, and the code falls back to an even older rule that looks at *where the blue box is drawn*. **Your hand-drawn box is bigger than the tight gold box, so its centre lands outside** — and it silently doesn't follow. A blue box holding one **imported** card lands in the same place.
+
+It is now one **exact** sentence: **the cards that move in this drag are precisely the ones under that gold box.** If **any** of the blue box's cards is among them, it follows; if none is, it stays put. Nothing about how you drew it, how big it is, or whether it is collapsed.
+
+> Along the way: **a collapsed blue box now follows too** (its bar sits at the centroid, so the offset has to come from where it actually is — it used to be skipped entirely).
+
+**② Gold boxes were getting a doubled identity.** The same folder produced **a different id depending on which layer you were looking from** — and a box's name and collapsed state are two global tables keyed by id. So *"I collapsed it on this layer and it unfolded itself on the next one"*, and the same for renaming — with nothing said. The cause was the recursive box walk appending the full path to the parent path a second time.
+
+**③ The file that holds box positions silently drops a write.** This one came out of **your own vault's data**:
+
+```
+data.json (view state, written on every drag)   m:6  x=3003  bottom=294
+.crystal-boxes.json (sidecar, 11:55:52)         m:6  x=2709  bottom=252
+```
+
+The two disagree, and the rule is **the file wins** — so the next time the vault opens that box **jumps back** while the cards stay where they are, which reads as *"the cards are outside the blue box"* **whether or not you dragged anything**. The cause: the close path's flush **is never awaited** (`closeFullscreen` is an entirely synchronous function), and the pending-write queue was emptied *before* the write landed. It now **only leaves the queue once the write succeeds**, and the coalescing window went from a 700 ms debounce to **a single tick** (several writes from one release merge; anything across ticks goes out immediately).
+
 **1.3.90** · **The structure window's top bar can now be folded away entirely.** The **▲** at its far left is a single two-state button, and **its colour is the state**:
 
 - **Blue** = every button in the bar is out (the default, same as before);
