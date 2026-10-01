@@ -311,6 +311,20 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.94** · Fixes **a box reverting to an old position after you quit Obsidian and reopen** (1.3.93 did not get to the bottom of it; this is the root cause).
+
+The clue was yours: *"as long as I do not close Obsidian everything is fine; close it and open it again and the bug is back."* Only one thing satisfies both halves — **the stale copy is what gets saved.**
+
+The cause: **the two persistence paths were reading different objects.**
+
+Entering the storyline or the Structure window means entering the **camera stage**, which opens a **draft**; your edits all land in that draft. But the function that saves the view state **read `state.view` only — it never looked at the draft**. So while the storyline was open, every "save" wrote **the old state, the one the draft had not been merged into yet**. The sidecar (`.crystal-boxes.json`) reads draft-first.
+
+So: **the screen is correct** (it reads the draft), **the sidecar is correct**, and **only the view state is stale**. The two paths were bound to diverge — and the divergence **only shows up after a restart**.
+
+That function now uses **the same expression as "commit the draft"** (`{ ...view, ...draft }`), so the two paths read one and the same thing and cannot diverge.
+
+> This also explains why 1.3.93's timestamps could not save you: that version makes "newest wins" work, but **the newer copy was never written into the view state at all** — it sat in the draft the whole time.
+
 **1.3.93** · Fixes **a blue manual box jumping back to an old position when you quit Obsidian and reopen** — while everything looks correct as long as Obsidian stays open.
 
 In your words: *"as long as I do not close Obsidian everything is fine; close it and open it again and the bug is back."* Those two halves pin it down: **the follow was not broken, the write never reached the file.**

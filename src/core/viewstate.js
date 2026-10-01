@@ -543,7 +543,27 @@ export function forgetScreen(view) {
 
 /** 从当前运行时状态里取出要落盘的那一份（ctx.state → 视图状态） */
 export function collectViewState(state) {
-  const base = state && state.view ? state.view : defaultViewState();
+  // ⚠️⚠️ 3.0 刀 52：**必须把草稿并进来**，和 `commitDraft` 用同一个式子。
+  //
+  // 原来这里只读 `state.view`。而在相机档（故事线 / 结构窗）里用户的改动
+  // **全在 `state.draft` 里**——`beginDraft` 那一刻开的那份。于是每一次
+  // `flushViewState()`（拖完框、拖完卡、建完框都会调）写下去的都是
+  // **那份还没并进草稿的旧 view**：
+  //
+  //   · 屏幕上一切正常（界面读的是 `draft || view`）；
+  //   · **边车**（`.crystal-boxes.json`）也正常——`boxfile.js` 的 `viewOf`
+  //     读的就是 `draft || view`；
+  //   · **只有视图状态是旧的**。
+  //
+  // 两条持久化路线读的不是同一个对象，于是必然分叉；而分叉**只在重开之后**
+  // 才显形（用户 10-01 的原话：「只要我不关 Obsidian，一切正常，
+  // 关了再打开，又变成这个 bug 了」）。
+  //
+  // 式子**逐字对齐 `commitDraft`**（`canvas.js`）：草稿只覆盖它自己带的那些
+  // 布局键，其余键原样从 view 带过来。哪天那边改了合并方式，这里要跟着改。
+  const base = state
+    ? { ...(state.view || defaultViewState()), ...(state.draft || {}) }
+    : defaultViewState();
   return {
     ...base,
     v: VIEW_STATE_VERSION,
