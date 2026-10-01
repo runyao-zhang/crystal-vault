@@ -10,11 +10,11 @@ Turn a folder of Markdown cards into a **living crystal vault** — a place wher
      width shrinks and the picture comes out **squashed**.
      Width alone: the browser derives the height from the intrinsic ratio, so it
      scales cleanly at any container size. -->
-table mode:
+Desktop mode:
 
 <img width="1917" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/54550694-81b4-418f-a394-efd485701c1a" />
 
-storyline mode:
+Storyline mode:
 
 <img width="1677" alt="storyline mode" src="https://github.com/user-attachments/assets/65bc91ff-d3d9-4cc0-904f-b8e44be4c3d9" />
 
