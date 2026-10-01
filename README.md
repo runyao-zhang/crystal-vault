@@ -51,7 +51,7 @@ The annoying part of reading is *"what does this actually look like in my vault?
 
 - **A glance, not a departure.** Switching away is *leaving*; a window beside you is just a glance.
 - **Pin it to one crystal.** The 「晶体：…」 button in its top bar picks which crystal it watches, and it is still watching it next time.
-  When the name is too long, click the **▲** to its left to put the name away (the button shrinks to just 「晶体」); **▼** brings it back. That choice is remembered, so you do not have to re-collapse it on the next open.
+- **If the bar is in your way, fold it.** The **▲** at the far left of the bar is a master switch, and **its colour is the state**: **blue** = the buttons are all out; **white** = they are all folded away and only that one button is left. Click again and they all come back. Whether it is folded is remembered, so you do not have to fold it on the next open.
 
 ### Draw: view / write
 
@@ -312,6 +312,15 @@ One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **
 > - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
 > - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
 > - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
+
+**1.3.90** · **The structure window's top bar can now be folded away entirely.** The **▲** at its far left is a single two-state button, and **its colour is the state**:
+
+- **Blue** = every button in the bar is out (the default, same as before);
+- **White** = **all of them are folded away**, leaving only that one ▲; click again and they all come back.
+
+Whether it is folded is **remembered**, so you do not have to fold it again on the next open. (This replaces the 1.3.84 ▲/▼ pair, which folded only the crystal name — that was finer-grained, but this one button now takes the name and the buttons together, so ▼ is gone.)
+
+> **Why folding away the crystal switcher is allowed here** (an earlier version's comments forbade it outright): **the way back is in the same place** — the same ▲ restores everything. What that rule was guarding against was an entry point that is invisible exactly when you need it **with no way back**; this is not that. The floor is unchanged: **this ▲ is never itself folded away**, because it is the only way to bring the bar back.
 
 **1.3.89** · Two fixes, both fallout from 1.3.88:
 

@@ -108,15 +108,26 @@ export const EMBED_CSS =
   // 超长用省略号（名字仍然读得到前半截），完整的那颗在 title 里。
   ".kb-v13-embedcrystal{max-width:200px;overflow:hidden;text-overflow:ellipsis;" +
   "  white-space:nowrap;}" +
-  // ▲ / ▼：把名字收起来 / 放出来。**两颗，不是一颗轮着切**——一颗按钮上塞两个
-  // 动作的话，"点下去是哪一个"没法从屏幕上读出来（09-20 那次「右键只有金色线」
-  // 栽的就是这一类）。摆在名字**左边**（用户点名要的位置）。
+  // ▲：整条顶栏的折叠键（3.0 刀 49，用户 10-01）。**一颗按钮两种状态、颜色即状态。**
   ".kb-v13-embedname{cursor:pointer;font:inherit;font-size:9px;line-height:1;" +
   "  padding:2px 3px;border-radius:4px;border:1px solid rgba(0,200,255,.22);" +
   "  background:none;color:rgba(170,205,230,.8);}" +
   ".kb-v13-embedname:hover{color:rgba(224,240,255,1);border-color:rgba(0,200,255,.5);}" +
-  // `.on` 标的是**当前这一档**：收起时 ▲ 亮、展开时 ▼ 亮。看一眼就知道现在在哪一档。
+  // `.on` = **蓝** = 顶栏全摆着（默认那一档）。
   ".kb-v13-embedname.on{background:rgba(0,140,220,.3);color:rgba(228,242,255,.95);}" +
+  // **白** = 顶栏收起来了（用户点名的判据：「按钮是白色的时候隐藏顶栏所有按钮」）。
+  // 基础色那点淡蓝灰在深底上读起来不像"白"，所以这一档把字提亮、边框也提白。
+  ".kb-v13-embedfold:not(.on){color:rgba(244,250,255,.96);" +
+  "  border-color:rgba(255,255,255,.42);}" +
+  // 收起态：**除了那颗 ▲，栏里什么都不画。**
+  //
+  // `!important` 是必须的：那几颗按钮（选框 / 删除 / 显示全部…）的显隐一直是
+  // **行内 `style.display`** 在管（`syncBar`），而行内样式压得过普通规则。
+  // 少了它，收起之后那几颗"当时正好该显示"的会原地留着，收了个寂寞。
+  //
+  // ⚠️ `:not(.kb-v13-embedfold)` 那一条是**底线**：收起态下屏幕上必须留着这颗
+  //    按钮，否则用户没有任何办法把它叫回来（09-20 那次「入口恰好不可见」）。
+  ".kb-v13-embedbar-folded>*:not(.kb-v13-embedfold){display:none!important;}" +
   // 3.0 刀 16：这两颗「选框 / 删除」**开着的时候以前看不出来**——只有字变了。
   // `syncBar` 一直在加 `.on`，而这里从来只定义过 `.kb-v13-embedmode.on`。
   // 背后挂上"删掉笔记里的 [[链接]]"这种动作之后，「选框正开着」必须在屏幕上
@@ -327,51 +338,58 @@ export function createEmbedStory(ctx, opts = {}) {
     if (opts.onPickCrystal) opts.onPickCrystal();
   });
 
-  // 3.0 刀 43（用户 09-30 第 2 条）：晶体名太长会把后面的按钮**挤出窗外**
-  // （窗外层 overflow:hidden，顶出去就点不到了）。给一对 ▲ / ▼ 摆在名字
-  // **左边**——▲ 收起名字，▼ 放出来。
+  // 3.0 刀 49（用户 10-01）：顶栏最左边那颗 ▲，**一颗按钮两种状态、颜色即状态**：
   //
-  // ⚠️ **收的是名字，不是那颗按钮。** 换晶体是这扇窗唯一的入口（幽灵节点点的
-  //    也是它），顺手把入口一起藏掉，就是 09-20 那次「入口在需要它的那一刻恰好
-  //    不可见」——那一课在这扇窗里记着好几处。收起后按钮缩成「晶体」两个字。
+  //   · **蓝**（`.on`）＝ 顶栏所有按钮都摆着（**默认，和以前一样**）；
+  //   · **白** ＝ 全收起来了，屏幕上只剩这一颗。
+  //
+  // ⚠️ 它**顶替**了 1.3.84 那对 ▲ / ▼（那时 ▲ 只收晶体名、▼ 放出来）。用户
+  //    10-01 要的是"▲ 一颗按钮两种状态"，所以 ▼ 撤掉，粒度从"只收名字"改成
+  //    "整条收掉"。
+  //
+  // ⚠️ **为什么这回敢连"换晶体"那颗入口一起收**（下面原来那条 ⚠️ 明令禁止过）：
+  //    **出口就在原地**——同一颗按钮再点一下，全回来。而 09-20 那次栽的是
+  //    「入口在需要它的那一刻恰好不可见，而且**没有回头路**」。这两件事不一样。
+  //    但底线仍然是硬的：**这颗 ▲ 自己永远不参与折叠**（见下面 CSS 那句
+  //    `:not(.kb-v13-embedfold)`），收起态下屏幕上必须留着它。
   //
   // ⚠️ **状态落进偏好，不留在内存。** 这扇窗是**每次打开重建**的，留在内存里
-  //    等于"每开一次都要重收一次"，而用户收它正是因为名字**一直**很长。
-  const nameMinBtn = EL("button", "kb-v13-embedname", "▲");
-  nameMinBtn.type = "button";
-  nameMinBtn.title = "把晶体名收起来。名字太长会把后面的按钮挤出窗外。";
-  const nameMaxBtn = EL("button", "kb-v13-embedname", "▼");
-  nameMaxBtn.type = "button";
-  nameMaxBtn.title = "把晶体名放出来。";
-  // 默认**显示**：坏值一律当显示——少显示的代价是"我明明有名字却看不见"。
-  const nameShown = () =>
-    !(ctx.state && ctx.state.prefs && ctx.state.prefs.storyBarName === false);
+  //    等于"每开一次都要重收一次"，而用户收它正是因为**一直**嫌它挡着。
+  const foldBtn = EL("button", "kb-v13-embedname kb-v13-embedfold", "▲");
+  foldBtn.type = "button";
+  // 默认**摆着**：坏值一律当"没收起"——反过来的代价是"我什么都没点，按钮全没了"。
+  const barShown = () =>
+    !(ctx.state && ctx.state.prefs && ctx.state.prefs.storyBarHidden === true);
   /**
-   * 按当前偏好把名字重新写一遍。**在 render() 里调**（那里才知道这一屏看的是
+   * 按当前偏好把顶栏重新写一遍。**在 render() 里调**（那里才知道这一屏看的是
    * 哪颗晶体）。⚠️ 它读 `view.path`，而 `view` 是**这个作用域里后声明的 const**
    * ——所以只能在 render() 里调，绝不能在按钮这一段就试调一次（TDZ，这个仓
    * 栽过两次）。
    */
   function paintName() {
-    const on = nameShown();
+    const on = barShown();
     const full = view.path && view.path.length ? view.path[view.path.length - 1] : "";
-    crystalBtn.textContent = on ? "晶体：" + (full || "?") : "晶体";
+    crystalBtn.textContent = "晶体：" + (full || "?");
     crystalBtn.title = on
       ? "换一颗晶体看。结构窗固定看这颗，下次打开还是它。"
-      : "换一颗晶体看。现在是「" + (full || "?") + "」——名字收起来了，" +
-        "点左边那颗 ▼ 放出来。";
-    nameMinBtn.classList.toggle("on", !on);
-    nameMaxBtn.classList.toggle("on", on);
+      : "换一颗晶体看。现在是「" + (full || "?") + "」——顶栏收起来了，" +
+        "点左边那颗白 ▲ 展开。";
+    bar.classList.toggle("kb-v13-embedbar-folded", !on);
+    // `.on` = 蓝 = 全摆着。**颜色就是状态**，所以这一个类名同时管着"长什么样"
+    // 和"现在在哪一档"，不会对不上。
+    foldBtn.classList.toggle("on", on);
+    foldBtn.title = on
+      ? "把顶栏这些按钮全收起来，只留这一颗（它会变成白色）。"
+      : "顶栏现在是收起的。点一下把它们全放出来。";
   }
-  function setNameShown(on) {
+  function setBarShown(on) {
     // ⚠️ 写的是**真 ctx** 的 prefs。`fake` 只影子那几个单槽位字段，prefs 不在
     //    名单里——写 fake.state 反而会造出一份只活在窗口生命周期里的副本。
-    if (ctx.state) ctx.state.prefs = { ...(ctx.state.prefs || {}), storyBarName: !!on };
+    if (ctx.state) ctx.state.prefs = { ...(ctx.state.prefs || {}), storyBarHidden: !on };
     if (ctx.savePrefs) ctx.savePrefs();
     paintName();
   }
-  nameMinBtn.addEventListener("click", () => setNameShown(false));
-  nameMaxBtn.addEventListener("click", () => setNameShown(true));
+  foldBtn.addEventListener("click", () => setBarShown(!barShown()));
 
   // 3.0 刀 13：右键藏起来的卡，出口在这儿。
   // **只在真有东西可显的时候出现**（与「删除实线」同一条规矩）——摆一颗点了
@@ -431,9 +449,9 @@ export function createEmbedStory(ctx, opts = {}) {
   // `delCardBtn` 紧挨着 `delBtn`：两颗永不同时出现（一个管线、一个管卡），
   // 占的是同一个视觉位置——"框住之后能删什么"就在这一处。
   bar.append(
-    // ▲ / ▼ 排在名字**左边**（用户点名要的位置）——它们管的就是紧挨着的那三个字。
-    nameMinBtn,
-    nameMaxBtn,
+    // ▲ 排在**最左边**（用户点名要的位置）——它是整条栏的折叠键，
+    // 而且收起态下**它是屏幕上唯一留下来的那一颗**（见下面 CSS）。
+    foldBtn,
     crystalBtn,
     modeBtn,
     kindBtn,
@@ -786,8 +804,9 @@ export function createEmbedStory(ctx, opts = {}) {
     view.path = Array.isArray(path) ? path.slice() : [];
     // 那把「金线记在哪颗名下」的钥匙跟着这一屏走（见 makeFacade 里的警告）。
     fake.state.crystalPath = view.path;
-    // 3.0 刀 43：名字的写法收在 `paintName` 里——它要同时管那颗 ▲/▼ 的亮灭，
-    // 两处各写一遍的话，收起之后换一颗晶体就会自己"弹回来"。
+    // 3.0 刀 43：名字和顶栏的写法收在 `paintName` 里——它同时管着那颗 ▲ 的颜色
+    // 和整条栏的折叠。两处各写一遍的话，收起之后换一颗晶体就会自己"弹回来"。
+    // （函数还叫 paintName 是历史名字，它现在管的不止名字，见那边。）
     paintName();
     if (!view.path.length) {
       world.textContent = "";
