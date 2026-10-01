@@ -11,8 +11,7 @@ Turn a folder of Markdown cards into a **living crystal vault** — a place wher
      Width alone: the browser derives the height from the intrinsic ratio, so it
      scales cleanly at any container size. -->
 Desktop mode:
-
-<img width="1917" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/54550694-81b4-418f-a394-efd485701c1a" />
+<img width="1917" height="1020" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/383b1d98-7686-40b2-bc6a-eb278aeb96d0" />
 
 Storyline mode:
 
