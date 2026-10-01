@@ -5,6 +5,7 @@
 
 import { mount } from "./core/app.js";
 import { toStr } from "./core/dom.js";
+import { parseSidesField, SIDES_FIELD } from "./core/frontmatter.js";
 import { toLinkTarget, viewStateKey, prefsKey } from "./adapter.js";
 import { CARDS_FOLDER, VAULT_PDF_RUNTIME_PATH } from "./config.js";
 import { createLazyPdfRenderer } from "./core/pdfdoc.js";
@@ -202,6 +203,12 @@ export function createObsidianAdapter({
       // 只认 `[数, 数]` 这一个形状——一个手滑写歪的字符串（"3,2"）在这儿就当没有，
       // 不去 `split` 猜：猜错的话整屏卡片的位置会以"看起来很正常"的方式全部错位。
       pos: posOf(fm["晶体坐标"]),
+      // 3.0 刀 46：卡片亲手设过的**连线接法**（frontmatter「晶体接法」）。
+      // 写进卡片自己身上是为了让它**跟着文件走**——改名、搬到别的文件夹、
+      // 压缩发给别人，都带着（以前只活在本机视图状态里，一发走就没了）。
+      // ⚠️ 解析器**只有一份**（frontmatter.js 的 `parseSidesField`），
+      //    模型和假适配层调的是同一个——不像 `posOf` / `posPair` 那样各抄一遍。
+      sides: parseSidesField(fm[SIDES_FIELD]),
       content,
     };
   }

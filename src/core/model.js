@@ -6,6 +6,10 @@
 
 import { toStr, stripCardPrefix } from "./dom.js";
 import { splitFrontmatter } from "../adapter.js";
+// 3.0 刀 46：连线接法的解析器**只有那一份**（模型 / 真适配层 / 假适配层共用），
+// 见 frontmatter.js 里 `parseSidesField` 那段。坐标那条路是各端各抄一份的
+// （`posOf` / `posPair`），这里不重复那个取舍。
+import { parseSidesField } from "./frontmatter.js";
 
 // 匹配 [[目标]] / [[目标|别名]]；前面带 ! 的是嵌入，不算关系
 // （对齐 Obsidian：meta.links 不含 embeds）
@@ -281,6 +285,13 @@ export function normalizeCard(raw, keyOfFolder) {
     // （那正是这一刀要修的事），而且迁移的去重护栏永远为假、每次开库
     // 都重排同一批。**加字段时先看这里。**
     pos: posPair(raw.pos),
+    // 3.0 刀 46：这张卡**亲手设过的连线接法**（frontmatter「晶体接法」）。
+    // 一条 = `{title, mine, its}`：从我这边的 `mine` 出去，进那张卡的 `its`。
+    //
+    // ⚠️ **和 `pos` 同一条铁律：这一行不能省。** 这个函数是逐个字段列出来建新
+    // 对象的，漏一个就是整个丢掉——适配层那边读得再对也没用，而且**不报错**，
+    // 表现只是"接法又变回自动的了"。
+    sides: parseSidesField(raw.sides),
     content: toStr(raw.content),
     // #13 卡头关键词。在归一化时算一次，卡面与浮层两处直接读——
     // 卡片重建（翻页）频率不低，没必要每建一个 DOM 就把正文重扫一遍。
@@ -330,6 +341,10 @@ export function applyCardFields(card, fields, content) {
   // 走的就是这条路（`applyCardFields(card, fields, content)`）。
   // 与上面几条同一个写法：传了才动，没传就留着原来那份。
   if (f.pos !== undefined) card.pos = posPair(f.pos);
+  // 3.0 刀 46：接法同理——**别的机器改了「晶体接法」同步过来时**走的就是这条路。
+  // `parseSidesField` 自己认两种形状（原始字符串 / 已解析好的对象数组），
+  // 所以这里不分叉——分叉就有了第二处"哪种形状该怎么解"的判断，而两处迟早会漂。
+  if (f.sides !== undefined) card.sides = parseSidesField(f.sides);
   if (content !== undefined) card.content = toStr(content);
   card.keywords = extractHighlights(card.content, card.concept);
   return card;

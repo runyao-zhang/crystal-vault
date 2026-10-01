@@ -68,6 +68,7 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 ### Right-click: three places, three results
 
+- **A line you routed by hand is written into that card's own frontmatter** (a field called `晶体接法`) — so it travels with the note: renaming it, moving it to another folder, or **zipping it up and sending it to someone** all keep it. Lines you never touched are not written; for those, geometry is enough.
 - **Which side a blue line attaches to is decided from the geometry by default**: two cards stacked one above the other run bottom-to-top, two side by side run right-to-left. To route one differently, drag it from the side you want in **write** mode — **that one line then follows your choice** (anything dragged by hand always beats the default).
 - **Right-click a card → hide every link going into and out of it.**
   When one card has a dozen lines running through it, clearing them all out leaves the rest of the structure readable at a glance. **Right-click it again to bring them back.** While anything is hidden, a 「**显示全部**」 (Show all) button appears in the top bar and restores everything at once.
@@ -275,6 +276,20 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.3.87** · **Link attachments now travel with your cards** — zip up a crystal and send it to someone, and the lines run exactly the way they do on your machine. (Reported 10-01: "I zipped it and sent it to a friend; on his side every line is left-right.")
+
+The cause was that **the attachment had always lived on your machine**: it sat in the view state, keyed by *which layer you happened to be standing on*. So a different computer starts empty, and copying the folder elsewhere in your own vault breaks the key too — **the zip never carried it**. It is now written into each card's own frontmatter:
+
+```yaml
+晶体接法: ["[[02-中继]] b t"]
+```
+
+One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **top**" (`t/r/b/l` = top/right/bottom/left). Only lines you **dragged by hand** are written; anything you never touched is left alone (the default attachment is computed from the layout, so it already comes out the same on any machine). A card with ten hand-routed lines gains roughly 250 bytes.
+
+> - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
+> - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
+> - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
 
 **1.3.86** · Fixes: **a blue line always attached on the left and right sides, wherever the cards sat**. Two cards stacked one above the other still had their line leave the right edge and loop back into the left. The cause was the fallback used when nothing was set by hand: it was hard-wired to left/right (whichever card is further left gets the left side). It now **picks the facing side from the geometry**: cards stacked vertically run bottom-to-top, cards side by side run right-to-left.
 There is a second layer to this, and it is where switching computers comes in: **the attachment you set by hand lives in that machine's view state, not with the cards** — so carrying your material to another computer leaves every one of them behind, and the whole screen degrades to left/right. With the geometry-based default, **the default attachment is derived from the layout**, identical on any machine; the ones you dragged by hand still win over it (manual > automatic).

@@ -368,3 +368,146 @@ function mustQuote(s) {
   if (DATEISH_RE.test(s)) return true; // "2026-08-26" 会被解析成日期对象
   return false;
 }
+
+// ============================================================
+// 连线接法（3.0 刀 46，用户 10-01）
+// ============================================================
+//
+// **卡片亲手设过的「这根线从哪条边出去」，写进它自己的 frontmatter。**
+//
+// ---- 为什么非得进文件 ----
+//
+// 用户要把一颗晶体压缩发给别人（他拿这个在卖），对方打开之后线全变成左右。
+// 原来那份接法存在**本机视图状态**里（`view.linkSides`），而且有两层都不成立：
+//   · 键是**用户当时站在哪一层**（晶体路径）——换个文件夹，键就对不上；
+//   · 那份状态**每台机器各存各的**——朋友电脑上一开始就是空的。
+// 存进卡片自己身上之后：改名、搬到别的文件夹、压缩发走，都带着走。
+//
+// ---- 一条长什么样 ----
+//
+//     "[[02-中继]] b t"     从我这边的「下」出去，进它那边的「上」
+//
+// 方向字母 t/r/b/l（上下右左）。**用字母不用汉字**：中文一个字 3 字节，
+// 字母 1 字节，一条省 4 字节，而这是要塞进每张卡 frontmatter 的东西。
+//
+// ⚠️ **目标故意写成 `[[双链]]` 的形状，不是裸标题。** Obsidian 改名时会把
+//    `[[…]]` 一起改掉（正文里的本来就会改，frontmatter 里的它同样认）；
+//    写成裸标题的话，对方（或你自己）给那张卡改名之后，这一条就永远失联。
+//
+// ⚠️ 解析器**只此一份**，模型 / 真适配层 / 假适配层三处都调它。
+//    这和 `晶体坐标` 那条路不一样——那边 `posOf` / `posPair` 抄了两遍（各端
+//    "同一条口径"），多一处抄写就多一处漂移的机会。这里不重复那个取舍。
+export const SIDES_FIELD = "晶体接法";
+
+/**
+ * 方向：**方位名与字母，两张表按下标一一对应。**
+ *
+ * ⚠️ **这里现在是唯一的真源。** `storyline.js` 的 `LINK_SIDES` 改成了
+ * `= SIDE_NAMES`（照样 export，免得动到老调用方），`viewstate.js` 那份校验
+ * 白名单同理。
+ *
+ * 为什么非要收成一份：这两张表**错开一格**的坏法是"线从别的边出去"——不报错、
+ * 也不是没生效，只是接错了地方。而它已经有前科：写这一刀的时候，迁移那条路把
+ * 「bottom」这个**方位名**当**字母**传了进去，`formatSideEntry` 认不出就退回
+ * 默认的 `r l`，于是**写进用户卡片的是错的方向**（探针逮住的）。
+ * 三份拷贝各自写着"顺序一致"是靠不住的，靠的该是同一个数组。
+ */
+export const SIDE_NAMES = ["top", "right", "bottom", "left"];
+export const SIDE_KEYS = ["t", "r", "b", "l"];
+
+/** 方位名 → 字母；认不出回空串（调用方自己决定兜底成什么）。 */
+export const sideLetter = (name) => SIDE_KEYS[SIDE_NAMES.indexOf(toStr(name))] || "";
+
+/** 字母 → 方位名；认不出回空串。 */
+export const sideName = (letter) => SIDE_NAMES[SIDE_KEYS.indexOf(toStr(letter))] || "";
+
+/** `{title, mine, its}` → 那一条字符串。给不出合法方向时按「右出左进」兜底。 */
+export function formatSideEntry(e) {
+  if (!e || !e.title) return "";
+  const m = SIDE_KEYS.indexOf(e.mine) >= 0 ? e.mine : "r";
+  const i = SIDE_KEYS.indexOf(e.its) >= 0 ? e.its : "l";
+  return "[[" + String(e.title) + "]] " + m + " " + i;
+}
+
+/**
+ * frontmatter 里那个字段 → `[{title, mine, its}]`。
+ *
+ * 吃两种形状：真适配层给的是 YAML 解出来的**数组**，假适配层给的是那一行的
+ * **原始文本**（`["[[a]] b t"]`）——由 `decodeFlowList` 拆开。
+ * **形状不对的条目逐条丢掉**（不整条作废）：一条写坏了不该把整张卡的接法清空。
+ */
+export function parseSidesField(raw) {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? decodeFlowList(raw)
+      : null;
+  if (!list) return [];
+  const out = [];
+  for (const item of list) {
+    // ⚠️ **已经是对象的那一条直接收**——这个函数会被调**两道**：适配层先解一次
+    //    （`entry-obsidian` / `fake` 都解），`normalizeCard` 再解一次。
+    //    不认这一支的话，第二道里 `toStr({title,mine,its})` 是 "[object Object]"，
+    //    正则一条都不匹配，于是**整张表的接法被静默清空**：文件里白纸黑字写着，
+    //    模型里永远是空的，不报错、屏幕上只是"接法又变回自动的了"。
+    //    （写这一刀时正是它让可移植性探针红着——字段写对了，读回来是空。）
+    //    做成幂等还有一个好处：调用方不必先问"我手上这份解过了没有"。
+    if (item && typeof item === "object") {
+      const title = toStr(item.title).trim();
+      const mine = toStr(item.mine);
+      const its = toStr(item.its);
+      if (!title || SIDE_KEYS.indexOf(mine) < 0 || SIDE_KEYS.indexOf(its) < 0) continue;
+      out.push({ title, mine, its });
+      continue;
+    }
+    const m = /^\[\[(.+?)\]\]\s*([trbl])\s*([trbl])$/.exec(toStr(item).trim());
+    if (!m) continue;
+    const title = m[1].trim();
+    if (!title) continue;
+    out.push({ title, mine: m[2], its: m[3] });
+  }
+  return out;
+}
+
+/**
+ * 拆一个 YAML **行内流式列表**：`["a", "b"]` → `["a", "b"]`。
+ *
+ * 为什么不能直接 `split(",")`：标题里可以带逗号（「01-总览，绪论」），而条目
+ * 一律是带引号的——所以按**引号状态**扫一遍，引号里的逗号不算分隔符。
+ * 转义（`\"` 与 `\`）也要认，那是 `encodeScalar` 写出去的形式。
+ */
+export function decodeFlowList(s) {
+  const t = toStr(s).trim();
+  if (!/^\[.*\]$/.test(t)) return [];
+  const body = t.slice(1, -1);
+  const out = [];
+  let cur = "";
+  let q = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (q) {
+      if (ch === "\\") {
+        cur += body[++i] || "";
+        continue;
+      }
+      if (ch === '"') {
+        q = false;
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      q = true;
+      continue;
+    }
+    if (ch === ",") {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
+}

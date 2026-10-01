@@ -41,6 +41,13 @@ import {
 } from "./storyimports.js";
 // 3.0 刀 34：把卡片的坐标写进它自己的 frontmatter（用户 09-29 要的可移植）。
 import { gridToPixel, queueCardPos } from "./cardpos.js";
+// 3.0 刀 46：**连线接法也走同一条路**（用户 10-01：压缩发给别人之后线全变左右）。
+// 这一份管写盘，读在下面的 `sideHintMap`。
+import { setCardSide } from "./linksides.js";
+// 方向字母 ↔ 方位名（`t/r/b/l` ↔ top/right/bottom/left）。字母是 frontmatter
+// 里存的形态，方位名是画线用的。**两张表都由 `LINK_SIDES` 现推**（见下面那段），
+// 不手抄——手抄的话哪天加一个方向，就是"存进去的字母读回来变成另一个方向"。
+import { SIDE_NAMES, sideLetter, sideName } from "./frontmatter.js";
 // 3.0 刀 32「格点」。单位怎么算出来的、坐标以哪个角为准，全写在那份文件头上。
 // 3.0 刀 42（用户 09-30 第 3 条）：**方框又把格点接回来了。**
 // 刀 34 撤过一次（用户 09-29），这一刀按他 09-30 的话装回去——所以 `UNIT`
@@ -850,7 +857,9 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
   svg.setAttribute("height", h);
 
   // 3.0 刀 13：蓝线接在卡片的哪一边。**每帧建一次**，见 sideHintMap 顶上那段。
-  const hints = sideHintMap(ctx);
+  // 3.0 刀 46：接法的主要来源变成了**卡片自己的 frontmatter**，所以要把这一屏
+  // 的卡片传进去（按标题找目标卡）。视图状态那份在函数里面当兜底。
+  const hints = sideHintMap(ctx, cards);
 
   // 3.0 刀 13：被右键藏掉入链出链的那几张卡。**每帧建一次**（几十项，够便宜）。
   const hidden = hiddenCardSet(ctx);
@@ -1280,7 +1289,15 @@ export function bindStorylineClicks(ctx) {
 // 而且屏幕上始终有一个明确的「现在处于什么状态」——那正是这类模式该给的。
 
 /** 四个方向。顺序与 CSS 里的定位对应，改一处要连着改另一处。 */
-export const LINK_SIDES = ["top", "right", "bottom", "left"];
+/**
+ * 四个方向。**名册本身住在 `frontmatter.js`**（那边同时管着存进文件的字母），
+ * 这里只是换个名字再 export 一次——老调用方认的还是 `LINK_SIDES`。
+ *
+ * 3.0 刀 46 之前这份名册就长在这一行上，而 `frontmatter.js` / `viewstate.js`
+ * 各有一份拷贝，靠注释写着"顺序要一致"。探针逮到过一次它们错位的后果
+ * （写进用户卡片的方向是错的），所以收成了一处。
+ */
+export const LINK_SIDES = SIDE_NAMES;
 
 /** 四个方向「朝外」是哪一边。橡皮筋从连接点出去时要顺着它。 */
 const SIDE_DIR = {
@@ -1332,6 +1349,21 @@ function canonical(x, y) {
  */
 function writeLinkSide(ctx, from, to, fromSide, toSide) {
   if (!from || !to || from === to) return;
+  // 3.0 刀 46：**主路改成写进「源卡自己」的 frontmatter**（用户 10-01）。
+  // 这条路让接法跟着文件走——改名、搬到别的文件夹、压缩发给别人，都带着。
+  // 存进去的是**目标卡的标题**（写成 `[[标题]]` 的形状，好让 Obsidian 改名时
+  // 连它一起改），源卡这边是 `fromSide`，目标卡那边是 `toSide`。
+  const target = ctx.model && ctx.model.byPath ? ctx.model.byPath.get(to) : null;
+  if (
+    target &&
+    target.title &&
+    setCardSide(ctx, from, target.title, sideLetter(fromSide) || "r", sideLetter(toSide) || "l")
+  ) {
+    return;
+  }
+  // 落不下去（源卡不在模型里之类）→ 退回视图状态那份。
+  // ⚠️ 它现在是**兜底**不是主路：读的时候 frontmatter 优先（见 `sideHintMap`），
+  //    所以这里记的那一份只在这一台机器上管用，而且下次开库会被迁移搬进文件。
   const [a, b, flip] = canonical(from, to);
   const v = layoutOf(ctx);
   if (!v.linkSides || typeof v.linkSides !== "object") v.linkSides = {};
@@ -1421,7 +1453,7 @@ export function showAllHidden(ctx) {
  * （见 embedstory.js 的 makeFacade），多一个槽位就多一处漏归零——症状是结构窗
  * 用着**库那一屏**的提示。几十项的 Map 每帧建一次，不值得为它冒那个险。
  */
-function sideHintMap(ctx) {
+function sideHintMap(ctx, cards) {
   const out = new Map();
   const v = layoutOf(ctx);
   const all = v.linkSides && typeof v.linkSides === "object" ? v.linkSides : {};
@@ -1434,20 +1466,18 @@ function sideHintMap(ctx) {
       out.set(l.to + " " + l.from, { fromSide: l.toSide, toSide: l.fromSide });
     }
   };
+  // ---- 1) 兜底：**视图状态里那份**（老数据，正在被迁移搬进文件）----
+  //
   // 3.0 刀 42（用户 09-30 第 4 条）：**别的层的接法也算数。**
   //
   // 原来这里只读 `all[key]`——就是当前这一层那一格。可「接法」是**一对卡片
   // 之间**的事：`writeLinkSide` 拿层当键，只是因为"用户当时站在哪一层"是最省事
   // 的写法，不是因为它俩的关系属于那一层。于是同一个文件夹里的两张卡：
   //   · 进到那颗晶体里看 → 用他拖过的那套接法，线从他拖的那一边出去；
-  //   · 站在外面看那个金色方框 → 查不到提示，退回默认的"看谁在左谁在右"——
+  //   · 站在外面看那个金色方框 → 查不到提示，退回默认的——
   //     **同一对卡、同一根线，走线形状不一样**，而屏幕上没有任何东西解释这件事。
   //
-  // 用户要的是"金色方框里面和文件夹内部一样"（09-30 第 4 条），所以把各层的
-  // 提示都收进来。
-  //
-  // ⚠️ **本层的最后放**：同一对卡在两个层都记过时以当前这一层为准——
-  //    他现在站在哪儿，看到的就该是哪儿的那一份。
+  // ⚠️ **本层的最后放**：同一对卡在两个层都记过时以当前这一层为准。
   // ⚠️ 键里的分隔符是**真的 NUL 字节**（\x00 那个字符本身），不是空格。它和
   //    `mergePairs` / `edgesUnder` 用的是同一个字符，改一处就得改全部——
   //    而这两边一旦不一致，表现是**接法静默失效**（查不到就是没提示），
@@ -1457,8 +1487,35 @@ function sideHintMap(ctx) {
     put(all[k]);
   }
   put(all[key]);
+  // ---- 2) 主源：**卡片自己 frontmatter 里那份**（3.0 刀 46，用户 10-01）----
+  //
+  // 用户把这颗晶体压缩发给别人（他拿这个在卖），对方打开之后线全变成左右。
+  // 根因：接法只活在视图状态里，而且键是"当时站在哪一层"——换台电脑是空的，
+  // 换个文件夹路径也对不上。现在它写在**源卡自己的 frontmatter**（「晶体接法」），
+  // 于是跟着卡片走：改名、搬文件夹、压缩发走，都带着。
+  //
+  // ⚠️ **排在后面**：同一对卡两处都有记录时**以文件里那份为准**。文件那份才是
+  //    能跟着卡片走的那个；本机那份只是还没迁完的老数据。
+  // ⚠️ 目标按**标题**找，而标题在库里可能重名——所以只在**这一屏**（`cards`）
+  //    里找，找不到就当这条没有（同 `edgesUnder` 那条"同名卡会让边指错人"）。
+  const byTitle = new Map();
+  for (const c of cards) if (!byTitle.has(c.title)) byTitle.set(c.title, c);
+  for (const c of cards) {
+    const list = Array.isArray(c.sides) ? c.sides : [];
+    for (const e of list) {
+      if (!e || !e.title) continue;
+      const target = byTitle.get(e.title);
+      if (!target) continue;
+      const mine = sideName(e.mine);
+      const its = sideName(e.its);
+      if (!mine || !its) continue;
+      out.set(c.path + " " + target.path, { fromSide: mine, toSide: its });
+      out.set(target.path + " " + c.path, { fromSide: its, toSide: mine });
+    }
+  }
   return out;
 }
+
 
 /** 位置表：这一层每张卡此刻在哪（世界坐标） */
 function posMapOf(ctx, path, layout) {

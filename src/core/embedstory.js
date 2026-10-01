@@ -68,6 +68,7 @@ import { viewportCenter } from "./storyspot.js";
 import { importCard } from "./storyimports.js";
 // 3.0 刀 34：关窗之前催一下还没写下去的卡片坐标（它们是防抖写的）。
 import { flushCardPos } from "./cardpos.js";
+import { flushCardSides } from "./linksides.js";
 import { flushBoxFiles } from "./boxfile.js";
 
 /** 结构窗那一小块自绘界面的样式。
@@ -894,6 +895,8 @@ export function createEmbedStory(ctx, opts = {}) {
       // **放在最前面**：下面那几行会把这一扇窗的运行时拆掉，而那之后再取
       // 位置取到的就不是这一屏了。
       flushCardPos(ctx);
+      // 3.0 刀 46：接法同样是防抖写的，同一条理由（关窗正好卡在窗口期里就白拖了）。
+      flushCardSides(ctx);
       // 3.0 刀 35：框的边车同一条理由（也是防抖写的）。
       // 不用传 ctx：每一笔待写自己记着**是谁排的队**（见 boxfile.js 的 `dirty`），
       // 所以这里只是个兜底。门面的 `state` 本来就穿透到真 state，视图是同一份。

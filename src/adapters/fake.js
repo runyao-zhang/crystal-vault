@@ -5,6 +5,7 @@
 
 import { toLinkTarget, viewStateKey, prefsKey } from "../adapter.js";
 import { CARDS_FOLDER } from "../config.js";
+import { parseSidesField, SIDES_FIELD } from "../core/frontmatter.js";
 
 /**
  * watchCards 的订阅者。**故意放在模块作用域**，不放在 createFakeAdapter 里面。
@@ -107,7 +108,10 @@ export function createFakeAdapter({
    * 它要保证的只有一件事：用核心写下的东西、核心自己读得回来。
    */
   function readCardFields(content) {
-    const out = { concept: "", source: "", tags: [], pos: null };
+    // ⚠️ `sides` 的"没写过"必须是 **null**，不能是 `[]`。空数组在 JS 里是真值，
+    // 拿它当默认值的话，`sidesFromDisk(p) || base.sides` 这一句永远短路在第一项，
+    // **卡上原有的接法再也回填不上来**（而 `pos` 用 null 是对的，所以那句照抄不出来）。
+    const out = { concept: "", source: "", tags: [], pos: null, sides: null };
     const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---/.exec(String(content || ""));
     if (!m) return out;
     for (const line of m[1].split(/\r?\n/)) {
@@ -128,7 +132,13 @@ export function createFakeAdapter({
           .split(",")
           .map((s) => Number(unquote(s.trim())));
         if (n.length >= 2 && Number.isFinite(n[0]) && Number.isFinite(n[1])) out.pos = [n[0], n[1]];
-      } else if (key === "tags" && /^\[.*\]$/.test(raw)) {
+      }
+      // 3.0 刀 46：`晶体接法: ["[[02-中继]] b t", …]`。
+      // ⚠️ **不能像上面 `晶体坐标` 那样 `split(",")`**：条目是带引号的字符串，
+      //    而卡片标题里可以带逗号（「01-总览，绪论」）。按引号状态扫一遍才对，
+      //    所以走 `decodeFlowList`（和真适配层、模型**同一份**解析器）。
+      else if (key === SIDES_FIELD) out.sides = parseSidesField(raw);
+      else if (key === "tags" && /^\[.*\]$/.test(raw)) {
         out.tags = raw
           .slice(1, -1)
           .split(",")
@@ -144,6 +154,11 @@ export function createFakeAdapter({
     return readCardFields(disk.get(path)).pos;
   }
 
+  /** 假盘上那份 frontmatter 里的「晶体接法」；**没写过回 null**（见上面那条）。 */
+  function sidesFromDisk(path) {
+    return readCardFields(disk.get(path)).sides;
+  }
+
   function unquote(s) {
     if (!/^".*"$/.test(s)) return s;
     return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
@@ -154,7 +169,25 @@ export function createFakeAdapter({
       // content 从假盘现取：写过之后再加载能读到新内容。
       // 顺带记着「核心拿到的是副本」——核心改完自己的 card 之后，
       // 不能让核心以为假盘也变了，两边都得更新（见 entry-web 的 boot 注释）。
-      return cards.map((c) => ({ ...c, content: disk.get(c.path) }));
+      return cards.map((c) => {
+        const content = disk.get(c.path);
+        const fm = readCardFields(content);
+        return {
+          ...c,
+          content,
+          // 3.0 刀 46：**`pos` / `sides` 从假盘现读**，和真适配层一个口径。
+          //
+          // 真宿主那边这两个字段来自 metadataCache——**从文件里读出来的**。
+          // 假盘没有那一层，于是夹具卡片上写死的字段成了唯一来源，后果是：
+          // 「把字段写进文件、换台机器打开」这条路**在测试台里压根走不到**
+          // （卡片对象上那个字段是夹具给的，跟文件里有没有没关系）。
+          // 写这一刀的时候正是它让可移植性探针红着——文件里明明写着 `b t`，
+          // 读回来却是空的。
+          // 优先取盘上那份（同 `emitModify` 里的先后），盘上没有才退回夹具给的值。
+          pos: fm.pos || c.pos || null,
+          sides: fm.sides || c.sides || [],
+        };
+      });
     },
 
     // 对齐 Obsidian getFirstLinkpathDest 的常见情形：按文件名匹配，忽略目录
@@ -509,7 +542,9 @@ export function createFakeAdapter({
       // 全文里读回来。**这不算违背「适配层不解析 YAML」**——那条规矩管的是
       // 真实现不许把核心的序列化规则复制一份，而这里读的正是核心刚写下的那三个键。
       const fm = readCardFields(content);
-      const record = { path, folder: dir, name, ...fm };
+      // `sides` 从 `readCardFields` 出来可能是 null（没写过）——卡记录上一律给数组，
+      // 和真适配层那份形状对齐（别让 null 漏进模型）。
+      const record = { path, folder: dir, name, ...fm, sides: fm.sides || [] };
       cards.push(record);
       byName.set(name, record);
       return Promise.resolve({ ok: true, path, content });
@@ -550,6 +585,8 @@ export function createFakeAdapter({
       // frontmatter 里读，**读不到就沿用卡上原有的值**——写坐标那条路正是
       // 靠这个回读来更新的（和 `source` 同一个道理）。
       pos: posFromDisk(path) || (base ? base.pos : null) || null,
+      // 3.0 刀 46：接法同理——写进文件之后那一次回读正是靠这里把卡上的值更新掉。
+      sides: sidesFromDisk(path) || (base ? base.sides : []) || [],
       content: disk.get(path),
     };
     // 广播给所有订阅者——真宿主那边一个 modify 会打到每一个还挂着监听的实例上，

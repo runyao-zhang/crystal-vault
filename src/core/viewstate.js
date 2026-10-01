@@ -9,6 +9,10 @@
 // 最差都只能退化成默认视角——绝不能把晶体库锁死在打不开的状态。
 
 import { toStr } from "./dom.js";
+// 3.0 刀 46：四个方向的**名册只有一份**（frontmatter.js），那边的字母表和它
+// 下标对齐。以前这里另抄了一份，靠注释写着"顺序要一致"——而错开一格的后果是
+// "线从别的边出去"，不报错。
+import { SIDE_NAMES } from "./frontmatter.js";
 
 export const VIEW_STATE_VERSION = 1;
 
@@ -179,7 +183,8 @@ function sanitizeMembership(raw, modules) {
  * 那张卡可能是被删了，而删卡不该顺手把别的线也弄没。渲染时找不到对方
  * 自然就不画（见 storyline.js），那是「安静少一根线」，不是「整屏崩掉」。
  */
-const SIDES = ["top", "right", "bottom", "left"];
+// 3.0 刀 46：名册住在 frontmatter.js（那边管着存进文件的字母），别在这儿再抄一份。
+const SIDES = SIDE_NAMES;
 function sanitizeCardLinks(raw) {
   if (!isObj(raw)) return {};
   const out = {};

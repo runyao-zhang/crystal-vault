@@ -111,6 +111,8 @@ import {
 import { viewportCenter } from "./storyspot.js";
 // 3.0 刀 34：卡片坐标写进它自己的 frontmatter（用户 09-29）。
 import { migrateCardPos, flushCardPos } from "./cardpos.js";
+// 3.0 刀 46：连线接法走同一条路（写盘 + 老数据迁移），理由是同一个。
+import { migrateCardSides, flushCardSides } from "./linksides.js";
 // 3.0 刀 35：收纳方框的落盘（每颗晶体一个 `.crystal-boxes.json`）。
 import { loadBoxFiles, flushBoxFiles } from "./boxfile.js";
 // 3.0 刀 17：故事线的「写」。**和结构窗共用同一份**，不是各写一套——
@@ -450,6 +452,9 @@ function sameCard(a, b) {
   // 单独比，漏了这一句就会变成"文件变了、模型没变"，而且**只在同步坐标时**发作。
   // 顺手写上，成本是一次数组比较。
   if (!samePos(a.pos, b.pos)) return false;
+  // 3.0 刀 46：**接法也要比。** 同上面 `pos` 那条的理由，一个字不差：
+  // 「别的机器把接法同步过来、我这边跟着变」能不能成立，全看这一句认不认得出差异。
+  if (!sameSides(a.sides, b.sides)) return false;
   const x = a.tags || [];
   const y = b.tags || [];
   return x.length === y.length && x.every((v, i) => v === y[i]);
@@ -461,6 +466,24 @@ function samePos(a, b) {
   const y = Array.isArray(b) ? b : null;
   if (!x || !y) return !x && !y;
   return Number(x[0]) === Number(y[0]) && Number(x[1]) === Number(y[1]);
+}
+
+/**
+ * 两份接法是不是同一套（条数、次序、每一对的目标与两个方向都一致）。
+ *
+ * 次序敏感是有意的：换序也当成"变了"，代价只是多刷一次屏，而漏判的代价是
+ * 「文件变了、屏幕上没变」——那一类**不报错**的坏法正是这张表最怕的。
+ */
+function sameSides(a, b) {
+  const x = Array.isArray(a) ? a : [];
+  const y = Array.isArray(b) ? b : [];
+  if (x.length !== y.length) return false;
+  for (let i = 0; i < x.length; i++) {
+    const p = x[i] || {};
+    const q = y[i] || {};
+    if (p.title !== q.title || p.mine !== q.mine || p.its !== q.its) return false;
+  }
+  return true;
 }
 
 /**
@@ -638,7 +661,15 @@ function applyExternalChange(ctx, incoming, from, gone) {
     // 3.0 刀 34：`pos` 也要跟着走——**这是"别的机器把卡片摆好了、我这边跟着动"
     // 的唯一入口**。漏了它的话，文件里的 `晶体坐标` 变了、卡上那份没变，
     // 而屏幕上什么都不说。
-    { 概念: incoming.concept, 来源: incoming.source, tags: incoming.tags, pos: incoming.pos },
+    // 3.0 刀 46：`sides` 也走这一趟——它是"别的机器调好的接法、我这边跟着对"的
+    // **唯一入口**。漏了它：文件里的「晶体接法」变了、卡上那份没变，屏幕上什么都不说。
+    {
+      概念: incoming.concept,
+      来源: incoming.source,
+      tags: incoming.tags,
+      pos: incoming.pos,
+      sides: incoming.sides,
+    },
     incoming.content
   );
 
@@ -2091,6 +2122,11 @@ export async function mount({
     // （用户 09-29 要的"别人电脑上相对位置一样"）。一次开库最多搬一批，
     // 剩下的下次开接着搬——理由写在 `migrateCardPos` 顶上。
     migrateCardPos(ctx, ctx.state.view.crystalPos);
+    // 3.0 刀 46（用户 10-01）：**接法也搬一遍。**
+    // 老存档里的接法只存在这台机器上（`view.linkSides`），而且是**按层**存的
+    // ——用户把文件夹压缩发给别人就全没了。搬进卡片自己的 frontmatter 之后
+    // 才跟着文件走。一次开库最多搬一批，剩下的下次开接着搬。
+    migrateCardSides(ctx, ctx.state.view.linkSides);
     // 3.0 刀 35：把各层的收纳方框边车读回来。**异步、不挡着开库**——
     // 读盘慢一点的话，框晚半拍出现，比整个库卡在那里强。读完了自己重画一次。
     loadBoxFiles(ctx).then((changed) => {
@@ -2152,6 +2188,9 @@ export async function mount({
     // 3.0 刀 34：**催一下还没写下去的坐标。** 它们是防抖写的（拖完停一会儿才落盘），
     // 关库正好卡在窗口期里的话，最后那一两次摆放就白摆了——而用户完全看不出来。
     flushCardPos(ctx);
+    // 3.0 刀 46：接法也是防抖写的（900ms），同一条理由——关库正好卡在窗口期里的话，
+    // 用户刚拖的那一下接法就白拖了，而他看不出来。
+    flushCardSides(ctx);
     // 3.0 刀 35：框的边车同一条理由（它也是防抖写的，关库正卡在窗口期里就白摆了）。
     flushBoxFiles(ctx);
     // 关掉那一刻屏幕上是什么，就记什么：晶体环、某颗晶体的第几页、某张翻开着的卡。
