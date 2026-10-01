@@ -1269,7 +1269,9 @@ const CANVAS = [
   // 这条规律这一轮已经踩到第三次：晶体（刀 1）、方框的标题栏与抓手（刀 4）、
   // 现在是故事线节点。**凡是住在世界层里、又要点得着的东西，都得自己写这一句。**
   ".kb-v13-snode{",
-  "  position:absolute;box-sizing:border-box;z-index:1;pointer-events:auto;",
+  // z-index 3：**卡片永远压在所有方框之上**（框是 1/2，见 STORY_BOXES 那段阶梯）。
+  // 卡片和抓手原来的相对次序（1 < 2）原样保留，只是整体上移了两档。
+  "  position:absolute;box-sizing:border-box;z-index:3;pointer-events:auto;",
   "  padding:10px 12px;border-radius:10px;cursor:pointer;",
   "  background:rgba(10,22,44,.92);border:1px solid rgba(0,180,255,.22);",
   "  transition:border-color .16s,background .16s,box-shadow .16s;",
@@ -1339,10 +1341,10 @@ const CANVAS = [
   // **不能收事件**：它压在线上，pointer-events 一开就把 hitManual 挡在后头了。
   ".kb-v13-marquee{fill:rgba(255,110,100,.10);stroke:rgba(255,140,130,.85);",
   "  stroke-width:1.2;stroke-dasharray:5,4;pointer-events:none;}",
-  // 拐点抓手**单独一层、画在卡片之上**（z-index 2 > 节点的 1）。
+  // 拐点抓手**单独一层、画在卡片之上**（z-index 4 > 卡片的 3，见 STORY_BOXES 那段阶梯）。
   // 线本身埋在卡片底下是对的（横穿卡面很难看），但抓手跟着埋进去就永远点不着——
   // 金线经常整段压在别的卡上，那正是最需要抓拐点的地方。
-  ".kb-v13-shandles{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;z-index:2;}",
+  ".kb-v13-shandles{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;z-index:4;}",
   // **pointer-events:auto 必须显式写**——它住在 SVG 里，而 SVG 是
   // pointer-events:none；不写这一条，双击它、拖它全部落空且不报错。
   ".kb-v13-sbend{fill:#0a1626;stroke:rgba(255,215,130,.95);stroke-width:2;",
@@ -2263,12 +2265,24 @@ const READER_DOCK = [
 // 故事线/结构窗里把几张卡收进一个可以命名、可以收起的框里。
 // 整块逻辑在 `storyboxes.js`，这里只负责长相。
 const STORY_BOXES = [
-  // ⚠️ **z-index:0**：框压在卡片**下面**（DOM 里也确实排在卡片前面）。
+  // ---- z-index 阶梯（3.0 刀 47 重新排过一次）----
+  //
+  //   连线 0  <  **金框 1**  <  **蓝框 2**  <  卡片 3  <  拐点抓手 4
+  //
+  // 加粗那两档是这一刀新插进来的，为的是用户第 2 条：
+  // 「金色方框里面的蓝色收纳方框，蓝色收纳方框的层级比金色方框层级高，在上面」。
+  //
+  // ⚠️ **原来靠的全是 DOM 顺序**（框是 `z-index:0`、卡片 `1`、连线 `0`，谁后进来谁在上面）。
+  //    DOM 顺序在**同档**里确实够用，可"蓝框压金框"和"卡片压蓝框"要的是
+  //    **两件方向相反的事**——一个顺序排不出来。所以从这一刀起改成显式数字。
+  //
+  // ⚠️ 卡片和抓手原来的相对次序（1 < 2）**原样保留**，只是整体上移了两档，
+  //    免得动到别处的层序。
   //
   // 3.0 刀 42（用户 09-30 第 1 条）：**`pointer-events` 从 none 打开了。**
   // 原来只有标题栏那一条能接事件，于是「拖动 = 只能抓顶上那 26px」；用户要的是
   // **框里任何一块空白都能拖**。打开是安全的，靠的是**层级**而不是"框不接事件"：
-  //   · 卡片是 `z-index:1`、且是框的**兄弟节点**（两边都直接挂在 canvas 上，
+  //   · 卡片是 `z-index:3`、且是框的**兄弟节点**（两边都直接挂在 canvas 上，
   //     见 renderStorylineStage 末尾那个循环），所以压在卡片上时指针落的是卡片——
   //     「拖卡片区域不会拖框」这件事是层级给的，不用额外判一次。
   //   · 只有落在框里**没有卡**的那块地方，指针才落到框自己身上。
@@ -2278,7 +2292,7 @@ const STORY_BOXES = [
   // 框里想推画面：拖框外面，或者用滚轮/触控板（滚轮走的是 gesture 上的监听，
   // 从框冒泡上去照样收得到）。
   ".kb-v13-sbox{",
-  "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:0;pointer-events:auto;",
+  "  position:absolute;box-sizing:border-box;border-radius:14px;z-index:1;pointer-events:auto;",
   // ⚠️ 用户 09-27：「颜色太浅」。第一版是 .4 透明度的细虚线，在库自绘的深底上
   // 几乎看不见。**深色底上要看清，靠的是"亮 + 粗"，不是"淡 + 细"**——
   // 透明度提到 .85、线宽到 2px，底色也抬一档，让它一眼是一块地方而不是一道痕。
@@ -2286,7 +2300,22 @@ const STORY_BOXES = [
   "}",
   // 晶体框用暖色点线，和手动框分得开——「这个是文件夹自己长出来的」
   ".kb-v13-sbox-crystal{border-style:dotted;border-color:rgba(255,190,110,.85);background:rgba(255,170,80,.09);}",
+  // 蓝色收纳方框**整体压在所有金框之上**（用户 10-01 第 2 条）。金框现在是嵌套的，
+  // 一个蓝框常常嵌在好几层金框里面——不给它一个更高的数，内层金框就会盖住它。
+  ".kb-v13-sbox-manual{z-index:2;}",
   ".kb-v13-sbox-collapsed{border-style:solid;background:rgba(0,140,220,.22);}",
+  // ---- 金框内部的分割线（3.0 刀 47，用户 10-01 第 1 条）----
+  //
+  // 用户点名的两种含义，颜色就是含义本身，别随手改：
+  //   · **珊瑚橙实线** = **跨层**：这个文件夹自己的卡 ↔ 它的子文件夹；
+  //   · **金色实线**（同一个金）= **同级**：两个兄弟子文件夹之间。
+  //
+  // `pointer-events:none` 是必须的：它是画在框里的一条装饰线，接住事件的话
+  // 用户按在线上就拖不动那个框了（同 `.kb-v13-slinks` 那条）。
+  ".kb-v13-sbox-split{",
+  "  position:absolute;width:0;border-left:2px solid #FF6B6B;pointer-events:none;",
+  "}",
+  ".kb-v13-sbox-split-gold{border-left-color:rgba(255,190,110,.85);}",
   ".kb-v13-sbox-bar{",
   "  display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;",
   "  font-family:system-ui,sans-serif;font-size:11px;color:rgba(224,240,255,.96);",

@@ -81,7 +81,29 @@ Delete a blue line in 写 mode and what you are deleting is **the `[[link]]` in 
 
 The dashed rectangles are **boxes**. **Every sub-crystal gets one automatically**, named after its folder; a box can be **renamed** (click the name) and **collapsed** (click the little triangle on its left).
 
-> **A box you drew belongs to the layer you drew it on.** Make one inside 「Python/数据分析」 and it is not there when you switch to 「Python/爬虫」 — go back and it is exactly as you left it. It did not used to work that way: boxes were global, so switching folders left the other layer's boxes sitting on screen.
+There are two colours of box, and they mean different things:
+
+| | What it is | Container? |
+| --- | --- | --- |
+| **Gold** (dotted, warm) | a **sub-crystal** — grown from a folder | **yes** — see below |
+| **Blue** (dashed, cool) | a box **you drew** with 「＋ 框」 | no — cards move in and out freely |
+
+**Gold boxes nest, one per level** (since 1.3.88). A folder's box contains that folder's own cards *and* a box for each of its subfolders, so the hierarchy is visible all the way down. Inside a box:
+
+```
+┌ A ─────────────────────────────────┐
+│  [A's own cards]  ┃  [B1's cards]  ┊  [B2's cards] │
+└───────────────────┸───────────────┸────────────────┘
+          coral line ↑        gold line ↑
+      (this level ↔ subfolders)  (sibling ↔ sibling)
+```
+
+- **Coral `#FF6B6B`** separates a folder's **own cards** from its **subfolders**.
+- **Gold** separates two **sibling** subfolders from each other.
+
+**A gold box is a container.** Cards inside it cannot be dragged into another gold box, nor across the coral line into the parent's own cards; the card **stops at the boundary**. A **blue box cannot be moved or resized out of the gold box it sits in** — but it is not a container itself, so cards still move in and out of it. **Dragging a gold box carries everything inside it**, blue boxes included.
+
+> **A blue box you drew belongs to the layer you drew it on.** Make one inside 「Python/数据分析」 and it is not there when you switch to 「Python/爬虫」 — go back and it is exactly as you left it. It did not used to work that way: boxes were global, so switching folders left the other layer's boxes sitting on screen.
 
 A box made with 「**＋ 框**」 lands **where you are looking** (the middle of the viewport), not in some fixed corner of the world — boxes used to appear at a hard-coded (60, 60), so if you had panned away you had to pan back to find it. Same for a newly created card.
 
@@ -290,6 +312,27 @@ One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **
 > - **The target is stored in `[[wikilink]]` form**, so renaming that card makes Obsidian rewrite it too — the attachment never loses its target.
 > - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
 > - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
+
+**1.3.88** · **Gold boxes are split up, one level at a time.** A gold box used to swallow the folder's **entire subtree** — so when A contained B1 and B2, and B2 contained C, the screen showed one single box for A with all four levels of cards flattened together. **The hierarchy was invisible**, which is the one thing this window exists to show.
+
+Now **every folder in the subtree gets its own box**, so they nest naturally. Inside a box, the layout splits left to right the way you asked:
+
+```
+┌ A ─────────────────────────────────┐
+│  [A's own cards]  ┃  [B1's cards]  ┊  [B2's cards] │
+└───────────────────┸───────────────┸────────────────┘
+          coral line ↑        gold line ↑
+      (this level ↔ subfolders)  (sibling ↔ sibling)
+```
+
+- The **coral `#FF6B6B` line** marks a **change of level**: this folder's own cards ↔ its subfolders.
+- The **gold line** (the same gold as the boxes) marks **siblings**: two subfolders side by side. Deeper levels work the same way — C inside B2 gives B2 an internal "B2's own cards ┃ C", again coral.
+
+Three more things came with it, all from the same report:
+
+- **Blue manual boxes now sit above gold boxes.** With gold boxes nesting, a blue box is usually inside several of them; without a higher layer it gets covered by the inner ones.
+- **A gold box is a container: cards inside it cannot be dragged into another gold box**, nor into the parent's "own cards" zone (the other side of the coral line). The card **stops at the boundary** rather than sliding in and bouncing back. **A blue manual box cannot leave the gold box it sits in either** — neither by dragging nor by resizing. A blue box is *not* a container, though: cards still move in and out of it freely.
+- **Dragging a gold box carries everything inside it.** Cards already did; what was missing was **blue manual boxes** — they store their own rectangle, so they used to stay pinned in place while the cards moved out from under them.
 
 **1.3.86** · Fixes: **a blue line always attached on the left and right sides, wherever the cards sat**. Two cards stacked one above the other still had their line leave the right edge and loop back into the left. The cause was the fallback used when nothing was set by hand: it was hard-wired to left/right (whichever card is further left gets the left side). It now **picks the facing side from the geometry**: cards stacked vertically run bottom-to-top, cards side by side run right-to-left.
 There is a second layer to this, and it is where switching computers comes in: **the attachment you set by hand lives in that machine's view state, not with the cards** — so carrying your material to another computer leaves every one of them behind, and the whole screen degrades to left/right. With the geometry-based default, **the default attachment is derived from the layout**, identical on any machine; the ones you dragged by hand still win over it (manual > automatic).

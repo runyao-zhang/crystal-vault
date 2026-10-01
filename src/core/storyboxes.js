@@ -143,31 +143,79 @@ function findBox(ctx, id) {
   return null;
 }
 
+/** 这个文件夹**直属**的卡（不含子文件夹里的）。珊瑚橙分割线要的就是它。 */
+function ownPaths(ctx, path) {
+  const out = [];
+  for (const c of ctx.model.cardsAt ? ctx.model.cardsAt(path) || [] : []) out.push(c.path);
+  return out;
+}
+
 /**
- * 这一层该画哪些框。**顺序即层叠顺序**：先晶体框（在后面），后手动框（压在上面）。
+ * 3.0 刀 47（用户 10-01 第 1 条）：递归发金框——`path` 底下**每一层**文件夹，
+ * 只要子树里有卡就发一个。
  *
- * @returns {Array<{id:string, name:string, paths:string[], collapsed:boolean, crystal:boolean}>}
+ * ---- 为什么非改不可 ----
+ *
+ * 原来只有**直接子晶体**发框，成员是它的**整棵子树**。于是 A 里嵌着 B1、B2，
+ * B2 里又嵌着 C 的时候，屏幕上只有 A 一个金框，四层的卡全摊平混在一起——
+ * **层级完全看不出来**，而这正是这个窗口存在的意义。
+ *
+ * 现在每一层都发，框就自然嵌套了。用户拍板的画法（横排切）：
+ *   · 一个框内部，**左边是它自己的卡，右边是它的子文件夹**；
+ *   · 两者之间一条**珊瑚橙 `#FF6B6B` 实线**（跨层）；
+ *   · 兄弟子文件夹之间一条**金色实线**（同级，金同金框的金）。
+ * 分割线怎么算见下面 `splitLines`。
+ *
+ * ---- 成员仍然是「整棵子树」，这一条是硬的 ----
+ *
+ * 不是只算直属的那些。三条理由，少一条都会当场出洋相：
+ *   · **父框的矩形 = 成员包围盒**——成员不全，子框就画到父框外面去了；
+ *   · 拖动按 `paths` 整体平移（用户第 4 条），漏掉后代就是"拖了父框，
+ *     子框和里面的卡留在原地"；
+ *   · 收起也靠它：收一个框要把里面**所有后代**一起收掉。
+ *
+ * 而"这一层自己的卡"单独挂在 `own` 上——珊瑚橙线要的正是这两者之差。
+ *
+ * ⚠️ **顺序即层叠顺序**：这里父先子后（`out` 是同一个数组，手动框最后才 push），
+ *    同档 z-index 下 DOM 顺序就决定了子框压在父框上。别改成先子后父。
+ */
+function emitCrystalBoxes(ctx, path, parentId, names, collapsed, out) {
+  for (const k of childKeys(ctx, path)) {
+    const sub = (path || []).concat([k]);
+    const kids = cardsUnderPath(ctx, sub);
+    // 一个空框在屏幕上是个没有解释的方印。但**"自己没卡、下面有卡"的文件夹
+    // 照样要发**——`kids` 是递归的，已经把它算进来了，它就是有内容的那一层。
+    if (!kids.length) continue;
+    const id = crystalBoxId(sub.join("/"));
+    out.push({
+      id,
+      name: names[id] || String(k),
+      paths: kids.map((c) => c.path),
+      own: ownPaths(ctx, sub),
+      collapsed: collapsed.has(id),
+      crystal: true,
+      // 谁罩着它。渲染要靠它排层叠顺序、判"被收起的父框罩住"，画分割线也要用。
+      parent: parentId,
+      // 嵌套深度（**相对这一层**，不是相对库根）。"最里面的那个才是它家"要比较它。
+      depth: (path || []).length,
+    });
+    emitCrystalBoxes(ctx, sub, id, names, collapsed, out);
+  }
+}
+
+/**
+ * 这一层该画哪些框。**顺序即层叠顺序**：金框父先子后，手动框最后（压在最上面）。
+ *
+ * @returns {Array<{id:string, name:string, paths:string[], own:string[],
+ *   collapsed:boolean, crystal:boolean, parent:(string|null), depth:number}>}
  */
 export function boxesOf(ctx, path) {
   const names = namesOf(ctx);
   const collapsed = new Set(collapsedOf(ctx));
   const out = [];
 
-  // 1) 晶体框：每个直接子晶体一个。**只在它有卡的时候才画**——
-  //    一个空框在屏幕上是个没有解释的方印。
-  for (const k of childKeys(ctx, path)) {
-    const key = (path || []).concat([k]).join("/");
-    const kids = cardsUnderPath(ctx, (path || []).concat([k]));
-    if (!kids.length) continue;
-    const id = crystalBoxId(key);
-    out.push({
-      id,
-      name: names[id] || String(k),
-      paths: kids.map((c) => c.path),
-      collapsed: collapsed.has(id),
-      crystal: true,
-    });
-  }
+  // 1) 晶体框：**子树里每一个文件夹一个**（用户 10-01 第 1 条）。
+  emitCrystalBoxes(ctx, path, null, names, collapsed, out);
 
   // 2) 手动框。成员被删光的丢掉——同上面「空框不画」那条。
   //    ⚠️ 成员表里可能留着已经不在这一层的路径（卡被挪走了），**渲染时按当前
@@ -210,10 +258,28 @@ export function boxesOf(ctx, path) {
   return out;
 }
 
-/** `卡片路径 -> 框 id`。一张卡只归一个框（后出现的赢，也就是手动框压过晶体框）。 */
-export function memberIndexOf(boxes) {
+/**
+ * `卡片路径 -> 罩着它的**所有**框 id`。
+ *
+ * ⚠️ **1.3.88 起是"一串"不是"一个"**，这是金框改成递归之后必须跟着改的地方。
+ * 原来一张卡只归一个框（后出现的赢），因为框之间是**互不相交**的：一个文件夹的
+ * 整棵子树一个框。现在父框罩着子框、子框罩着它里面的卡——C 的一张卡同时住在
+ * C 的框、B2 的框、A 的框里，**每一层都得算数**。
+ *
+ * 只留一个的后果全在"收起"上：收了 A 却只记着 C 的话，C 的卡照样画在屏幕上
+ * ——而用户明明把 A 收起来了。这不会报错，只会让人以为"收起坏了"。
+ *
+ * 数组是**由外到内**排的（`boxesOf` 就是父先子后），所以"最里面那个"取最后一个。
+ */
+export function membersOf(boxes) {
   const m = new Map();
-  for (const b of boxes) for (const p of b.paths) m.set(p, b.id);
+  for (const b of boxes) {
+    for (const p of b.paths) {
+      const cur = m.get(p);
+      if (cur) cur.push(b.id);
+      else m.set(p, [b.id]);
+    }
+  }
   return m;
 }
 
@@ -230,14 +296,165 @@ export function collapsedSet(boxes) {
  * 有就整条不画（用户第 4 条：「一律隐藏外部连线」）。**框内部的线也一并不画**
  * ——里面的卡本来就没画。
  */
-export function edgeHidden(memberOf, collapsed, aPath, bPath) {
+export function edgeHidden(members, collapsed, aPath, bPath) {
   if (!collapsed.size) return false;
-  const a = memberOf.get(aPath);
-  const b = memberOf.get(bPath);
-  return (a && collapsed.has(a)) || (b && collapsed.has(b));
+  const buried = (p) => {
+    const ids = members.get(p);
+    return !!(ids && ids.some((id) => collapsed.has(id)));
+  };
+  return buried(aPath) || buried(bPath);
+}
+
+/**
+ * 罩着这个点的**最里面那个**、而且**正收着**的框 id（没有就回 null）。
+ *
+ * 用在"线的一头被收起来了"这件事上：要给外面那一头的卡点个黄点，
+ * 黄点点下去要能闪到对应的框。嵌套之后可能有**好几层**都收着，
+ * 该闪的是**最里面**那个——它是"东西到底在哪"最精确的答案。
+ */
+export function innermostCollapsed(members, collapsed, path) {
+  const ids = members.get(path);
+  if (!ids) return null;
+  for (let i = ids.length - 1; i >= 0; i--) if (collapsed.has(ids[i])) return ids[i];
+  return null;
 }
 
 // ---- 渲染 ----
+
+/**
+ * 一个框的矩形。**渲染和命中判定唯一的算法出处**。
+ *
+ * 这一段原来在 `renderBoxes` 和 `hitBoxAt` 里**各写了一份**（那边还留着一句
+ * "几何必须和 renderBoxes 用同一套"的注释）。两套写法漂开的表现是
+ * 「框明明拖进去了、松手却什么都没发生」——不报错，只是不生效。
+ * 3.0 刀 47 收成一份。
+ *
+ * @returns {{x:number,y:number,w:number,h:number}|null}
+ *   晶体框没有算得出位置的成员时回 `null`（= 不画，也不参与命中）。
+ */
+export function rectOf(b, pos, NODE_W, NODE_H) {
+  if (b.crystal) {
+    const at = (b.paths || []).map((p) => pos.get(p)).filter(Boolean);
+    if (!at.length) return null;
+    const minX = Math.min(...at.map((p) => p.x));
+    const minY = Math.min(...at.map((p) => p.y));
+    const maxX = Math.max(...at.map((p) => p.x)) + NODE_W;
+    const maxY = Math.max(...at.map((p) => p.y)) + NODE_H;
+    return {
+      x: minX - BOX_PAD,
+      y: minY - BOX_PAD - BAR_H,
+      w: maxX - minX + BOX_PAD * 2,
+      h: maxY - minY + BOX_PAD * 2 + BAR_H,
+    };
+  }
+  const w = Math.max(MIN_BOX_W, Number(b.w) || DEFAULT_BOX_W);
+  const h = Math.max(MIN_BOX_H, Number(b.h) || DEFAULT_BOX_H);
+  // ⚠️ 兜底用的是 `NEW_BOX_X/Y`（建框时那个落座点）。这里原来写的是
+  // `MIN_X` / `MIN_Y` ——**那两个常量在这个仓里根本不存在**。今天走不到
+  // （`boxesOf` 给手动框的 x/y 一定填了有限数），但它是颗哑弹：
+  // 哪天有人从别处构造一个没有坐标的框，等着的是一次 ReferenceError，
+  // 而渲染里抛错是一整屏白掉，不是"少画一个框"。
+  const x = Number.isFinite(Number(b.x)) ? Number(b.x) : NEW_BOX_X;
+  const y = Number.isFinite(Number(b.y)) ? Number(b.y) : NEW_BOX_Y;
+  return { x, y, w, h };
+}
+
+/**
+ * 3.0 刀 47（用户 10-01 第 1 条）：每个金框内部该画哪几条分割线。
+ *
+ * 两种线、两个含义，用户点名过：
+ *   · **珊瑚橙 `#FF6B6B` 实线** = **跨层**：这个文件夹**自己的卡** ↔ 它的**子文件夹**；
+ *   · **金色实线**（同金框那个金）= **同级**：两个兄弟子文件夹之间。
+ *
+ * 位置怎么定：**落在"两坨东西之间的空档正中"**。
+ *   · 珊瑚橙：`own` 里最靠右那张卡的右边缘 ↔ 其余（= 后代）里最靠左那张的左边缘；
+ *   · 金色：左兄弟框的右边缘 ↔ 右兄弟框的左边缘。
+ * 两坨东西**贴在一起甚至重叠**时（双链把它们拉到一起了）没有空档可取，就取两者
+ * 的中点——线会压在卡片上，但至少位置是确定的、不会跳。
+ *
+ * ⚠️ 只对**有父框**的框算金色线。这一层（`crystalPath`）自己**不画框**（用户拍的），
+ *    所以这一层的直接子框之间没有父框可挂——那一段自然没有金线。
+ *
+ * @returns {Map<string, Array<{x:number, gold:boolean}>>} 键是**父框** id，
+ *   `x` 是**相对父框左边缘**的像素（渲染时直接当 left 用）。
+ */
+function splitLines(boxes, pos, NODE_W, NODE_H) {
+  const out = new Map();
+  const kids = new Map(); // 父框 id（没有父的记 ""）-> 它下面那一排子框
+  for (const b of boxes) {
+    if (!b.crystal) continue;
+    const p = b.parent == null ? "" : String(b.parent);
+    if (!kids.has(p)) kids.set(p, []);
+    kids.get(p).push(b);
+  }
+  const push = (id, x, gold) => {
+    if (!out.has(id)) out.set(id, []);
+    out.get(id).push({ x, gold });
+  };
+  for (const b of boxes) {
+    if (!b.crystal) continue;
+    const geo = rectOf(b, pos, NODE_W, NODE_H);
+    if (!geo) continue;
+    // (a) 珊瑚橙：本级的卡 ↔ 子文件夹的卡。**"两者之差"就是 `own` 与非 `own`**。
+    const own = new Set(b.own || []);
+    const ownRight = [];
+    const subLeft = [];
+    for (const p of b.paths) {
+      const at = pos.get(p);
+      if (!at) continue;
+      if (own.has(p)) ownRight.push(at.x + NODE_W);
+      else subLeft.push(at.x);
+    }
+    // 只有一边有东西就不画——没有"分割"可言（比如这个文件夹自己没卡，
+    // 或者它压根没有子文件夹）。
+    if (ownRight.length && subLeft.length) {
+      push(b.id, (Math.max(...ownRight) + Math.min(...subLeft)) / 2 - geo.x, false);
+    }
+    // (b) 金色：兄弟之间。`kids` 里的次序就是 `boxesOf` 的次序（从左到右）。
+    const ch = kids.get(String(b.id)) || [];
+    for (let i = 0; i + 1 < ch.length; i++) {
+      const l = rectOf(ch[i], pos, NODE_W, NODE_H);
+      const r = rectOf(ch[i + 1], pos, NODE_W, NODE_H);
+      if (!l || !r) continue;
+      push(b.id, (l.x + l.w + r.x) / 2 - geo.x, true);
+    }
+  }
+  return out;
+}
+
+/**
+ * 这张卡**属于哪个金框**——嵌套时取**最深**的那个（最里面那个才是"它家"）。
+ *
+ * 用户 10-01 第 3 条：「任意一个金色方框里面的卡片不可以移动到该金色方框之外」。
+ * 判据不用几何、直接用成员表：`boxesOf` 里 `paths` 是递归的，所以一张卡会同时
+ * 出现在它自己和每一层祖先的 `paths` 里，`depth` 最大的那个就是它的家。
+ */
+export function innermostCrystalBox(boxes, path) {
+  const s = String(path);
+  let best = null;
+  for (const b of boxes) {
+    if (!b.crystal) continue;
+    if (b.paths.indexOf(s) < 0) continue;
+    if (!best || (b.depth || 0) > (best.depth || 0)) best = b;
+  }
+  return best;
+}
+
+/**
+ * 把一个 `w×h` 的东西夹进矩形 `r` 里（用户 10-01 第 3 条：蓝框不许移出金框）。
+ *
+ * 东西**比框还大**时不去硬塞，就贴着左上角——"挪不动"读起来是对的，
+ * 而"被甩到某个角落"不是。
+ */
+export function clampInto(r, x, y, w, h) {
+  if (!r) return { x, y };
+  const maxX = Math.max(r.x, r.x + r.w - w);
+  const maxY = Math.max(r.y, r.y + r.h - h);
+  return {
+    x: Math.min(Math.max(x, r.x), maxX),
+    y: Math.min(Math.max(y, r.y), maxY),
+  };
+}
 
 /**
  * 把框画出来。**节点之前调用**——框要在卡片的**后面**。
@@ -250,48 +467,58 @@ export function edgeHidden(memberOf, collapsed, aPath, bPath) {
 export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
   const made = new Map();
   if (!boxes.length) return made;
+  // 3.0 刀 47：**被收起来的框罩住的那些框，整个不画。**
+  //
+  // 框变成嵌套的之后这条非有不可：收起 B2 却照画 C 的框，屏幕上就会剩一个
+  // 孤零零的 C 框悬在 B2 的标题条外面——而它里面的卡明明已经跟着 B2 一起收走了。
+  // 那读起来是「框坏了」，不是「我把它收起来了」。
+  const byId = new Map(boxes.map((b) => [String(b.id), b]));
+  const buried = (b) => {
+    let cur = b;
+    // 圈数上限是防**数据里出现环**（手改过视图状态就可能）。没有它的话这里会
+    // 转到天荒地老，而表现是"整个结构窗白屏"——比少画一个框难查得多。
+    for (let i = 0; i < 64 && cur && cur.parent; i++) {
+      const up = byId.get(String(cur.parent));
+      if (!up) break;
+      if (up.collapsed) return true;
+      cur = up;
+    }
+    return false;
+  };
+  // 分割线先算好（用户 10-01 第 1 条），下面按框取用。**挂在父框自己身上**，
+  // 所以父框一动它们跟着动，不用单独维护坐标。
+  const splits = splitLines(boxes, pos, NODE_W, NODE_H);
   for (const b of boxes) {
-    // 两种框的几何**来路完全不同**（用户 09-27 拍板的 B）：
+    if (buried(b)) continue;
+    // 几何算法**只有一份**，在 `rectOf` 里（`hitBoxAt` 走的是同一个函数）。
+    // 两边各写一套的话，"看到的框"和"判到的框"迟早会漂开，而表现是
+    // 「拖进去了、什么都没发生」——这条注释原来就写在 `hitBoxAt` 那边，
+    // 刀 47 索性把算法收到一处。
+    //
+    // 两种框的几何**来路仍然完全不同**（用户 09-27 拍板的 B）：
     //   · **手动框** = 你自己画的一个框。位置和大小全由你定（存在框自己身上），
     //     卡片只是"归属"——**框不会为了迁就它们而变形**。空框和有卡一个样。
     //   · **晶体框** = 算出来的外壳，跟着里面卡片的包围盒走。它是文件夹长出来的，
     //     不是谁画的，所以没有"你自己定的大小"这回事。
-    let geo;
-    if (b.crystal) {
-      const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-      if (!at.length) continue; // 没卡的子晶体 = 没那颗，不画是对的
-      const minX = Math.min(...at.map((p) => p.x));
-      const minY = Math.min(...at.map((p) => p.y));
-      const maxX = Math.max(...at.map((p) => p.x)) + NODE_W;
-      const maxY = Math.max(...at.map((p) => p.y)) + NODE_H;
-      geo = {
-        x: minX - BOX_PAD,
-        y: minY - BOX_PAD - BAR_H,
-        w: maxX - minX + BOX_PAD * 2,
-        h: maxY - minY + BOX_PAD * 2 + BAR_H,
-        cx: (minX + maxX) / 2,
-        cy: (minY + maxY) / 2,
-      };
-    } else {
-      const w = Math.max(MIN_BOX_W, Number(b.w) || MIN_BOX_W);
-      const h = Math.max(MIN_BOX_H, Number(b.h) || MIN_BOX_H);
-      // ⚠️ 兜底用的是 `NEW_BOX_X/Y`（建框时那个落座点）。这里原来写的是
-      // `MIN_X` / `MIN_Y` ——**那两个常量在这个仓里根本不存在**。今天走不到
-      // （`boxesOf` 给手动框的 x/y 一定填了有限数），但它是颗哑弹：
-      // 哪天有人从别处构造一个没有坐标的框，等着的是一次 ReferenceError，
-      // 而渲染里抛错是一整屏白掉，不是"少画一个框"。
-      const x = Number.isFinite(Number(b.x)) ? Number(b.x) : NEW_BOX_X;
-      const y = Number.isFinite(Number(b.y)) ? Number(b.y) : NEW_BOX_Y;
-      geo = { x, y, w, h, cx: x + w / 2, cy: y + BAR_H / 2 + 8 };
-    }
+    const geo = rectOf(b, pos, NODE_W, NODE_H);
+    if (!geo) continue; // 没卡的子晶体 = 没那颗，不画是对的
+    const cx = geo.x + geo.w / 2;
+    // 收起态的条摆在重心上（**不是矩形左上角**，见下面那段）。手动框的"重心"
+    // 稍微偏上一丁点：它是一块自己画的板，摆正中间反而不像那条标题。
+    const cy = b.crystal ? geo.y + geo.h / 2 : geo.y + BAR_H / 2 + 8;
 
-    const node = el("div", "kb-v13-sbox" + (b.crystal ? " kb-v13-sbox-crystal" : "") + (b.collapsed ? " kb-v13-sbox-collapsed" : ""));
+    const node = el(
+      "div",
+      "kb-v13-sbox" +
+        (b.crystal ? " kb-v13-sbox-crystal" : " kb-v13-sbox-manual") +
+        (b.collapsed ? " kb-v13-sbox-collapsed" : "")
+    );
     node.dataset.box = b.id;
     if (b.collapsed) {
       // 收起：只剩一条标题栏，摆在自己的重心附近——**不摆在矩形左上角**，
       // 因为矩形可能是按展开时的大小定的，收起后那个位置会离得很远。
-      node.style.left = Math.round(geo.cx) + "px";
-      node.style.top = Math.round(geo.cy) + "px";
+      node.style.left = Math.round(cx) + "px";
+      node.style.top = Math.round(cy) + "px";
       node.style.width = COLLAPSED_W + "px";
       node.style.height = BAR_H + "px";
     } else {
@@ -325,6 +552,21 @@ export function renderBoxes(host, boxes, pos, el, NODE_W, NODE_H) {
       bar.appendChild(del);
     }
     node.appendChild(bar);
+    // 3.0 刀 47：分割线（用户 10-01 第 1 条）。**只画展开态**——收起时整个框
+    // 只剩一条标题栏，里面什么都看不见，画线是没有意义的。
+    //
+    // 挂在**这个框自己身上**（作为子节点）：父框一被拖动，lines 跟着走，
+    // 不用在拖动那段里单独维护它们的坐标。
+    if (!b.collapsed) {
+      for (const s of splits.get(String(b.id)) || []) {
+        const line = el("div", "kb-v13-sbox-split" + (s.gold ? " kb-v13-sbox-split-gold" : ""));
+        line.style.left = Math.round(s.x) + "px";
+        // 让开标题栏（`BAR_H`），底下留一点不贴边。从常量算，不写死像素。
+        line.style.top = BAR_H + 6 + "px";
+        line.style.bottom = "8px";
+        node.appendChild(line);
+      }
+    }
     // 手动框右下角那颗抓手：**框是你画的**，所以大小得能自己定（用户拍板的 B）。
     // 晶体框不给抓手——它的形状是算出来的，拉它没有意义。
     if (!b.crystal && !b.collapsed) {
@@ -543,28 +785,14 @@ export function deleteBox(ctx, id) {
  */
 export function hitBoxAt(boxes, pos, NODE_W, NODE_H, pt) {
   if (!pt) return null;
+  // 倒着扫（手动框排在数组最后、金框是子框在后）→ **先命中的是最里面那个**。
+  // 这正是要的：一张卡"掉进哪个框"问的是最精确的那个答案。
   for (let i = boxes.length - 1; i >= 0; i--) {
     const b = boxes[i];
     if (b.collapsed) continue;
-    // 几何**必须和 renderBoxes 用同一套**：那边怎么摆的，这边就怎么判。
-    // 手动框用自己记的矩形（用户 09-27 拍板的 B），晶体框用成员包围盒。
-    let x1, y1, x2, y2;
-    if (b.crystal) {
-      const at = b.paths.map((p) => pos.get(p)).filter(Boolean);
-      if (!at.length) continue;
-      x1 = Math.min(...at.map((p) => p.x)) - BOX_PAD;
-      y1 = Math.min(...at.map((p) => p.y)) - BOX_PAD - BAR_H;
-      x2 = Math.max(...at.map((p) => p.x)) + NODE_W + BOX_PAD;
-      y2 = Math.max(...at.map((p) => p.y)) + NODE_H + BOX_PAD;
-    } else {
-      const w = Math.max(MIN_BOX_W, Number(b.w) || DEFAULT_BOX_W);
-      const h = Math.max(MIN_BOX_H, Number(b.h) || DEFAULT_BOX_H);
-      x1 = b.x;
-      y1 = b.y;
-      x2 = b.x + w;
-      y2 = b.y + h;
-    }
-    if (pt.x >= x1 && pt.x <= x2 && pt.y >= y1 && pt.y <= y2) return b;
+    const r = rectOf(b, pos, NODE_W, NODE_H);
+    if (!r) continue;
+    if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h) return b;
   }
   return null;
 }

@@ -14,7 +14,12 @@ import { runLayout, layeredLayout, NODE_W, NODE_H } from "./storylayout.js";
 // 渲染时算一次框、把它们画到卡片**后面**，画线时问一句「这条边是不是通进收起来的框」。
 import {
   boxesOf,
-  memberIndexOf,
+  // 3.0 刀 47：`memberIndexOf` 改叫 `membersOf`，并且**返回一串而不是一个**
+  // （金框变成嵌套的之后，一张卡同时住在它自己和每一层祖先的框里）。
+  // 判"要不要藏"必须问「有没有**任何**一个罩着它的框收着」——只问最里面那个的话，
+  // 收了 A、而 C 没被单独收，C 的卡就照样画在屏幕上，用户明明把 A 收起来了。
+  membersOf,
+  innermostCollapsed,
   collapsedSet,
   renderBoxes,
   bindBoxHover,
@@ -22,6 +27,11 @@ import {
   renameBox,
   deleteBox,
   setBoxRect,
+  // 3.0 刀 47（用户第 3 条）：金框是**容器**——里面的卡不许拖进别的金框，
+  // 蓝框不许移出它所在的那个金框。几何算法和夹取都在那边。
+  rectOf,
+  innermostCrystalBox,
+  clampInto,
   // 3.0 刀 30：归属判定整批走 `assignCards`——单张那条路已经并进去了
   // （"批里只有一张"是它的特例）。原来那三个单张的入口
   // （`boxOfPath` / `addCardToBox` / `removeCardFromBox`）已经删掉，
@@ -403,7 +413,7 @@ export function renderStorylineStage(ctx, path) {
   // 而成员表与收起表必须在这之前挂到 ctx 上——紧接着的 `paintStoryLines` 要靠
   // 它们决定哪几根线不画。
   const boxes = boxesOf(ctx, path);
-  ctx._boxMember = memberIndexOf(boxes);
+  ctx._boxMember = membersOf(boxes);
   ctx._boxCollapsed = collapsedSet(boxes);
   ctx._boxEls = renderBoxes(ctx.canvas, boxes, pos, EL, NODE_W, NODE_H);
   // 悬停委托**只挂一次**：卡片每帧重建，逐张挂监听会漏、也会越堆越多
@@ -492,6 +502,29 @@ export function renderStorylineStage(ctx, path) {
         const gy = e.clientY;
         let lw = gw;
         let lh = gh;
+        // 3.0 刀 47（用户第 3 条）：**拉大也不能拉出金框**。
+        // 拖动那条路已经夹过了，缩放这条不夹的话，从右下角往外一扯就出去了
+        // ——而"框不许出金框"是对这个蓝框整体的约束，跟它是被拖出去的
+        // 还是被拉大的没有关系。
+        const gcp = ctx.state.crystalPath || [];
+        const gBoxes = boxesOf(ctx, gcp);
+        const gMe = gBoxes.find((b) => String(b.id) === String(gid));
+        const gPos = new Map();
+        for (const it of ctx._cardHit || []) gPos.set(it.path, { x: it.x, y: it.y });
+        const gClamp = (() => {
+          if (!gMe) return null;
+          const me = rectOf(gMe, gPos, NODE_W, NODE_H);
+          if (!me) return null;
+          const c0 = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
+          for (let i = gBoxes.length - 1; i >= 0; i--) {
+            const b = gBoxes[i];
+            if (!b.crystal || b.collapsed) continue;
+            const r = rectOf(b, gPos, NODE_W, NODE_H);
+            if (!r) continue;
+            if (c0.x >= r.x && c0.x <= r.x + r.w && c0.y >= r.y && c0.y <= r.y + r.h) return r;
+          }
+          return null;
+        })();
         // 3.0 刀 34：这里原来有一整套「宽高吸附到格点上」的算法，
         // 用户 09-29 说收纳方框不要格点了，整套撤掉。下限回到
         // storyboxes 的 MIN_BOX_W / MIN_BOX_H（260 / 180）——
@@ -502,6 +535,17 @@ export function renderStorylineStage(ctx, path) {
           // 卡片才是要对齐的东西。这里退回 1.3.56 的写法：只夹下限。
           lw = Math.max(260, gw + (ev.clientX - gx));
           lh = Math.max(180, gh + (ev.clientY - gy));
+          // 夹的是**右下角**：这个抓手在右下，所以它决定右下角能到哪儿。
+          // 左上角不动（框的位置是它自己记的 x/y，缩放不改位置）。
+          if (gClamp) {
+            const me = rectOf(gMe, gPos, NODE_W, NODE_H);
+            const maxW = gClamp.x + gClamp.w - me.x;
+            const maxH = gClamp.y + gClamp.h - me.y;
+            // ⚠️ 夹完还要**再夹一次下限**：金框比 260×180 还小的时候，
+            // 上面那两个 max 会小于下限，只夹上限就把框缩成负的宽高。
+            lw = Math.max(260, Math.min(lw, maxW));
+            lh = Math.max(180, Math.min(lh, maxH));
+          }
           gnode.style.width = lw + "px";
           gnode.style.height = lh + "px";
         };
@@ -606,6 +650,52 @@ export function renderStorylineStage(ctx, path) {
       //    两次都是他明确要的，中间隔了一天。
       const isManualBox = String(id).indexOf("m:") === 0;
       const hasRect = isManualBox && Number.isFinite(mx) && Number.isFinite(my);
+
+      // 3.0 刀 47：两种框各自的"容器"关系（用户 10-01 第 3、4 条）。
+      //
+      // 第 3 条「蓝色收纳方框不可以移出金色方框之外」→ `blueClamp`：
+      //   判据 = 蓝框**中心**落在哪个金框里（倒着扫 = 最里面那个）。一个都没落进
+      //   （比如它罩着的是**这一层自己的卡**，那本来就没有金框）就不设限——
+      //   那种蓝框本来就是自由的，硬塞一个约束反而拖不动。
+      //
+      // 第 4 条「拖动金框，里面所有元素跟随移动」→ `followers`：
+      //   卡片本来就跟着走（上面 `start` 是按 `paths` 拍的快照），漏的是
+      //   **蓝色收纳方框**——它是个自己记着矩形的容器，不带它走的话，
+      //   一拖金框，里面的卡全跑了、那个蓝框还钉在原地。
+      //
+      // 位置表用上面那份 `now`（就是这一帧屏幕上那些卡的位置），不重算。
+      const allBoxes = boxesOf(ctx, cp);
+      const blueClamp = box.crystal
+        ? null
+        : (() => {
+            const me = rectOf(box, now, NODE_W, NODE_H);
+            if (!me) return null;
+            const c0 = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
+            for (let i = allBoxes.length - 1; i >= 0; i--) {
+              const b = allBoxes[i];
+              if (!b.crystal || b.collapsed) continue;
+              const r = rectOf(b, now, NODE_W, NODE_H);
+              if (!r) continue;
+              if (c0.x >= r.x && c0.x <= r.x + r.w && c0.y >= r.y && c0.y <= r.y + r.h) return r;
+            }
+            return null;
+          })();
+      const followers = [];
+      if (box.crystal) {
+        const r = rectOf(box, now, NODE_W, NODE_H);
+        const els = ctx._boxEls || new Map();
+        if (r) {
+          for (const mb of allBoxes) {
+            if (mb.crystal || mb.collapsed) continue;
+            const mr = rectOf(mb, now, NODE_W, NODE_H);
+            if (!mr) continue;
+            const fx = mr.x + mr.w / 2;
+            const fy = mr.y + mr.h / 2;
+            if (fx < r.x || fx > r.x + r.w || fy < r.y || fy > r.y + r.h) continue;
+            followers.push({ id: String(mb.id), x: mr.x, y: mr.y, node: els.get(String(mb.id)) });
+          }
+        }
+      }
       /** 把这一帧的原始位移吸成格点位移。 */
       const snapDelta = (dx, dy) => {
         // 没有自己的矩形（晶体框，或坐标坏掉的手动框）→ 只能吸位移。
@@ -632,9 +722,23 @@ export function renderStorylineStage(ctx, path) {
         const w1 = toWorld(ev.clientX, ev.clientY);
         const dx = w1.x - w0.x;
         const dy = w1.y - w0.y;
-        const at = snapDelta(dx, dy);
-        const sdx = at.x;
-        const sdy = at.y;
+        const raw = snapDelta(dx, dy);
+        // 3.0 刀 47（用户第 3 条）：蓝框不许移出它所在的那个金框。
+        // **夹在吸附之后**——反过来的话格点会把框从边界上又推出去一格，
+        // 表现是"还能蹭出去一点点"，而不是干净的"停在边界上"。
+        let sdx = raw.x;
+        let sdy = raw.y;
+        if (hasRect && blueClamp) {
+          const cl = clampInto(
+            blueClamp,
+            mx + sdx,
+            my + sdy,
+            Number(box.w) || 0,
+            Number(box.h) || 0
+          );
+          sdx = cl.x - mx;
+          sdy = cl.y - my;
+        }
         lastDx = sdx;
         lastDy = sdy;
         // ⚠️ 3.0 刀 34：**一动没动就什么都不写。**
@@ -664,6 +768,13 @@ export function renderStorylineStage(ctx, path) {
         // 框会在按下的那一瞬间跳到一个完全不同的地方——用户 09-27 报的就是这个。
         node.style.left = bx + sdx + "px";
         node.style.top = by + sdy + "px";
+        // 3.0 刀 47（用户第 4 条）：跟着走的蓝色收纳方框。**这里只改 DOM**
+        // （和这个框自己一样），落盘在 `up` 里——拖动过程中每帧写一次状态没有意义。
+        for (const f of followers) {
+          if (!f.node) continue;
+          f.node.style.left = f.x + sdx + "px";
+          f.node.style.top = f.y + sdy + "px";
+        }
         applyStorylinePositions(ctx, cp);
         redrawStoryLines(ctx);
       };
@@ -695,6 +806,13 @@ export function renderStorylineStage(ctx, path) {
           for (const [p, s] of start) {
             if (isForeign(ctx, p)) continue;
             queueCardPos(ctx, p, { x: s.x + lastDx, y: s.y + lastDy });
+          }
+          // 3.0 刀 47（用户第 4 条）：跟着走的蓝色收纳方框也要**落盘**。
+          // 只在 `move` 里改 DOM 的话，那一趟看起来完全正常，重开一次
+          // 蓝框就跳回原处、而里面的卡是搬过的——**同一段位移，卡写了框没写**，
+          // 正是这个仓里反复出现过的"两个半张脸对不上"。
+          for (const f of followers) {
+            setBoxRect(ctx, f.id, { x: f.x + lastDx, y: f.y + lastDy });
           }
         }
         // 落定：立刻写盘，并让顶栏那个「未保存」小点跟上（同 itemdrag 的 end 那条）
@@ -745,8 +863,11 @@ export function renderStorylineStage(ctx, path) {
   for (const c of cards) {
     // 收起来的框里的卡**不画**（用户第 4 条）。只是不画——数据一个字没动，
     // 框一展开原样回来。
-    const bid = ctx._boxMember.get(c.path);
-    if (bid && ctx._boxCollapsed.has(bid)) continue;
+    // ⚠️ 1.3.88 起 `_boxMember` 是**一串**：一张卡同时住在它自己和每一层祖先的框里，
+    // 其中**任何一个**收着它就不该画。只问最里面那个的话，"收了 A 却没单独收 C"
+    // 会让 C 的卡留在屏幕上——用户明明把 A 收起来了。
+    const bids = ctx._boxMember.get(c.path);
+    if (bids && bids.some((id) => ctx._boxCollapsed.has(id))) continue;
     const p = pos.get(c.path);
     // ⚠️ 这一句要**排在上面那个 continue 之后**：收起来的框里的卡没画，
     // 也就不该能被框选中——否则用户框一下会把一批看不见的卡也拖走。
@@ -894,10 +1015,10 @@ function paintStoryLines(ctx, svg, cards, path, layoutMaybe) {
     //
     // 两端都在收起来的框里（可能是两个不同的框）就没什么可点的——不记。
     if (ctx._boxCollapsed && ctx._boxCollapsed.size && ctx._boxMember) {
-      const fa = ctx._boxMember.get(e.from);
-      const fb = ctx._boxMember.get(e.to);
-      const ca = !!(fa && ctx._boxCollapsed.has(fa));
-      const cb = !!(fb && ctx._boxCollapsed.has(fb));
+      const fa = innermostCollapsed(ctx._boxMember, ctx._boxCollapsed, e.from);
+      const fb = innermostCollapsed(ctx._boxMember, ctx._boxCollapsed, e.to);
+      const ca = !!fa;
+      const cb = !!fb;
       if (ca || cb) {
         if (ca !== cb && ctx._boxLinked) {
           const outside = ca ? e.to : e.from;
@@ -1106,6 +1227,40 @@ export function bindStorylineDrag(ctx) {
   let group = null;
   let groupStart = null;
 
+  // 3.0 刀 47（用户 10-01 第 3 条）：**金框是个容器，里面的卡不许拖到别的金框里去。**
+  //
+  // 两个变量分别是「这一趟不许进的矩形」和「最后一个合法落点」：
+  // 指针一旦把卡片中心带进某个外来的金框，就退回上一个合法位置——表现是
+  // **卡片停在那条边界上**，而不是"滑进去然后弹回来"（弹回来看着像 bug）。
+  let forbidBoxes = [];
+  let lastOk = null;
+
+  /**
+   * 把落点夹在"允许的范围"里。指针一旦把**卡片中心**带进某个外来的金框，
+   * 就退回上一个合法落点——表现是**卡片停在那条边界上**（不是滑进去再弹回来，
+   * 那看着像 bug）。
+   *
+   * 判中心而不是判整张卡，是因为归属判定（`hitBoxAt`）一直用的就是中心；
+   * 两处口径不一样的话，"能不能拖进去"和"拖进去算谁的"会给出不同答案。
+   *
+   * 顺带在这里做一次吸附：`itemdrag` 松手时拿的是**这个函数返回的值**
+   * （`drag.x/drag.y`），不吸的话松手那一刻会滑回没吸过的位置。
+   * `snapPos` 是幂等的，`onMove` 那边再吸一次不会走样。
+   */
+  const holdIn = (p) => {
+    if (!forbidBoxes.length) return p;
+    const at = snapPos(p.x, p.y, NODE_H);
+    const cx = at.x + NODE_W / 2;
+    const cy = at.y + NODE_H / 2;
+    for (const r of forbidBoxes) {
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) {
+        return lastOk || at;
+      }
+    }
+    lastOk = at;
+    return at;
+  };
+
   bindItemDrag(ctx, {
     selector: ".kb-v13-snode",
     keyOf: (el) => el.dataset.path,
@@ -1115,6 +1270,8 @@ export function bindStorylineDrag(ctx) {
     // 手一抖就超过 4px 的拖动阈值，于是 itemdrag 会把它当成一次拖动、
     // 拖完再 `swallowNextClick` 把点击吃掉：**明明是点 ✕，卡片却挪了一点、也没有被拿走**。
     ignore: ".kb-v13-port,.kb-v13-snode-unimport",
+    // 3.0 刀 47：金框是容器，里面的卡不许拖到别的金框里去（`holdIn` 见上）。
+    clamp: (c, path, p) => holdIn(p),
     posOf: (c, path) => {
       const card = c.model.byPath.get(path);
       if (!card) return { x: 0, y: 0 };
@@ -1161,6 +1318,59 @@ export function bindStorylineDrag(ctx) {
         const card = c.model.byPath.get(p);
         if (card) groupStart.set(p, nodePosOf(c, card, layout));
       }
+      // 3.0 刀 47（用户第 3 条）：这一趟**不许进**的金框。
+      //
+      // 判据用**成员表**（`innermostCrystalBox` / `parent` 链），不用几何——
+      // `paths` 是递归的，"这张卡属于哪个文件夹"是确定的；而矩形会因为排布
+      // 互相重叠，"谁在谁里面"用矩形判会得到随卡片位置漂移的答案。
+      //
+      // 「外来」= **不是它的家、也不是它家的任何一层祖先**。祖先当然放行
+      // （卡在自己那个框里、以及任何一层父框的范围里走动都是应该的）。
+      //
+      // ⚠️ 位置取 `_cardHit`（上一帧渲染时留下的那份），**不重算**：
+      //    重算要跑一遍 `layoutFor` + 每张卡 `nodePosOf`，而这一趟的判据
+      //    本来就该是"按下那一刻屏幕上的样子"。
+      forbidBoxes = [];
+      lastOk = groupStart.get(path) || null;
+      const all = boxesOf(c, cp);
+      const byId = new Map(all.map((b) => [String(b.id), b]));
+      const mine = new Set();
+      for (let b = innermostCrystalBox(all, path); b; ) {
+        mine.add(String(b.id));
+        b = b.parent == null ? null : byId.get(String(b.parent));
+      }
+      const posMap = new Map();
+      for (const it of c._cardHit || []) posMap.set(it.path, { x: it.x, y: it.y });
+      const homeId = (() => {
+        const h = innermostCrystalBox(all, path);
+        return h ? String(h.id) : null;
+      })();
+      for (const b of all) {
+        if (!b.crystal || b.collapsed || mine.has(String(b.id))) continue;
+        const r = rectOf(b, posMap, NODE_W, NODE_H);
+        if (r) forbidBoxes.push(r);
+      }
+      // ⚠️ 还有**每一层祖先"自己的卡"那一块**。
+      //
+      // 珊瑚橙线分的就是这两块，而"本级的卡"**不属于任何金框**（框只发给子文件夹，
+      // 用户拍的），所以上面那一圈拦不住它：一张 B1 的卡能一路拖到 A 的文件堆里去
+      // ——而 B1 的框会跟着伸过去，**罩在人家 A 自己的卡上面**。
+      // 那正是这条约束要防的那张假图。
+      //
+      // 用**祖先的 `own` 那几张卡的包围盒**当禁区。这是个近似（那几张卡自己也可能
+      // 东一张西一张），但它是个**拖动守卫**，不是数据判据——挡早一点读起来
+      // 就是"停在那条珊瑚橙线前面"，而那正是对的。
+      for (const id of mine) {
+        if (id === homeId) continue;
+        const a = byId.get(id);
+        const own = ((a && a.own) || []).map((p) => posMap.get(p)).filter(Boolean);
+        if (!own.length) continue;
+        const x1 = Math.min(...own.map((o) => o.x));
+        const y1 = Math.min(...own.map((o) => o.y));
+        const x2 = Math.max(...own.map((o) => o.x)) + NODE_W;
+        const y2 = Math.max(...own.map((o) => o.y)) + NODE_H;
+        forbidBoxes.push({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+      }
     },
     // 拖动过程中：位置**当场写进草稿**，并把线重画一遍。
     // 不写的话，线是按「卡片此刻在哪」算的，而它读的还是旧位置——照样不动。
@@ -1170,7 +1380,9 @@ export function bindStorylineDrag(ctx) {
       const base = groupStart ? groupStart.get(path) : null;
       const many = group && group.length > 1;
       // 3.0 刀 32：吸附。**算的是"主拖那张"该落在哪个格点**，位移再从它倒推。
-      const at = snapPos(p.x, p.y, NODE_H);
+      // 3.0 刀 47：吸附之后**再夹一次**（`holdIn` 自己也吸，幂等）。顺序反过来的话，
+      // 格点会把卡片从边界上又推回禁区里一格——表现是"还能挤进去一点点"。
+      const at = holdIn(snapPos(p.x, p.y, NODE_H));
       // 3.0 刀 34：**外来卡的位置记在别处**（`importPos`），而且拖动过程中
       // 每一帧都要写——它就是"我此刻把它摆在哪儿"的即时记录，和原生卡一样。
       const own = isForeign(c, path);

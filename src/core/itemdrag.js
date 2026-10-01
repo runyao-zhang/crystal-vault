@@ -78,8 +78,23 @@ export function bindItemDrag(ctx, cfg) {
     }
     // 屏幕位移要**除以相机缩放**：相机缩了 k 倍，屏幕走 100px 世界只走 100/k。
     // 忘了这一步的表现是「放大之后拖起来飞得离谱」。
-    const x = drag.from.x + dx / drag.k;
-    const y = drag.from.y + dy / drag.k;
+    let x = drag.from.x + dx / drag.k;
+    let y = drag.from.y + dy / drag.k;
+    // 3.0 刀 47（用户 10-01 第 3 条）：**允许调用方把落点夹住。**
+    //
+    // 结构窗用它来实现"金框是容器"：卡片不许拖进别的金框、蓝框不许移出金框。
+    // 为什么夹在这里而不是调用方的 `onMove` 里——`onMove` 是**通知**，
+    // 而这里算出来的 `drag.x/drag.y` 是**松手时 `writePos` 真正写下去的值**。
+    // 只在 `onMove` 里夹的话，屏幕上看着拖不动，一松手位置却写进去了。
+    //
+    // 回 `null`（或没给这个钩子）就用原值——**没配它的时候，这条路一个字节都没变**。
+    if (cfg.clamp) {
+      const at = cfg.clamp(ctx, drag.key, { x, y });
+      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
+        x = at.x;
+        y = at.y;
+      }
+    }
     drag.x = x;
     drag.y = y;
     drag.el.style.left = x + "px";
