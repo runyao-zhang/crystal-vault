@@ -11,9 +11,11 @@
      （1016px）、宽度被压窄，图当场被**压扁**。
      只给 width：高度由浏览器按原图比例算出来，容器怎么窄都不变形。 -->
 桌面模式：
+
 <img width="1917" alt="晶体库概览" src="https://github.com/user-attachments/assets/0a4f224e-f3fc-4a80-8a1e-ea524075750f" />
 
 故事线模式：
+
 <img width="1677" alt="故事线模式" src="https://github.com/user-attachments/assets/1e7bc88b-484b-4d4a-a8a7-d5a20d308b0e" />
 
 而它真正的战场是**文献模式**：一边读 PDF / 图片 / Markdown，一边把读到的东西当场立成结构——
