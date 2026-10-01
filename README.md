@@ -1,6 +1,7 @@
 # Crystal Vault（晶体库）
 
 把一文件夹的 Markdown 卡片变成一座**能看的知识晶体库**。
+**QQ 群：831440768**
 
 截图预览：
 
@@ -325,6 +326,14 @@
 > - **嵌入模式不锁笔记的滚动**（另外两档会——它们盖在笔记上，背后不该跟着滚）。
 > - **dataviewjs 那种用法没有这几档**（它本来就嵌在笔记里），所以那颗按钮不会出现。
 
+### 遇到问题 / 想提意见
+
+**QQ 群：831440768**
+
+装不上、用着哪儿不对劲、想要个什么功能，都可以直接进来说。
+（在 GitHub 上开 [Issue](https://github.com/runyao-zhang/crystal-vault/issues) 也一样，
+只是群里问一句通常快得多。）
+
 ## 安装
 
 在 *设置 → 第三方插件 → 浏览* 里搜 **Crystal Vault**。
@@ -333,13 +342,6 @@
 `main.js` / `manifest.json` / `styles.css`，放进 `<你的 vault>/.obsidian/plugins/crystal-vault/`，
 然后在 *设置 → 第三方插件* 里启用。
 
-### 遇到问题 / 想提意见
-
-**QQ 群：831440768**
-
-装不上、用着哪儿不对劲、想要个什么功能，都可以直接进来说。
-（在 GitHub 上开 [Issue](https://github.com/runyao-zhang/crystal-vault/issues) 也一样，
-只是群里问一句通常快得多。）
 
 ## 上手
 
