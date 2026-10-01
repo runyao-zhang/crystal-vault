@@ -40,6 +40,8 @@ import {
   //    原来还有个 `isUnderBox`（"G 是不是 home 的祖先"），随那条一起删了：
   //    它服务的那个判据本身是错的，留着只会是下一个人踩进去的第二种规矩。
   crystalHomeOf,
+  // 3.0 刀 50：**跨层**跟随——蓝框按层存，金框逐层都有，两者的层不是一回事。
+  manualBoxesUnder,
   // 3.0 刀 30：归属判定整批走 `assignCards`——单张那条路已经并进去了
   // （"批里只有一张"是它的特例）。原来那三个单张的入口
   // （`boxOfPath` / `addCardToBox` / `removeCardFromBox`）已经删掉，
@@ -134,6 +136,9 @@ function viewCards(ctx, path) {
  *   · **不往它的文件里写坐标**——外来卡此刻的位置是"它在我这层被摆在哪儿"，
  *     跟它自己那颗晶体里的位置是两回事，写进去就是把 A 层的位置写坏。
  */
+/** 层链 → 层键。**只在这里拼**，和 boxfile.js 的 `keyOfChain` 同一口径。 */
+const keyOfChain = (chain) => (Array.isArray(chain) ? chain : []).join(" ");
+
 function isForeign(ctx, path) {
   return importsOf(ctx).indexOf(String(path || "")) >= 0;
 }
@@ -710,6 +715,25 @@ export function renderStorylineStage(ctx, path) {
         //       → 用户手画的框比金框大，中心落在外面 → **静默不跟**。
         //       表现就是用户报的：「卡片移出蓝框好一段距离，框还留在原地」。
         const moving = new Set(box.paths);
+        // ⚠️ **还要算上"存在更深那一层"的蓝框**（1.3.92）。
+        //
+        // 蓝框按层存，金框从 1.3.88 起逐层都有——于是"站在浅层拖某个深文件夹的
+        // 金框"这个动作，会带动那个文件夹里的卡，**却带不动那个文件夹里面画的
+        // 蓝框**（它存在更深那一层，不在这一屏的 `boxesOf` 里）。用户的报法就是
+        // 「拖完打开结构窗，卡片跑到框外面了」。
+        //
+        // 它们在这一屏上**不画**（属于别的层），所以没有 DOM——只跟着走、落盘。
+        const cross = [];
+        if (String(box.id).indexOf("c:") === 0) {
+          const here = keyOfChain(cp);
+          for (const e of manualBoxesUnder(ctx, String(box.id).slice(2), here)) {
+            const mine = Array.isArray(e.box.paths) ? e.box.paths : [];
+            if (!mine.some((p) => moving.has(p))) continue;
+            const mr = rectOf(e.box, now, NODE_W, NODE_H);
+            if (!mr) continue;
+            cross.push({ id: String(e.box.id), x: mr.x, y: mr.y, ox: mr.x, oy: mr.y, node: null });
+          }
+        }
         for (const mb of allBoxes) {
           if (mb.crystal) continue;
           const mine = Array.isArray(mb.paths) ? mb.paths : [];
@@ -733,6 +757,9 @@ export function renderStorylineStage(ctx, path) {
             node: el,
           });
         }
+        // 跨层那几笔并进来（它们没有 DOM，`move` 里 `!f.node` 会跳过，
+        // 但 `up` 里照样落盘——那才是它们唯一要干的事）。
+        for (const f of cross) followers.push(f);
       } else {
         // 蓝框不许移出它所在的那个金框。判据仍然走**成员**（位置判据在这边一样会漏：
         // 蓝框画大一点就不再"落在"金框里了，于是约束静默失效）。

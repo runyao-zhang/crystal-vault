@@ -313,6 +313,18 @@ One entry = "the line to `02-中继` leaves my **bottom** edge and enters its **
 > - **Existing attachments are migrated into the files** the first time you open the vault (one batch per open; the rest follow on later opens).
 > - Along the way, a "written to the file but never read back" path got closed: the parser ran twice, and the second pass received already-parsed objects, discarded the whole table as strings — present in the file, invisible on screen, with nothing said.
 
+**1.3.92** · **Dragging a gold box now carries blue boxes stored on deeper layers.** (This is the one the previous versions kept missing.)
+
+**Blue boxes are stored per layer** — wherever you drew it is where it is recorded. Gold boxes, since 1.3.88, exist **on every layer**. Put those two together and you get a shape you hit constantly:
+
+> You are on a **shallow layer** (say 「机器学习」) and drag the gold box of a **deeper folder** (say 「…/准确度的陷阱与混沌矩阵」). That moves the cards in that folder — but the blue box you drew for that folder is stored **on the deeper layer** (that is where you went in to draw it), so it is not on this screen at all and **nothing follows it**.
+>
+> Then you open the structure window (pinned to that deepest layer) — and **the cards are already well outside the blue box**.
+
+It now goes by **folder containment**: drag a gold box and every blue box drawn **inside it** — on its own layer or any layer beneath — follows, as long as any of its member cards moves in that drag.
+
+> Those boxes are **not drawn** on the shallow layer (they belong to another layer; drawing them would be ghosts), so you do not see them move — but **they are already in the right place** when you open the structure window, which is what matters. The write-back was fixed along the way too: on a cross-layer drag the sidecar goes to **the box's own layer**, not to the one you happen to be standing on.
+
 **1.3.91** · Three fixes, all around dragging a gold box:
 
 **① Blue manual boxes still did not follow a dragged gold box.** The test had been wrong all along, and wrong in exactly your case:

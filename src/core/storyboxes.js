@@ -130,17 +130,114 @@ function allBoxes(ctx) {
 }
 
 /**
- * 按 id 找一个框，**跨层找**。
+ * 按 id 找一个框，**跨层找**，**连它住在哪一格一起回**。
  *
  * 能跨层是因为 **id 是全局唯一的**（`createBox` 分配新号时会扫所有层，
  * 见那边）。这样 `boxNames` / `collapsedBoxes` 那两张按 id 索引的表
  * 一个字都不用改——它们的键本来就要求全局唯一。
+ *
+ * ⚠️ **回那个桶键**（`keyOf(chain)` 那个字符串）是 1.3.92 加的：跨层拖的时候
+ * 要把边车写回**框自己那一层**，而不是"你现在站在哪一层"（见 `setBoxRect`）。
  */
-function findBox(ctx, id) {
+function findBoxEntry(ctx, id) {
   const s = String(id || "");
   if (!s) return null;
-  for (const b of allBoxes(ctx)) if (String(b.id) === s) return b;
+  const v = view(ctx);
+  const t = v && v.boxes;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return null;
+  for (const [key, list] of Object.entries(t)) {
+    if (!Array.isArray(list)) continue;
+    for (const b of list) if (String(b && b.id) === s) return { box: b, key };
+  }
   return null;
+}
+
+function findBox(ctx, id) {
+  const e = findBoxEntry(ctx, id);
+  return e ? e.box : null;
+}
+
+/**
+ * 库里的**所有层链**（从根一路走下来，每一条都是 `path` 数组）。
+ *
+ * ⚠️ 走 model 而不是去 `split` 层键：晶体文件夹名**可以带空格**
+ * （`Python 基础`），把 `keyOf` 那个空格连接串切回来会切错——那个坑
+ * `boxfile.js` 的 `folderOfChain` 头上记着，别再踩一次。
+ */
+function allChains(ctx) {
+  const out = [];
+  const walk = (p) => {
+    for (const k of childKeys(ctx, p)) {
+      const c = p.concat([k]);
+      out.push(c);
+      walk(c);
+    }
+  };
+  walk([]);
+  return out;
+}
+
+/** 某一格（层键）对应哪条层链。找不到回 null（老存档里的哨兵桶就会到这儿）。 */
+function chainOfKey(ctx, key) {
+  for (const c of allChains(ctx)) if (keyOf(c) === key) return c;
+  return null;
+}
+
+/**
+ * 这个框住在哪条层链上（找不到回 null）。
+ *
+ * 给 `setBoxRect` 用的：它要把边车排进**框自己那一层**。跨层拖之后
+ * （见 `manualBoxesUnder`）这一点是硬的——排错层的话，深层的框动了、
+ * 深层的边车没写，下次开库它又跳回去。
+ */
+export function chainOfBox(ctx, id) {
+  const e = findBoxEntry(ctx, id);
+  return e ? chainOfKey(ctx, e.key) : null;
+}
+
+/**
+ * 3.0 刀 50（用户 10-01 第 4 条，跨层那一半）：**某个文件夹底下所有层**里，
+ * 存着的那些蓝框。
+ *
+ * ---- 为什么非有它不可 ----
+ *
+ * 蓝框是**按层存**的（`v.boxes[keyOf(chain)]`），而金框从 1.3.88 起**逐层都有**。
+ * 于是有一个用户天天撞、我们一直没接住的形状：
+ *
+ *   他在「机器学习」这一层，拖「…/准确度的陷阱与混沌矩阵」的金框；
+ *   而他给那个文件夹画的蓝框，存在**更深那一层**（他是进去画的）。
+ *   那一层不在这一屏的 `boxesOf` 里 → 原来一个都不跟 → **卡片全跑了、框留在原地**；
+ *   他再打开结构窗（钉在最深那层）就看到「卡片在框外面」。
+ *
+ * 用户的心智是「这个框在**那个文件夹**里」，跟"你此刻站在哪一层"没有关系。
+ * 所以跟随要按**文件夹的包含关系**去找，不是按"这一屏画了哪些框"。
+ *
+ * 代价：那些框在这屏上**不画**（它们属于别的层，画出来就成了幽灵）。
+ * 所以它们只跟着走、落盘，DOM 不动——不跟的话，卡片当场跑出框外。
+ *
+ * @param {string} folderKey 被拖的那个金框的 key（= `id` 去掉 `c:`）
+ * @param {string} [skipKey] 跳过的层键（当前这一层由 `allBoxes` 那份管，别重复算）
+ * @returns {Array<{chain:string[], key:string, box:object}>}
+ */
+export function manualBoxesUnder(ctx, folderKey, skipKey) {
+  const v = view(ctx);
+  const t = v && v.boxes;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return [];
+  const want = String(folderKey || "");
+  if (!want) return [];
+  const out = [];
+  for (const chain of allChains(ctx)) {
+    const last = String(chain[chain.length - 1] || "");
+    // 它自己那一层，或者它下面的某一层。**斜杠是硬的**：`机器学习2/x` 不该
+    // 被 `机器学习` 认领。
+    if (last !== want && last.indexOf(want + "/") !== 0) continue;
+    const key = keyOf(chain);
+    if (skipKey && key === skipKey) continue;
+    const list = t[key];
+    if (!Array.isArray(list)) continue;
+    for (const b of list) out.push({ chain, key, box: b });
+  }
+  return out;
 }
 
 /** 这个文件夹**直属**的卡（不含子文件夹里的）。珊瑚橙分割线要的就是它。 */
@@ -779,7 +876,13 @@ export function setBoxRect(ctx, id, rect) {
   //
   // 同一段拖动的收尾里，成员卡片是排了 `queueCardPos` 的（刀 34 那条），
   // 方框这一半漏了——两个半张脸对不上，正是这一刀要防的那类事。
-  queueBoxFile(ctx, ctx.state.crystalPath);
+  //
+  // ⚠️ 1.3.92：排的是**这个框自己所在的那一层**，不是"你现在站在哪一层"。
+  //    跨层拖那一路（浅层拖某个深文件夹的金框，顺手把**深层的蓝框**也带着走）
+  //    走的就是这里——排错层的话，深层的框动了、深层的边车没写，
+  //    下次开库它又跳回去，而用户在结构窗里看到的就是「卡片又跑到框外面了」。
+  //    拿不到链（老存档的哨兵桶）才退回当前这一层。
+  queueBoxFile(ctx, chainOfBox(ctx, id) || ctx.state.crystalPath);
 }
 
 export function renameBox(ctx, id, name) {
