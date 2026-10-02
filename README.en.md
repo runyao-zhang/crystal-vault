@@ -311,6 +311,12 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.95** · In the Structure window and the storyline, **right-clicking empty space in 写 (write) mode no longer pops up the hint bar**.
+
+It used to say: `点顶栏「选框」，然后拖出方框 · Esc 退出`. It appeared in the state "right-clicked empty space, entered delete-blue-line mode, nothing selected yet" — with nothing selected on screen, that line is just noise.
+
+**The other three states keep theirs**, in particular the one for right-clicking a **gold line in 看 (view) mode**: the top-bar 「选框」 button is the only way into gold-line marquee selection, and without that line you just sit there staring at the lines.
+
 **1.3.94** · Fixes **a box reverting to an old position after you quit Obsidian and reopen** (1.3.93 did not get to the bottom of it; this is the root cause).
 
 The clue was yours: *"as long as I do not close Obsidian everything is fine; close it and open it again and the bug is back."* Only one thing satisfies both halves — **the stale copy is what gets saved.**
