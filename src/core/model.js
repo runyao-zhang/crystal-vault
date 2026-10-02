@@ -577,9 +577,36 @@ export function createModel(rawCards, adapter, rawFolders = []) {
   const backLinkGraph = new Map(); // title -> Map(sourceTitle -> reason)
   const orphanPaths = new Set(); // 既无出链也无入链的卡片 path
 
+  /**
+   * 去掉开头的 frontmatter，只留正文。
+   *
+   * ⚠️⚠️ 3.0 刀 54（用户 10-02）：**算关系必须只看正文。**
+   *
+   * `card.content` 是**整个文件**（含 frontmatter），而 frontmatter 里**可以有
+   * `[[双链]]`**——插件自己写的 `晶体接法` 就是：
+   *
+   *    晶体接法: ["[[花式索引和布尔索引]] b t"]
+   *
+   * 那个格式是**故意**的（Obsidian 改名时会连它一起改，接法不会失联）。
+   * 但它一被 `parseLinks` 当成真链接，就长出一条**永远删不掉的边**：
+   *
+   *   · 删蓝线删的是**正文**里的 `[[…]]`，动不到 frontmatter —— 线还在；
+   *   · 它在文件里，所以**重启照样在**；
+   *   · 目标卡不在本层时，它变成**幽灵**——
+   *
+   * 三个症状一起出现，看起来像"渲染坏了""删了没反应"。实际是**读错了地方**。
+   * （用户报的「只要删了蓝线，那条线还在，关掉重启还在，文件里却没有这个链接了」。）
+   */
+  function bodyOf(content) {
+    const t = typeof content === "string" ? content : "";
+    // 只吃**文件最开头**那一段：正文中间出现的 `---` 是分隔线，不是 frontmatter。
+    const m = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(t);
+    return m ? t.slice(m[0].length) : t;
+  }
+
   // 解析一张卡片的出链。指向库外的目标也会被登记进 byTitle（原行为）
   function buildRelated(card) {
-    const raw = card.content || "";
+    const raw = bodyOf(card.content);
     const related = [];
     for (const link of parseLinks(raw)) {
       const resolved = adapter.resolveLink(link.target, card.path);

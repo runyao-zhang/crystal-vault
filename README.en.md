@@ -311,6 +311,22 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.96** · Fixes **deleting a blue line and the line staying there** — surviving a restart, even though **the file no longer contains it**, and turning into a **ghost**.
+
+The cause was that **working out the relationships read into the frontmatter**. The `晶体接法` field looks like this:
+
+```yaml
+晶体接法: ["[[花式索引和布尔索引]] b t"]
+```
+
+Storing the target as a `[[wikilink]]` is **deliberate** — renaming that card makes Obsidian rewrite it too, so the attachment never loses its target. But the step that decides whether two cards are related searched for `[[…]]` **across the whole file**, so that frontmatter entry **grew an edge of its own**:
+
+- deleting a blue line removes the link from the **body**, and never touches the frontmatter → **the line stays**
+- it lives in the file → **it survives a restart**
+- when the target card is not on this layer → it becomes a **ghost**
+
+Relationships now read **the body only**. This strips just the frontmatter block at the **very top of the file** — a horizontal rule (`---` on its own line) partway down the body is unaffected.
+
 **1.3.95** · In the Structure window and the storyline, **right-clicking empty space in 写 (write) mode no longer pops up the hint bar**.
 
 It used to say: `点顶栏「选框」，然后拖出方框 · Esc 退出`. It appeared in the state "right-clicked empty space, entered delete-blue-line mode, nothing selected yet" — with nothing selected on screen, that line is just noise.
