@@ -13,8 +13,7 @@
      只给 width：高度由浏览器按原图比例算出来，容器怎么窄都不变形。 -->
 桌面模式：
 
-
-<img width="1917" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/383b1d98-7686-40b2-bc6a-eb278aeb96d0" />
+<img width="1862" alt="Crystal Vault overview" src="https://github.com/user-attachments/assets/2da1ebb8-bdd6-4d82-bce8-88ce35194592" />
 
 故事线模式：
 
