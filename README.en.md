@@ -311,6 +311,18 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.3.97** · Fixes **an unreadable error when you press 「编辑」 on a desk card while no note is open.**
+
+The plugin mounts Obsidian's **native editor**, and Obsidian **does not export the editor class** — it can only be **borrowed from a live note instance**. The old test required "at least one Markdown note must be open", a precondition that was **never written down anywhere** — and your usage is probably **never opening an `.md` tab at all** (you read inside the crystal vault). So every press fell into the degraded path, with a developer-facing error attached.
+
+There are now **three ways to borrow it**, tried in order, first one that works wins:
+
+1. **a live Markdown instance** (the original path, with the test relaxed)
+2. **Obsidian's view-type table** (`viewRegistry.viewByType`) — **no note needs to be open**
+3. **the one borrowed last time**, still valid for the rest of the session
+
+When all three fail, the message is in plain language now: it says **why** and **what to do next**, and points out that the input box below **still works** — this is a fallback, not an error.
+
 **1.3.96** · Fixes **deleting a blue line and the line staying there** — surviving a restart, even though **the file no longer contains it**, and turning into a **ghost**.
 
 The cause was that **working out the relationships read into the frontmatter**. The `晶体接法` field looks like this:

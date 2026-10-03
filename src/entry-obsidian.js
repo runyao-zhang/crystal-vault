@@ -9,6 +9,7 @@ import { parseSidesField, SIDES_FIELD } from "./core/frontmatter.js";
 import { toLinkTarget, viewStateKey, prefsKey } from "./adapter.js";
 import { CARDS_FOLDER, VAULT_PDF_RUNTIME_PATH } from "./config.js";
 import { createLazyPdfRenderer } from "./core/pdfdoc.js";
+
 // ⚠️ **这里不许 import pdf.js。**
 //
 // 一开始是 import 的，esbuild 就把它合进了那张 markdown 笔记——笔记从 7,665 行
@@ -18,6 +19,15 @@ import { createLazyPdfRenderer } from "./core/pdfdoc.js";
 //
 // 这条没有任何自动检查守得住「你别 import」这个动作本身，但**有守得住结果的**：
 // scripts/build.mjs 末尾会体检那份产物的行数与体积，超了直接失败。
+
+/**
+ * 3.0 刀 55：上一次成功借到的「宿主编辑器类」。
+ *
+ * 借类这件事**只能从活着的实例上取**（Obsidian 不导出编辑器类），而用户平时
+ * 根本不打开 .md 标签页 —— 于是每一次点「编辑」都借不到、都掉进降级那条路。
+ * 借成一次就记在这儿，本会话内一直有效（模块级 = 整个插件一份）。
+ */
+let editorBorrow = null;
 
 // 文献阅读器认得的扩展名。**pptx 不在里面，也不打算加**——Obsidian 和 pdf.js
 // 都渲染不了它，收进来只会变成一条「点了没反应」的条目。用户自己导出成 PDF、
@@ -724,18 +734,56 @@ export function createObsidianAdapter({
         // 而这个函数**只要那个类，根本不要那颗叶子**（下面 `new anyLeaf.constructor(app)`）。
         // 所以从已经查到的 markdown 叶子上取构造器就够——`getLeavesOfType` 只是查表，
         // 不激活、不新建，零副作用。
+        // ---- 3.0 刀 55：借编辑器类换成三条路，而且要**记着**（用户 10-02）----
+        //
+        // 用户报：「桌面的所有卡片，点编辑都报错」。真机探针一查：
+        // 他**一篇 Markdown 笔记都没开着**——18 个叶子全是侧栏 / 网页视图 /
+        // 插件自己的视图，`getLeavesOfType("markdown")` 回来是**空的**。
+        //
+        // 原来的判据要求「有一颗活着的 markdown 叶子，**而且**它 `view.editor` 还在」，
+        // 两条都得成立。可"必须开着一篇笔记"这个前提**从来没写出来过**；而他平时的
+        // 用法就是**不打开 .md 标签页**（都在晶体库里读），于是每一次点「编辑」都
+        // 掉进降级那条路，还附带一句给开发看的报错话。
+        //
+        // 现在依次试，**任何一条走通就不再往下**：
+        //   ① 活着的 markdown 实例（原路，判据放宽）
+        //   ② `app.viewRegistry.viewByType` 里那个造视图的函数——**不需要任何笔记开着**
+        //   ③ 上一次借成的那一份，本会话内一直有效
         let ViewCtor = null;
+        let creator = null;
         let anyLeaf = null;
         for (const l of app.workspace.getLeavesOfType("markdown") || []) {
           const v = l && l.view;
-          if (v && typeof v.setState === "function" && v.editor) {
+          // ⚠️ 判据从「有 setState **且** 有 editor」放宽成「有 setState」。
+          //    多加 `&& v.editor` 那一条的唯一效果，是 Obsidian 哪天把 editor 改成
+          //    惰性的时候，**开着笔记也会判失败**——而那看起来跟"没开笔记"一模一样。
+          if (v && typeof v.setState === "function") {
             ViewCtor = v.constructor;
             anyLeaf = l; // 顺手留一颗**真**叶子，只为取它的类
             break;
           }
         }
-        // 连一颗 markdown 叶子都没有时退一步：`iterateAllLeaves` 同样只遍历、不激活。
-        // 仍然只要类，不要叶子。
+        if (!ViewCtor) {
+          // ⚠️ 整条包在 try 里：`viewRegistry` 是**没有文档的内部结构**，
+          //    换个 Obsidian 版本可能整个不见。拿不到就往下走，**绝不抛**。
+          try {
+            const reg = app.viewRegistry && app.viewRegistry.viewByType;
+            const c = reg
+              ? typeof reg.get === "function"
+                ? reg.get("markdown")
+                : reg["markdown"]
+              : null;
+            if (typeof c === "function") creator = c;
+          } catch (e) {
+            /* 没有这个口子就没有 */
+          }
+        }
+        if (!ViewCtor && !creator && editorBorrow) {
+          creator = editorBorrow.creator || null;
+          ViewCtor = editorBorrow.ctor || null;
+        }
+        // 叶子类：**任何一颗活着的叶子都行**，只为借它的构造函数。
+        // 连一颗 markdown 叶子都没有时走这条：`iterateAllLeaves` 只遍历、不激活。
         // ⚠️ 回调用**块体**、不交返回值：宿主的 iterate* 见到真值会提前停，
         //    写成 `(l) => anyLeaf = l` 这种表达式体会在第一颗叶子就断掉。
         if (!anyLeaf) {
@@ -747,10 +795,23 @@ export function createObsidianAdapter({
             /* 落到下面那句 fail */
           }
         }
-        if (!ViewCtor || !anyLeaf) return fail("拿不到宿主的编辑器类（它没开任何 markdown 视图？）");
+        if ((!ViewCtor && !creator) || !anyLeaf) {
+          // 这句是**给用户看的**，不是给开发看的：说清楚"为什么"和"下一步做什么"。
+          // 而且下面那个输入框**照样能写**，所以别把它写成"出错了"。
+          return fail(
+            "库里现在一篇 Markdown 笔记都没开着，借不到 Obsidian 的编辑器组件。" +
+              "随便打开一篇笔记，再点一次「编辑」就行——下面这个输入框照样能写。"
+          );
+        }
 
         leaf = new anyLeaf.constructor(app);
-        view = new ViewCtor(leaf);
+        view = creator ? creator(leaf) : new ViewCtor(leaf);
+        // 借成了就**记着**：本会话内不再依赖"有没有笔记开着"。
+        try {
+          editorBorrow = creator ? { creator } : { ctor: ViewCtor };
+        } catch (e) {
+          /* 记不住也不影响这一次 */
+        }
         // View 的构造函数会建 containerEl，但我们不把它交给工作区——它只活在
         // 我们这扇窗里，所以自己挂。脱离工作区的那几个生命周期方法也自己补上：
         // 不补的话编辑器组件不会初始化（这是没有文档的那一段里最靠猜的一步）。
