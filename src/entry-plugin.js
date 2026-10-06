@@ -517,6 +517,8 @@ export default class CrystalVaultPlugin extends Plugin {
         }),
         store: makeStore(this),
         version: this.manifest ? this.manifest.version : "",
+        // 写进发现文件，给"用户自己双击启动伴侣"那条路用（见 companion.js）。
+        cardsFolder: this.settings.cardsFolder,
       });
     }
     return this.companion;

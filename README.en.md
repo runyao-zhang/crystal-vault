@@ -346,6 +346,16 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.1** · Fixes **the two floating-window commands going dead after you close the window once.**
+
+Caught the same day 1.4.0 shipped. The companion **did not exit** when you clicked ✕ — it stayed alive as an invisible process, and it **kept holding the single-instance lock**. Every later "floating window" command was therefore rejected cleanly in the background (exit code 0, not even a flicker), so all you saw was **nothing happening** — and the diagnostic log said only "companion exited", never a word about a lock.
+
+Closing the window now quits it. And **launching the companion by double-clicking it works now too**: without a `--bridge` argument it used to sit there unable to reach the vault; it now reads the discovery file the plugin leaves behind.
+
+⚠️ **This needs a fresh companion download** (CrystalFloat 1.0.1). Uninstall or close the old one first — it is the process holding the lock. If the old one is still open after installing, end `CrystalFloat.exe` in Task Manager and try again.
+
+---
+
 **1.4.0** · New: **read-and-note and the structure window can now float outside Obsidian.**
 
 The three modes in settings (full screen / floating window / embedded) **all stay inside Obsidian's window** — they are overlays the plugin draws in its own process. This version adds a **fourth**: a genuinely separate window that **sits on top of Edge, WeChat, Word**.

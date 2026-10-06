@@ -67,7 +67,7 @@ export function detectCompanionPath({ explicit = "", vaultPath = "", env = proce
  * @param {string} opts.version   插件版本，给 /health 报
  * @param {Function} [opts.onLog] 子进程输出的一行（诊断用）
  */
-export function createCompanion({ adapter, store, version = "", onLog = null } = {}) {
+export function createCompanion({ adapter, store, version = "", cardsFolder = "", onLog = null } = {}) {
   let server = null;
   let conn = null; // {port, token}
   let child = null;
@@ -107,7 +107,18 @@ export function createCompanion({ adapter, store, version = "", onLog = null } =
     try {
       writeFileSync(
         join(tmpdir(), DISCOVERY_FILE),
-        JSON.stringify({ port: conn.port, token: conn.token, pid: process.pid, startedAt: new Date().toISOString(), version }),
+        JSON.stringify({
+          port: conn.port,
+          token: conn.token,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          version,
+          // ⚠️ **cardsFolder 必须带上。** 用户自己双击启动伴侣时（没有 `--bridge`），
+          // 它只能靠这个文件知道该读哪个目录——少了它，窗会开、能连上桥，
+          // 但库是空的（或者读错目录），而那种坏法看着像"同步坏了"。
+          cardsFolder,
+          keySuffix: ":float",
+        }),
         "utf8"
       );
     } catch (e) {
