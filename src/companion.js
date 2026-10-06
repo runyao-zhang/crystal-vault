@@ -157,14 +157,20 @@ export function createCompanion({ adapter, store, version = "", cardsFolder = ""
     if (!exe || !existsSync(exe)) throw new Error("找不到伴侣程序：" + (exe || "(未设置)"));
     const c = await ensureBridge();
 
-    await killChild();
-
+    // ⚠️ **这里不许再「先杀掉旧的再起新的」**（第一版是那样，两扇窗之后就成了 bug）。
+    //
+    // 伴侣那一个进程里装着**两扇窗**（边看边记 + 结构窗）。命令 A 起过一次之后，
+    // 用户点命令 B 时若把进程杀了，A 那扇窗会跟着没——而他想的是"两扇并排"。
+    //
+    // 现在改成：**照样 spawn，但旧的不动**。新进程一看单实例锁被占就干净退出，
+    // 把配置通过 `second-instance` 交给已经在跑的那个；由它去开/聚焦对应的 role。
+    // 代价是多起一次进程（它不建窗就退了），换来的是"点哪条命令只影响哪扇窗"。
     const payload = {
       origin: `http://127.0.0.1:${c.port}`,
       token: c.token,
       cardsFolder: cfg.cardsFolder || "",
-      keySuffix: ":float",
-      mode: cfg.mode === "story" ? "story" : "reader",
+      // 哪一扇窗。伴侣那边按它分：`reader` = 边看边记，`story` = 结构窗。
+      role: cfg.role === "story" ? "story" : "reader",
       version,
       seed: cfg.seed || null,
     };
@@ -178,7 +184,7 @@ export function createCompanion({ adapter, store, version = "", cardsFolder = ""
     if (cfg.appDir) argv.push(cfg.appDir);
     argv.push("--bridge", JSON.stringify(payload));
 
-    push(`启动伴侣：${exe}${cfg.appDir ? " " + cfg.appDir : ""}（mode=${payload.mode}）`);
+    push(`启动伴侣：${exe}${cfg.appDir ? " " + cfg.appDir : ""}（role=${payload.role}）`);
     child = spawn(exe, argv, {
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],
@@ -212,23 +218,30 @@ export function createCompanion({ adapter, store, version = "", cardsFolder = ""
       const done = () => resolve();
       // 宽限一小会儿再强杀：给伴侣一个把自己那份窗口位置写完的机会
       // （它那是防抖 400ms 写的，直接 taskkill 会丢掉最后一次拖动）。
+      const finish = () => {
+        // ⚠️ **置空不能漏。** `isRunning()` 读的是 `child` 和 `exited` 两个东西，
+        // 而 `exited` 靠 exit 事件置位。杀掉之后事件要过一拍才来，那一拍里
+        // `isRunning()` 会答「还在跑」——而 `stop()` 之后调用方多半马上要问它。
+        if (child === c) child = null;
+        done();
+      };
       const timer = setTimeout(() => {
         try {
           c.kill("SIGKILL");
         } catch {
           /* 已经没了 */
         }
-        done();
+        finish();
       }, 1200);
       c.once("exit", () => {
         clearTimeout(timer);
-        done();
+        finish();
       });
       try {
         c.kill();
       } catch {
         clearTimeout(timer);
-        done();
+        finish();
       }
     });
   }

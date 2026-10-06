@@ -572,20 +572,45 @@ export default class CrystalVaultPlugin extends Plugin {
     };
     // 那边现在开着哪份文献，就让它接着看哪一份。句柄上是**只读**的取法
     // （`handle.reader.doc()`），操作入口一律留在真实按钮上——见 app.js 那段注释。
+    let handle = null;
     try {
       const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
-      const h = leaf && leaf.view && leaf.view.handle;
-      const d = h && h.reader && h.reader.doc();
+      handle = leaf && leaf.view && leaf.view.handle;
+      const d = handle && handle.reader && handle.reader.doc();
       if (d && d.path) seed.docPath = d.path;
     } catch {
       /* 视图没开着就没有种子文献，正常 */
     }
-    if (seed.prefs && seed.prefs.readerStoryCrystal) seed.crystal = seed.prefs.readerStoryCrystal;
+    // 结构窗看哪颗：先取用户挑过的，没挑过就取第一颗。
+    //
+    // ⚠️ **必须有值，不能留空。** 伴侣那边 `story` 那扇窗会用种子里的
+    // `readerDesk` 播种一条"只有一扇铺满的结构窗"的桌面存档，而核心的
+    // `sanitizeDesk` 对 `kind === "storyline"` 要求 **crystal 非空**
+    // （没有 crystal 的整条丢掉——它画的是故事线，认的就是那个 key）。
+    // 丢掉了就等于桌面空着，于是会退回「替你摆一页 PDF」那条兜底，
+    // 结构窗那扇窗里就冒出一扇 PDF 窗——正是用户明确说不要的那个东西。
+    const picked = seed.prefs && seed.prefs.readerStoryCrystal;
+    if (picked) {
+      seed.crystal = picked;
+    } else {
+      try {
+        const keys = (handle && handle.model && handle.model.crystalKeys) || [];
+        if (keys.length) seed.crystal = keys[0];
+      } catch {
+        /* 拿不到就交给伴侣那边的兜底 */
+      }
+    }
     return seed;
   }
 
-  /** 打开悬浮窗。找不到伴侣时给一句人话 + 一个下载入口，而不是静默失败。 */
-  async openFloating(mode) {
+  /**
+   * 打开悬浮窗。找不到伴侣时给一句人话 + 一个下载入口，而不是静默失败。
+   *
+   * @param {"reader"|"story"} role 哪一扇：
+   *   `reader` = 边看边记，`story` = 结构窗。**两扇各自独立**——
+   *   点哪条命令只影响哪扇窗，不会把另一扇关掉（见 companion.js 的 launch）。
+   */
+  async openFloating(role) {
     const exe = this.companionPath();
     if (!exe) {
       new Notice("晶体库：还没装「悬浮伴侣」。它是**单独一个程序**——Obsidian 的插件造不出系统级窗口。设置页里有下载入口。", 10000);
@@ -608,7 +633,7 @@ export default class CrystalVaultPlugin extends Plugin {
 
     try {
       await this.getCompanion().launch(exe, {
-        mode,
+        role,
         cardsFolder: this.settings.cardsFolder,
         seed: this.buildSeed(),
         appDir,

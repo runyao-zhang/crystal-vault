@@ -76,6 +76,47 @@ export function createRemoteAdapter({
   const nsKey = (base) => base + keySuffix;
 
   /**
+   * 视图状态与偏好的**本地缓存**。
+   *
+   * ⚠️ **这两个方法在契约里是同步的**（`adapter.js`：`() => (object|null)`、
+   * `(state) => void`），而桥是异步的。第一版把远程实现直接写成 `async`，
+   * 于是核心那边 `sanitizePrefs(adapter.loadPrefs())`（**没有 await**，
+   * `core/app.js:1648` 就是那么写的）拿到的是一个 **Promise 对象**，
+   * 校验不认、退回默认值——**偏好和视图状态从来没被读进来过**。
+   *
+   * 症状极隐蔽：界面照常能用（阅读器打开文献靠的是启动参数里那份 seed，
+   * 不走这条路），只有"用户布置好的样子有没有被记住""播种有没有生效"
+   * 这类事悄悄不对。而且它**骗过了当时的探针**——探针里是
+   * `await remote.loadPrefs()`，按异步调；核心按同步调。同一份实现，
+   * 两种用法，只有一种是对的。
+   *
+   * 解法：**启动时预读进缓存**（`prefetch()`，伴侣在 mount 之前 await 它），
+   * 之后读走缓存（同步，符合契约）、写走"缓存 + 异步回推"（也是同步返回，
+   * 符合契约）。代价是**退出时可能丢掉最后一笔还没回推的写**——视图状态与
+   * 偏好本来就是防抖写的，这个代价可接受；不能接受的是现在这样整个读不回来。
+   */
+  const cache = { viewState: undefined, prefs: undefined, ready: false };
+
+  /** 预读。**必须在 `mount()` 之前 await 掉**——mount 会同步问 `loadPrefs()`。 */
+  async function prefetch() {
+    const [vsRaw, pfRaw] = await Promise.all([
+      transport.getStored(nsKey(viewStateKey(cardsFolder))).catch(() => null),
+      transport.getStored(nsKey(prefsKey(cardsFolder))).catch(() => null),
+    ]);
+    // 只在这两格**还没有**的时候用种子。写过一次之后各存各的，永不回看——
+    // 否则用户把悬浮窗挪成自己习惯的样子，下次启动又被打回 Obsidian 那套几何。
+    cache.viewState = vsRaw == null ? (seed && seed.viewState ? clone(seed.viewState) : null) : parseObject(vsRaw);
+    cache.prefs = pfRaw == null ? (seed && seed.prefs ? clone(seed.prefs) : null) : parseObject(pfRaw);
+    cache.ready = true;
+    return cache;
+  }
+
+  /** 写回。**不 await**（同步方法），失败只记不抛——丢一笔状态不该影响界面能用。 */
+  function push(key, value) {
+    Promise.resolve(transport.setStored(key, value)).catch(() => {});
+  }
+
+  /**
    * 在 loadCards / listDocs 里见过的路径。
    *
    * 用途只有一个：保住 `assetUrl` 契约里「解析不到回 `""`」那一半。
@@ -167,46 +208,26 @@ export function createRemoteAdapter({
 
     // ---- 存储：命名空间 + 播种（见文件头第 2 条）----
 
-    async loadViewState() {
-      const key = nsKey(viewStateKey(cardsFolder));
-      let raw = null;
-      try {
-        raw = await transport.getStored(key);
-      } catch {
-        return FALLBACKS.loadViewState();
-      }
-      // 只在这一格**还没有**的时候用种子。写过一次之后各存各的，永不回看——
-      // 否则用户把悬浮窗挪成自己习惯的样子，下次启动又被打回 Obsidian 那套几何。
-      if (raw == null) return seed && seed.viewState ? clone(seed.viewState) : null;
-      return parseObject(raw);
+    // ---- 存储：命名空间 + 播种 + **同步契约**（见上面 cache 那段）----
+
+    loadViewState() {
+      // 契约是同步的，所以只能从缓存答。`undefined` = 预读还没跑——
+      // 那时候回 null 是**对的**（等于"没存过"），而不是把 Promise 漏出去。
+      return cache.viewState === undefined ? FALLBACKS.loadViewState() : cache.viewState;
     },
 
-    async saveViewState(state) {
-      try {
-        await transport.setStored(nsKey(viewStateKey(cardsFolder)), JSON.stringify(state));
-      } catch {
-        // 丢就丢了，不该影响界面能用（与另两个实现同一条口径）
-      }
+    saveViewState(state) {
+      cache.viewState = state;
+      push(nsKey(viewStateKey(cardsFolder)), JSON.stringify(state));
     },
 
-    async loadPrefs() {
-      const key = nsKey(prefsKey(cardsFolder));
-      let raw = null;
-      try {
-        raw = await transport.getStored(key);
-      } catch {
-        return FALLBACKS.loadPrefs();
-      }
-      if (raw == null) return seed && seed.prefs ? clone(seed.prefs) : null;
-      return parseObject(raw);
+    loadPrefs() {
+      return cache.prefs === undefined ? FALLBACKS.loadPrefs() : cache.prefs;
     },
 
-    async savePrefs(prefs) {
-      try {
-        await transport.setStored(nsKey(prefsKey(cardsFolder)), JSON.stringify(prefs));
-      } catch {
-        /* 同 saveViewState */
-      }
+    savePrefs(prefs) {
+      cache.prefs = prefs;
+      push(nsKey(prefsKey(cardsFolder)), JSON.stringify(prefs));
     },
 
     // ---- 卡片与文件：远程，逐方法兜底 ----
@@ -345,6 +366,11 @@ export function createRemoteAdapter({
       };
     },
   };
+
+  // 预读是**另一条路**，不在契约里（契约那四个方法是同步的，塞不进"等一次网络"）。
+  // 伴侣那边必须在 `mount()` 之前 `await adapter.prefetch()`——mount 会同步问
+  // `loadPrefs()`，没预读就等于"没存过"。见上面 cache 那段。
+  adapter.prefetch = prefetch;
 
   return adapter;
 }

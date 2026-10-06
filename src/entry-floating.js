@@ -3,6 +3,13 @@
 // 它和另外三个唯一的区别是**适配层背后是谁**：那边是 Obsidian / 假盘，
 // 这边是一条到 Obsidian 的桥（bridge/client.js）。核心一行不改。
 //
+// ── 两扇窗，各自一个 role ──
+//
+//   `reader` —— 边看边记：阅读器 + 右边那条笔记栏。可以切成「只有笔记栏」。
+//   `story`  —— 结构窗：窗口里只有结构窗本身，不要桌面层那套空场。
+//
+// 两者**同属一个进程、两扇 BrowserWindow**（见 floating/main.js）。
+//
 // ── 一条 spike 验过、但看代码看不出来的事 ──
 //
 // **全程不调 `handle.open()`。** 阅读器元素是 `doc.body` 的兄弟节点
@@ -41,13 +48,16 @@ function setChromeText(id, text) {
 }
 
 /**
- * 把拖拽条上那三颗按钮接上外壳。
+ * 把拖拽条上那几颗按钮接上外壳。
  *
  * **先接按钮、再连桥**：桥连不上的时候，用户至少还能把窗关掉/最小化，
  * 而不是对着一扇既没内容也点不动的窗发呆。
  */
-function wireChrome() {
+function wireChrome(role) {
   const shell = globalThis.__FLOAT_SHELL__;
+  const setRole = () => document.documentElement.setAttribute("data-float-role", role);
+  setRole();
+
   if (!shell) return; // 浏览器里跑（测试）没有外壳，正常
 
   const pin = document.getElementById("float-pin");
@@ -69,6 +79,82 @@ function wireChrome() {
   if (min) min.addEventListener("click", () => shell.minimize());
   const close = document.getElementById("float-close");
   if (close) close.addEventListener("click", () => shell.close());
+
+  // 「只有笔记栏」那颗开关**只对边看边记那扇有意义**（结构窗没有页阵可藏）。
+  const side = document.getElementById("float-sideonly");
+  if (side) {
+    if (role !== "reader") {
+      side.style.display = "none";
+    } else {
+      side.addEventListener("click", () => {
+        const on = document.documentElement.classList.toggle("kb-float-sideonly");
+        side.setAttribute("aria-pressed", String(on));
+        side.textContent = on ? "显示阅读区" : "只看笔记栏";
+      });
+    }
+  }
+}
+
+/**
+ * 桌面存档的**窗口条数上限**由 core/prefs.js 把关，这里不管。
+ *
+ * @typedef {object} DeskWinRecord  见 core/prefs.js 的 sanitizeDesk
+ */
+
+/**
+ * 按 role 造种子。
+ *
+ * `reader` —— 原样用插件给的那份（用户在 Obsidian 里布置好的样子）。
+ *
+ * `story`  —— **把桌面存档整个换掉**，只留一扇结构窗、而且铺满窗口。
+ *   为什么必须换：`setDeskMode(true)` 在桌面空着时会**替你摆一页 PDF**
+ *   （core/reader.js 里那段「存档是空的：切过去看见一块空地…先替他摆一页」）。
+ *   结构窗那扇窗里出现一扇 PDF 窗，正是用户 2026-10-06 明确说不要的东西。
+ *   播一条非空的存档进去，`restoreDesk` 就会恢复它，那条兜底根本不会走到。
+ *   矩形给得比窗口大是**故意的**——桌子是 `overflow:hidden`，超出去的部分被裁掉，
+ *   于是「铺满」这件事不必知道桌面此刻的确切尺寸（那个数挂载时才量得到）。
+ */
+function seedFor(role, seed) {
+  const base = seed || {};
+  if (role !== "story") return base;
+
+  const w = Math.max(1200, (globalThis.innerWidth || 1000) + 400);
+  const h = Math.max(900, (globalThis.innerHeight || 700) + 400);
+  // ⚠️ **不能留空。** core/prefs.js 的 `sanitizeDesk` 对 `kind === "storyline"`
+  // 要求 crystal 非空（它画的是故事线，认的就是那个 key），空字符串会让**整条记录
+  // 被丢掉**，于是桌面空着 → `setDeskMode` 走"替你摆一页 PDF"那条兜底 →
+  // 这扇窗里冒出一扇 PDF 窗。这正是用户明确说不要的东西。
+  //
+  // 取不到真晶体时给一个**认不出的占位**：`sanitizeDesk` 只查非空，
+  // 而 `mountEmbedStory` 会拿 `ctx.model.hasNode()` 判它、判不过就退回第一颗晶体。
+  // 于是占位值自己不会显示出来，但记录活得下来。
+  const PLACEHOLDER = "__float_first_crystal__";
+  const crystal = base.crystal || PLACEHOLDER;
+  const prefs = { ...(base.prefs || {}) };
+  prefs.readerDesk = {
+    windows: [
+      {
+        kind: "storyline",
+        path: "",
+        crystal,
+        cam: null,
+        page: 1,
+        from: 1,
+        to: 1,
+        x: 0,
+        y: 0,
+        w,
+        h,
+        docked: false,
+      },
+    ],
+  };
+  // 那一栏是「结构窗固定看哪颗」的记忆。窗里换晶体时它会跟着改。
+  // **占位值不写进偏好**——`storyCrystalPref()` 拿 `model.hasNode()` 判它，
+  // 判不过就当"没挑过"，那颗按钮会转去弹文件夹选择器（那不是我们要的）。
+  if (crystal !== PLACEHOLDER) prefs.readerStoryCrystal = crystal;
+
+  return { ...base, prefs };
 }
 
 /**
@@ -76,20 +162,16 @@ function wireChrome() {
  * @param {string} cfg.origin     桥的地址，如 http://127.0.0.1:51234
  * @param {string} cfg.token
  * @param {string} cfg.cardsFolder
- * @param {string} [cfg.keySuffix] 状态命名空间后缀，默认 ":float"
+ * @param {"reader"|"story"} [cfg.role]
  * @param {object} [cfg.seed]     { viewState, prefs, docPath, scratch, crystal }
- * @param {"reader"|"story"} [cfg.mode]
  * @param {string} [cfg.version]
  */
 export async function boot(cfg) {
-  const {
-    origin,
-    token,
-    cardsFolder,
-    keySuffix = ":float",
-    seed = null,
-    mode = "reader",
-  } = cfg || {};
+  const { origin, token, cardsFolder, seed = null } = cfg || {};
+  const role = cfg && cfg.role === "story" ? "story" : "reader";
+
+  wireChrome(role);
+  setChromeText("float-title", role === "story" ? "晶体库 · 结构窗" : "晶体库 · 边看边记");
 
   if (!origin || !token) {
     setChromeText("float-status", "没有桥的地址——请从 Obsidian 里打开这个窗口");
@@ -107,8 +189,11 @@ export async function boot(cfg) {
   const adapter = createRemoteAdapter({
     transport,
     cardsFolder,
-    keySuffix,
-    seed,
+    // ⚠️ **按 role 分家**。两扇窗共用一个键的话，它们会同时防抖写
+    // `prefs.readerDesk`——而结构窗那扇的桌面存档是"一扇铺满的窗"、
+    // 边看边记那扇是"用户自己摆的样子"，两边会互相覆盖，几何来回跳。
+    keySuffix: ":float:" + role,
+    seed: seedFor(role, seed),
     render: (md, el, srcPath) => {
       renderer = renderer || createWebRenderer({ assetUrl: (p) => adapter.assetUrl(p) });
       return renderer(md, el, srcPath);
@@ -119,6 +204,19 @@ export async function boot(cfg) {
       return shell && typeof shell.openExternal === "function" ? shell.openExternal(url) : false;
     },
   });
+
+  // ⚠️ **必须在 mount 之前预读。**
+  //
+  // 契约里 `loadViewState` / `loadPrefs` 是**同步**的（`() => (object|null)`），
+  // 而 mount 会在里面**同步**问一次（`core/app.js:1648` 那句没有 await）。
+  // 桥是异步的，所以只能在 mount 之前把这些值先拉进缓存，让那个同步调用答得出来。
+  // 不预读的话核心拿到的是"没存过"——播种、用户布置好的布局、上次看到哪儿，
+  // 全都静默失效。
+  try {
+    await adapter.prefetch();
+  } catch {
+    /* 预读失败就当没存过，不影响窗能开 */
+  }
 
   const pdfRenderer = createPdfRenderer({ pdfjs, workerSrc });
 
@@ -147,29 +245,10 @@ export async function boot(cfg) {
 
   // 阅读器这一层是 body 级的 fixed 覆盖层，所以下面这一步就等于"整个窗口都是阅读器"。
   handle.reader.open();
+  await new Promise((r) => setTimeout(r, 120));
 
-  if (seed && seed.docPath) {
-    try {
-      await handle.reader.openDoc(seed.docPath);
-    } catch {
-      // 那份文献可能已经被删了——不是致命错误，让用户自己从列表里挑。
-    }
-  }
-
-  if (mode === "story") {
-    await new Promise((r) => setTimeout(r, 250));
-    clickIfPresent("kb-reader-deskbtn");
-    await new Promise((r) => setTimeout(r, 350));
-    if (seed && seed.crystal) {
-      // 偏好先设上：为空时那颗按钮会**转去开文件夹选择器**，那不是我们要的。
-      try {
-        handle.ctx.state.prefs.readerStoryCrystal = seed.crystal;
-      } catch {
-        /* 拿不到就让它弹选择器，也不是坏事 */
-      }
-    }
-    clickIfPresent("kb-reader-storywin");
-  }
+  if (role === "story") await bootStory(handle, seed);
+  else await bootReader(handle, seed);
 
   // 桥断了要让用户**看见**，而不是留一扇正在编辑僵尸文件的窗（见 README 的风险清单）。
   transport.subscribe({
@@ -184,6 +263,54 @@ export async function boot(cfg) {
   return handle;
 }
 
+/** 边看边记：打开上次那份文献。 */
+async function bootReader(handle, seed) {
+  if (seed && seed.docPath) {
+    try {
+      await handle.reader.openDoc(seed.docPath);
+    } catch {
+      // 那份文献可能已经被删了——不是致命错误，让用户自己从列表里挑。
+    }
+  }
+}
+
+/**
+ * 结构窗：开桌面层，但**桌上只有一扇铺满的结构窗**。
+ *
+ * 两步都走**真实按钮**（不新开句柄入口，见 app.js 那几行注释）：
+ *   ① 「桌面」——`setDeskMode(true)`。种子里的存档非空，所以它恢复我们那条
+ *      单窗记录，**不会**触发"替你摆一页 PDF"那条兜底。
+ *   ② 「结构窗」——已经开着就只是抬到前面，不会开出第二扇。
+ */
+async function bootStory(handle, seed) {
+  clickIfPresent("kb-reader-deskbtn");
+  await new Promise((r) => setTimeout(r, 260));
+
+  // 偏好兜一道：没设过的话那颗按钮会**转去开文件夹选择器**（那不是我们要的）。
+  // 占位值**不写**——它不是真晶体，写进去反而会触发选择器。
+  if (seed && seed.crystal && seed.crystal !== "__float_first_crystal__") {
+    try {
+      handle.ctx.state.prefs.readerStoryCrystal = seed.crystal;
+    } catch {
+      /* 拿不到就让它弹选择器，也不是坏事 */
+    }
+  }
+  clickIfPresent("kb-reader-storywin");
+  await new Promise((r) => setTimeout(r, 320));
+
+  // 窗尺寸变了要让结构窗重画一次线（桌面窗自己不会跟着重排）。
+  const onResize = () => {
+    try {
+      const rt = handle.ctx && handle.ctx.reader;
+      if (rt && typeof rt.onResize === "function") rt.onResize();
+    } catch {
+      /* 重画失败不该把窗搞崩 */
+    }
+  };
+  window.addEventListener("resize", onResize);
+  handle.__floatResize = onResize;
+}
+
 // ── 自举 ──────────────────────────────────────────────────────
 //
 // 配置由 preload 挂到 `window.__CRYSTAL_FLOAT__` 上。这里自己起，
@@ -193,9 +320,12 @@ export async function boot(cfg) {
 // 条件判断是给测试留的：把 bundle 装进一个没有那两个全局的页面时不许自动跑。
 if (typeof document !== "undefined") {
   const auto = () => {
-    wireChrome();
     const cfg = globalThis.__CRYSTAL_FLOAT__;
-    if (!cfg) return;
+    if (!cfg) {
+      // 没有配置（比如被当成普通页面打开）：至少把按钮接上，别让窗完全点不动。
+      wireChrome("reader");
+      return;
+    }
     boot(cfg).catch((e) => setChromeText("float-status", "启动失败：" + ((e && e.message) || e)));
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", auto);

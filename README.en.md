@@ -346,6 +346,23 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.2** · Changed: **the two features are now two separate windows, side by side.**
+
+1.4.0/1.4.1 used one window switching between modes, and the "structure window" command **dragged the whole desk layer out with it** (auto-adding a PDF window on top of that). That is not what was asked for. Now:
+
+| Command | What opens |
+| --- | --- |
+| **Floating window: read and note** | The document plus the note pane on the right. The top strip gains a **note-pane-only** toggle that collapses the document area so the note pane fills the window — handy pinned to one side of your screen. |
+| **Floating window: structure window** | **The structure window, and nothing else.** No desk layer showing through, no auto-added PDF window, and the reader's own top bar is tucked away. |
+
+The two commands **do not affect each other**: the second one no longer closes the first, and no longer kills-and-restarts. Each window keeps its own position and its own state.
+
+Also fixed something that **had never worked**: the floating windows' path for reading prefs and view state was broken (the contract requires a synchronous read, the bridge is async, and the first version leaked a Promise through) — so "set it up in Obsidian, then float it" **never actually succeeded**. It does now.
+
+⚠️ This needs **CrystalFloat 1.0.2**.
+
+---
+
 **1.4.1** · Fixes **the two floating-window commands going dead after you close the window once.**
 
 Caught the same day 1.4.0 shipped. The companion **did not exit** when you clicked ✕ — it stayed alive as an invisible process, and it **kept holding the single-instance lock**. Every later "floating window" command was therefore rejected cleanly in the background (exit code 0, not even a flicker), so all you saw was **nothing happening** — and the diagnostic log said only "companion exited", never a word about a lock.
