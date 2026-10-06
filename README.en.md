@@ -244,6 +244,41 @@ Opening the vault from the ribbon icon gives you the **full screen** by default 
 > - **Embedded mode does not lock your note's scrolling** (the other two do — they sit over the note, so it should not scroll behind them).
 > - **The dataviewjs form has none of this** (it already lives inside a note), so that button never appears there.
 
+## A fourth mode: outside Obsidian entirely (the floating companion)
+
+All three modes above **stay inside Obsidian's window** — they are overlays the plugin draws in its own process. To sit **on top of Edge, WeChat, Word** (reading something in a browser with read-and-note still hanging beside it) you need an OS-level window, and **a plugin cannot make one**: an Obsidian plugin sandbox has no route to it.
+
+Hence **CrystalFloat** — a **separate small program**:
+
+| | Size | Where from |
+| --- | --- | --- |
+| Crystal Vault (this plugin) | ~2 MB | the plugin store, unchanged |
+| CrystalFloat (the companion) | ~107 MB | [another repo's Releases](https://github.com/runyao-zhang/crystal-vault-float/releases/latest) |
+
+Once installed **there is no path to configure** — the plugin finds it on its own. Two commands appear in the palette:
+
+- **Crystal Vault: Floating window: read and note**
+- **Crystal Vault: Floating window: structure window**
+
+The window has a drag strip along the top; on the right are **on-top toggle / minimize / close**.
+
+> **With no companion installed, everything above still works** — only those two commands are missing. Clicking them tells you so in plain words and offers a download link; it never fails silently.
+
+### What "on top" beats, and what it doesn't
+
+**Beats**: Edge, Chrome, WeChat, QQ, Word, Explorer — regular windows, maximized included.
+
+**Does not beat** (this list is honest):
+- Exclusive-fullscreen apps (fullscreen video, games)
+- **Another always-on-top window** — in that band, whichever was activated last wins. Raycast (on top by default) or certain screenshot/recording tools will collide with it
+- UAC elevation prompts (those live on the secure desktop; nothing gets above them)
+
+### Three known trade-offs
+
+1. **Editing a card body inside the floating window uses a plain textarea**, not Obsidian's live-preview editor — that component cannot cross a process boundary. Turning pages, dragging cards and writing notes all work; only the editing experience is downgraded.
+2. **`[[wikilinks]]` and callouts inside a floated document render as plain text**, and extensions like Dataview do not apply there.
+3. **Don't drag the same card in both windows at once** — card coordinates are written with debouncing and no baseline comparison, so a simultaneous edit silently loses one side. Sequential edits are fine.
+
 ## Install
 
 ### From the community directory
@@ -310,6 +345,22 @@ Then link onward: [[02-Next card]] and say why you are linking
 ## Changelog
 
 Newest first. Kept current with every release, and it **only records things you can see**.
+
+**1.4.0** · New: **read-and-note and the structure window can now float outside Obsidian.**
+
+The three modes in settings (full screen / floating window / embedded) **all stay inside Obsidian's window** — they are overlays the plugin draws in its own process. This version adds a **fourth**: a genuinely separate window that **sits on top of Edge, WeChat, Word**.
+
+It has to be a **separate program** (CrystalFloat, ~107 MB), because a plugin sandbox cannot create an OS-level window — a platform limit, not laziness. Once installed **there is no path to configure**; the plugin finds it on its own, and two commands appear: **Floating window: read and note** and **Floating window: structure window**.
+
+**With no companion installed, everything above still works** — only those two commands are missing.
+
+Three trade-offs worth knowing up front (the full list is above):
+
+- **Editing a card body in the floating window uses a plain textarea** — that component cannot cross a process boundary. Turning pages, dragging cards and writing notes all work.
+- `[[wikilinks]]` and callouts inside a floated document render as plain text.
+- **Don't drag the same card in both windows at once** (card coordinates are debounced writes with no baseline comparison, so a simultaneous edit silently loses one side).
+
+---
 
 **1.3.97** · Fixes **an unreadable error when you press 「编辑」 on a desk card while no note is open.**
 

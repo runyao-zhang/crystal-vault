@@ -2114,10 +2114,37 @@ export async function mount({
     if (card) showHologram(ctx, card, model.colorOf(key).hue, { resumed: true, justSaved });
   }
 
-  function openFullscreen() {
+  /** 读回视图状态。**只读**，不碰任何卡片文件。 */
+  function readStateInto(ctx) {
     // 每次打开都重读一次：上次留下的视角是这次会话的起点，
     // 之后的改动都基于它，不是基于核心刚起来时的空白默认。
     ctx.state.view = readViewState(ctx);
+  }
+
+  /** 3.0 刀 35：把各层的收纳方框边车读回来。**异步、不挡着开库**——
+   *  读盘慢一点的话，框晚半拍出现，比整个库卡在那里强。读完了自己重画一次。 */
+  function loadBoxSidecars(ctx) {
+    loadBoxFiles(ctx).then((changed) => {
+      if (changed && ctx.refreshStoryline) ctx.refreshStoryline();
+    });
+  }
+
+  /**
+   * 只读那一半：读回视图状态 + 把收纳方框边车读回来。
+   *
+   * **故意不含两个 migrate**（`migrateCardPos` / `migrateCardSides`）——那两个会
+   * **写卡片 frontmatter**。悬浮伴侣（独立 Electron 窗口）走的就是这条路：
+   * 它和应用内那一份是两个进程，让第二个进程也去跑迁移等于对用户数据做无谓的并发写，
+   * 而且它要的只是一份能显示的状态。迁移交给应用内那一份做，**两边不一致是暂时的、无害的**
+   * （迁移本身一次开库只搬一批，本来就会跨多次开库完成）。
+   */
+  function hydrateState(ctx) {
+    readStateInto(ctx);
+    loadBoxSidecars(ctx);
+  }
+
+  function openFullscreen() {
+    readStateInto(ctx);
     // 3.0 刀 34：把**只存在这台机器上**的那些位置搬进卡片的 frontmatter
     // （用户 09-29 要的"别人电脑上相对位置一样"）。一次开库最多搬一批，
     // 剩下的下次开接着搬——理由写在 `migrateCardPos` 顶上。
@@ -2127,11 +2154,7 @@ export async function mount({
     // ——用户把文件夹压缩发给别人就全没了。搬进卡片自己的 frontmatter 之后
     // 才跟着文件走。一次开库最多搬一批，剩下的下次开接着搬。
     migrateCardSides(ctx, ctx.state.view.linkSides);
-    // 3.0 刀 35：把各层的收纳方框边车读回来。**异步、不挡着开库**——
-    // 读盘慢一点的话，框晚半拍出现，比整个库卡在那里强。读完了自己重画一次。
-    loadBoxFiles(ctx).then((changed) => {
-      if (changed && ctx.refreshStoryline) ctx.refreshStoryline();
-    });
+    loadBoxSidecars(ctx);
     // #9 模式不落盘，所以每次打开都回到回忆模式。别让一次误切把自测变成看答案——
     // 代价只是多点一下，比"哪天打开发现答案全摊着"轻得多。
     applyMode(ctx, MODE_RECALL);
@@ -2519,6 +2542,9 @@ export async function mount({
     // 去翻 ctx.state.view 就把测试绑在内部结构上了。
     viewState: () => ctx.state.view,
     open: openFullscreen,
+    // 悬浮伴侣（独立 Electron 窗口）用：只读地把状态装进来，
+    // **不开库层、不跑那两个会写卡片的迁移**。理由见 hydrateState 顶上那段。
+    hydrate: () => hydrateState(ctx),
     close: closeFullscreen,
     expand: (key) => expandCrystal(ctx, key),
     // #19 多层：当前所在的层栈（`[]` = 晶体环）。测试与截图脚本用它断言

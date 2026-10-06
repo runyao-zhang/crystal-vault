@@ -21,6 +21,10 @@ import { createPdfRenderer } from "./core/pdfdoc.js";
 // 因为代码块住在笔记里，笔记被编辑器打开不了块就跑不了（详见 entry-pdf-runtime.js）。
 // 插件里代码住在 main.js，没有那条线——1.8MB 就是 1.8MB，Obsidian 不会拿它去打编辑器。
 import { pdfjs, workerSrc } from "./entry-pdf-runtime.js";
+// 悬浮伴侣（独立 Electron 窗口）。**它不是插件的一部分**——是一个单独的产物，
+// 买家要装两样。这里只负责"找到它、拉起来、桥的生命周期"，全部逻辑在 companion.js。
+import { createCompanion, detectCompanionPath } from "./companion.js";
+import { prefsKey, viewStateKey } from "./adapter.js";
 /**
  * 插件形态的卡片目录默认值。
  *
@@ -67,6 +71,32 @@ const DEFAULT_SCRATCH_FOLDER = "草稿纸";
  * 深色主题走，两者并排本来就未必合眼——所以它可配，不是写死的。
  */
 const DEFAULT_DOCK_COLOR = "#ffffff";
+
+/**
+ * 伴侣路径**存在 Obsidian 的 localStorage 里，不进 data.json**。
+ *
+ * 理由：data.json 跟着 vault 走（同步到手机、传到别的电脑），而一个
+ * `C:\Users\甲\AppData\...\CrystalFloat.exe` 换台机器就是错的。
+ * 「这台机器上那个程序装在哪」是纯机器局部的属性，寿命不该跟着库走。
+ *
+ * 读不到就退回自动探测（见 companion.js 的 detectCompanionPath），
+ * 所以这一格大多数人是永远不用填的。
+ */
+const FLOAT_PATH_KEY = "crystal-vault:float-path";
+
+/**
+ * **开发用**：未打包时指向伴侣的应用目录（`dist/floating/`）。
+ *
+ * 填了它，启动就变成 `electron.exe <这一格> --bridge …`，于是**不必先打包**
+ * 就能把整条链在自己的库里跑通。装了正式版之后清空这一格即可——
+ * 打包后的 exe 自带入口，多一个目录参数反而起不来。
+ *
+ * 同样存在 localStorage：它指向的是这台机器上的一份构建产物，跟 vault 无关。
+ */
+const FLOAT_APPDIR_KEY = "crystal-vault:float-appdir";
+
+/** 伴侣的下载页。找不到程序时那颗按钮指向它。 */
+const FLOAT_DOWNLOAD_URL = "https://github.com/runyao-zhang/crystal-vault-float/releases/latest";
 
 const DEFAULT_SETTINGS = {
   cardsFolder: DEFAULT_CARDS_FOLDER,
@@ -324,6 +354,118 @@ class CrystalVaultSettingTab extends PluginSettingTab {
       cls: "setting-item-description",
       text: "改完会自动重开一次视图（换目录等于换了一整份数据）。",
     });
+
+    // ── 悬浮伴侣 ────────────────────────────────────────────────────────
+    //
+    // 这一段是买家唯一会看到「为什么我要装第二个程序」的地方，所以文案要把
+    // 那句话说出来，而不是让用户自己纳闷。**一句话说完，不辩解。**
+    containerEl.createEl("h3", { text: "悬浮伴侣（独立窗口）" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text:
+        "把「边看边记」和「结构窗」浮在其它窗口之上（比如压在 Edge 上面）。" +
+        "它必须是一个**单独的程序**——Obsidian 的插件沙箱里造不出系统级的窗口，" +
+        "这是平台限制，不是偷懒。没装它的时候，上面所有功能照常，只是没有这两条命令。",
+    });
+
+    const pathSetting = new Setting(containerEl)
+      .setName("伴侣程序路径")
+      .setDesc("留空 = 自动查找常见安装位置。找不到时点右边那颗「自动检测」。")
+      .addText((t) => {
+        let cur = "";
+        try {
+          cur = this.plugin.app.loadLocalStorage(FLOAT_PATH_KEY) || "";
+        } catch {
+          cur = "";
+        }
+        t.setPlaceholder("（自动）").setValue(cur).onChange((v) => {
+          try {
+            this.plugin.app.saveLocalStorage(FLOAT_PATH_KEY, String(v || "").trim());
+          } catch {
+            /* 存不下就只是这次会话有效，不致命 */
+          }
+        });
+      })
+      .addButton((b) =>
+        b.setButtonText("自动检测").onClick(() => {
+          const hit = this.plugin.companionPath();
+          if (hit) {
+            try {
+              this.plugin.app.saveLocalStorage(FLOAT_PATH_KEY, hit);
+            } catch {
+              /* 同上 */
+            }
+            new Notice("晶体库：找到伴侣了 —— " + hit);
+            this.display(); // 重画一遍，把找到的路径显示出来
+          } else {
+            new Notice("晶体库：没找到。装完之后回来再点一次，或者手动填路径。", 8000);
+          }
+        })
+      )
+      .addButton((b) =>
+        b.setButtonText("下载").onClick(() => {
+          try {
+            globalThis.require("electron").shell.openExternal(FLOAT_DOWNLOAD_URL);
+          } catch {
+            new Notice("晶体库：打不开浏览器，地址是 " + FLOAT_DOWNLOAD_URL, 10000);
+          }
+        })
+      );
+    pathSetting.settingEl.addClass("kb-v13-float-setting");
+
+    new Setting(containerEl)
+      .setName("开发用：未打包的应用目录")
+      .setDesc(
+        "**只在开发时用**。填了它，启动方式变成 `electron.exe <这一格> --bridge …`，" +
+          "于是不必先打包就能试。装了正式版之后**请清空这一格**——" +
+          "打包后的程序自带入口，多一个目录参数会让它起不来。"
+      )
+      .addText((t) => {
+        let cur = "";
+        try {
+          cur = this.plugin.app.loadLocalStorage(FLOAT_APPDIR_KEY) || "";
+        } catch {
+          cur = "";
+        }
+        t.setPlaceholder("（留空 = 用已打包的程序）")
+          .setValue(cur)
+          .onChange((v) => {
+            try {
+              this.plugin.app.saveLocalStorage(FLOAT_APPDIR_KEY, String(v || "").trim());
+            } catch {
+              /* 存不下就只是这次会话有效 */
+            }
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("试一试")
+      .setDesc("起一扇悬浮窗，看看通不通。它不会动你库里的东西。")
+      .addButton((b) =>
+        b.setButtonText("打开悬浮窗").onClick(() => this.plugin.openFloating("reader"))
+      )
+      .addButton((b) =>
+        b.setButtonText("复制诊断信息").onClick(async () => {
+          // 买家没有开发环境，这几行日志是他能给回来的唯一线索。
+          const c = this.plugin.getCompanion();
+          const logs = c.getLogs();
+          const text = [
+            "晶体库 悬浮伴侣 诊断",
+            "插件版本: " + (this.plugin.manifest ? this.plugin.manifest.version : "?"),
+            "伴侣路径: " + (this.plugin.companionPath() || "(没找到)"),
+            "卡片目录: " + this.plugin.settings.cardsFolder,
+            "--- 日志 ---",
+            ...(logs.length ? logs : ["(还没有日志，先点一次「打开悬浮窗」)"]),
+          ].join("\n");
+          try {
+            await navigator.clipboard.writeText(text);
+            new Notice("晶体库：诊断信息已复制");
+          } catch {
+            console.log(text);
+            new Notice("晶体库：复制失败，已打到控制台");
+          }
+        })
+      );
   }
 }
 
@@ -340,7 +482,138 @@ export default class CrystalVaultPlugin extends Plugin {
       callback: () => this.activateView(),
     });
 
+    // 悬浮伴侣那两条。**没装伴侣时它们照样出现**——点下去给一句人话 + 一个下载入口，
+    // 而不是"命令列表里没有这一条"。藏起来的话用户根本不知道有这功能
+    // （代价是命令面板里多两行，比"功能不可发现"轻）。
+    this.addCommand({
+      id: "float-reader",
+      name: "独立窗口：边看边记",
+      callback: () => this.openFloating("reader"),
+    });
+    this.addCommand({
+      id: "float-story",
+      name: "独立窗口：结构窗",
+      callback: () => this.openFloating("story"),
+    });
+
     this.addSettingTab(new CrystalVaultSettingTab(this.app, this));
+  }
+
+  // ── 悬浮伴侣 ──────────────────────────────────────────────────────────
+
+  /**
+   * 懒建。**没点过「独立窗口」的人不该多一个监听端口**——
+   * 桥只在第一次真要用的时候才起（`ensureBridge` 是幂等的）。
+   */
+  getCompanion() {
+    if (!this.companion) {
+      this.companion = createCompanion({
+        // 复用同一份适配层工厂：桥转发给它的就是应用内那一份在用的同一个东西。
+        adapter: createObsidianAdapter({
+          app: this.app,
+          cardsFolder: this.settings.cardsFolder,
+          renderMd: (md, el, srcPath) => MarkdownRenderer.render(this.app, md, el, srcPath || "", this),
+          store: makeStore(this),
+        }),
+        store: makeStore(this),
+        version: this.manifest ? this.manifest.version : "",
+      });
+    }
+    return this.companion;
+  }
+
+  /** 用户在设置里指定的路径优先；没指定就按常见位置找（见 companion.js）。 */
+  companionPath() {
+    let explicit = "";
+    try {
+      explicit = this.app.loadLocalStorage(FLOAT_PATH_KEY) || "";
+    } catch {
+      explicit = ""; // 老版本 Obsidian 没有这个 API，退回自动探测
+    }
+    let vaultPath = "";
+    try {
+      vaultPath = this.app.vault.adapter.getBasePath() || "";
+    } catch {
+      vaultPath = "";
+    }
+    return detectCompanionPath({ explicit, vaultPath });
+  }
+
+  /**
+   * 种子：用户在 Obsidian 里摆好的那套，**第一次打开悬浮窗时该是那个样子**。
+   *
+   * 只播一次种。之后伴侣用它自己的命名空间键（`:float` 后缀），两边各存各的
+   * ——共用的话，两边会同时防抖写 `prefs.readerDesk`，而桌窗坐标是**桌面局部**的，
+   * 悬浮窗桌面尺寸不同，几何会在两个值之间来回跳。
+   */
+  buildSeed() {
+    const store = makeStore(this);
+    const cf = this.settings.cardsFolder;
+    const readJson = (k) => {
+      try {
+        const raw = store.get(k);
+        return raw == null ? null : JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    };
+    const seed = {
+      prefs: readJson(prefsKey(cf)),
+      viewState: readJson(viewStateKey(cf)),
+      dockColor: this.settings.dockColor,
+      scratch: {
+        folder:
+          String(cf || "").replace(/\/+$/, "") +
+          "/" +
+          String(this.settings.scratchFolder || "").replace(/^\/+|\/+$/g, ""),
+      },
+    };
+    // 那边现在开着哪份文献，就让它接着看哪一份。句柄上是**只读**的取法
+    // （`handle.reader.doc()`），操作入口一律留在真实按钮上——见 app.js 那段注释。
+    try {
+      const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+      const h = leaf && leaf.view && leaf.view.handle;
+      const d = h && h.reader && h.reader.doc();
+      if (d && d.path) seed.docPath = d.path;
+    } catch {
+      /* 视图没开着就没有种子文献，正常 */
+    }
+    if (seed.prefs && seed.prefs.readerStoryCrystal) seed.crystal = seed.prefs.readerStoryCrystal;
+    return seed;
+  }
+
+  /** 打开悬浮窗。找不到伴侣时给一句人话 + 一个下载入口，而不是静默失败。 */
+  async openFloating(mode) {
+    const exe = this.companionPath();
+    if (!exe) {
+      new Notice("晶体库：还没装「悬浮伴侣」。它是**单独一个程序**——Obsidian 的插件造不出系统级窗口。设置页里有下载入口。", 10000);
+      return;
+    }
+    // 开发形态：填了应用目录就用 `electron.exe <目录>` 起（见 FLOAT_APPDIR_KEY）。
+    let appDir = "";
+    try {
+      appDir = String(this.app.loadLocalStorage(FLOAT_APPDIR_KEY) || "").trim();
+    } catch {
+      appDir = "";
+    }
+    // ⚠️ 只认 electron.exe。填着这一格又换成正式版 exe 的话，多出来的目录参数
+    // 会让它**起不来且不报错**（Electron 把那个目录当成第二个应用入口）。
+    // 与其让用户对着一扇不出现的窗发呆，不如在这里忽略掉、并且说一句。
+    if (appDir && !/electron(\.exe)?$/i.test(exe)) {
+      new Notice("晶体库：填了「开发用应用目录」但启动的是正式版程序，已忽略那一格。装完正式版请把它清空。", 8000);
+      appDir = "";
+    }
+
+    try {
+      await this.getCompanion().launch(exe, {
+        mode,
+        cardsFolder: this.settings.cardsFolder,
+        seed: this.buildSeed(),
+        appDir,
+      });
+    } catch (e) {
+      new Notice("晶体库：悬浮窗没起来——" + ((e && e.message) || e), 10000);
+    }
   }
 
   // ⚠️ 这里**不要** detachLeavesOfType：那会让用户重开插件后视图全没了。
@@ -540,6 +813,16 @@ export default class CrystalVaultPlugin extends Plugin {
     // 关插件（或者用户禁用）时把还在防抖窗口里的那一笔写下去。
     // 不写的话，最后一次滚动/拖动就丢了——而用户多半就是摆完位置就关了。
     await this.flush();
+    // 伴侣跟着一起收。**顺序在 companion.stop() 里**（先杀伴侣再停桥）——
+    // 反过来的话伴侣会看到桥没了、弹一句"连接断了"，而用户明明是正常关的 Obsidian。
+    if (this.companion) {
+      try {
+        await this.companion.stop();
+      } catch {
+        /* 卸载路径上不许抛 */
+      }
+      this.companion = null;
+    }
   }
 }
 
