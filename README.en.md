@@ -346,6 +346,31 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.3** · Changed: **what floats out is the component, not the whole desk mode.**
+
+1.4.2 got the structure window **wrong**: it opened the entire desk layer with one full-size structure window sitting on it. Measured, the window actually contained:
+
+```
+.kb-v13-trigger       976x80     the vault's entry button (library leftovers, unrelated to floating)
+.kb-v13-reader-desk   976x778    the whole desk layer container
+  .kb-v13-desk-win   1378x1180   a desk window with its own bar 「结构：X 收纳 ✕」 and a resize grip
+```
+
+That is the desk mode pulled out whole, not the structure window. The component is now **mounted directly** — the desk layer is not involved at all:
+
+```
+#float-story-host      906x724
+  .kb-v13-embedstory   906x724
+    .kb-v13-stage      906x724   the node canvas
+    .kb-v13-embedbar   304x34    the structure window's own top bar
+```
+
+Both windows also drop **Crystal Vault's own entry button** (pointless in a floating window — the companion does not carry the vault layer).
+
+The read-and-note window additionally drops **the vault's own navigation** (desk / +page / dock / card box / storyline / structure window) — those belong to the whole library, not to this component. Especially the desk button: pressing it pulls the desk layer into that window. The reader's own controls (back / switch document / page turning / zoom / read-and-note / fold top bar) all remain.
+
+---
+
 **1.4.2** · Changed: **the two features are now two separate windows, side by side.**
 
 1.4.0/1.4.1 used one window switching between modes, and the "structure window" command **dragged the whole desk layer out with it** (auto-adding a PDF window on top of that). That is not what was asked for. Now:

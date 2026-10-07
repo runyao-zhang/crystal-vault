@@ -4923,6 +4923,20 @@ export function createReader(ctx, opts = {}) {
     // 就等于绕过了「按钮在不在、点得到点不到」那一层。
     deskOn: () => desk.on,
     deskWins: () => desk.wins.map((w) => ({ ...w })),
+    /**
+     * 悬浮伴侣用（2026-10-07）：**那两棵文件夹树**（换晶体 / 导入卡片）。
+     *
+     * 结构窗那扇窗是**脱离桌面层单独挂的**——用户点名要「把结构窗那个组件
+     * 单独分出去」，而不是把桌面模式的整扇窗端出来。而 `createEmbedStory` 的
+     * `onPickCrystal` / `onPickCard` 指向的就是这两棵树，它们渲染在
+     * **阅读器的笔记栏**里；`openFolderPick` 一向是内部函数，外面够不着。
+     *
+     * 它们是**界面动作**（点开一棵树），和上面那批"只读"的不是一类；
+     * 但它们与「顶栏那两颗真按钮」走**同一个函数**，所以不违背那条纪律
+     * ——伴侣那边**没有别的入口**够得着它们。
+     */
+    pickCrystal: () => openFolderPick("crystal"),
+    pickCard: () => openFolderPick("importcard"),
     submitCard,
     /** 窗口变了重新排一次（app.js 的 kbResize 调它）。挂起时它自己会跳过。 */
     onResize: resizeNow,
