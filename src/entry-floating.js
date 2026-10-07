@@ -26,13 +26,21 @@ import { createRemoteAdapter } from "./adapters/remote.js";
 import { createHttpTransport } from "./bridge/client.js";
 import { createPdfRenderer } from "./core/pdfdoc.js";
 import { createWebRenderer } from "./adapters/web-render.js";
-// 结构窗**那个组件本身**。用户 2026-10-07 点名要的就是它——
-// 不是"桌面模式的整扇窗"，所以那一扇窗里不再开桌面层，直接挂这个。
-import { createEmbedStory } from "./core/embedstory.js";
 // 本地打包 pdf.js。**比在 Obsidian 里简单**：那两级 eval / blob 兜底
 // （entry-pdf-runtime.js 顶上记着）只是为了把 2MB 塞进 markdown 笔记，
 // 伴侣没有那条约束，直接 import 就完了。
 import { pdfjs, workerSrc } from "./entry-pdf-runtime.js";
+
+/** 点一颗真按钮。**不新开句柄入口**——app.js 那几行注释写着理由：
+ *  给句柄加操作入口，等于把被测的那条路整个绕过去。 */
+function clickIfPresent(id) {
+  const el = document.getElementById(id);
+  if (el && typeof el.click === "function") {
+    el.click();
+    return true;
+  }
+  return false;
+}
 
 function setChromeText(id, text) {
   const el = document.getElementById(id);
@@ -109,14 +117,43 @@ function wireChrome(role) {
 function seedFor(role, seed) {
   const base = seed || {};
   if (role !== "story") return base;
-  // 结构窗那扇只需要一件事：**固定看哪颗晶体**。
+
+  const w = Math.max(1200, (globalThis.innerWidth || 1000) + 400);
+  const h = Math.max(900, (globalThis.innerHeight || 700) + 400);
+  // ⚠️ **不能留空。** core/prefs.js 的 `sanitizeDesk` 对 `kind === "storyline"`
+  // 要求 crystal 非空（它画的是故事线，认的就是那个 key），空字符串会让**整条记录
+  // 被丢掉**，于是桌面空着 → `setDeskMode` 走"替你摆一页 PDF"那条兜底 →
+  // 这扇窗里冒出一扇 PDF 窗。这正是用户明确说不要的东西。
   //
-  // ⚠️ 1.0.2 这里还塞过一条"只有一扇铺满的结构窗"的桌面存档（为了让桌面层
-  // 恢复它、别触发"替你摆一页 PDF"）。**那一版整个方向是错的**——用户要的是
-  // 结构窗**组件**单独分出去，不是桌面模式的整扇窗。现在桌面层根本不参与，
-  // 那条存档连同它的占位晶体一并不需要了。
+  // 取不到真晶体时给一个**认不出的占位**：`sanitizeDesk` 只查非空，
+  // 而 `mountEmbedStory` 会拿 `ctx.model.hasNode()` 判它、判不过就退回第一颗晶体。
+  // 于是占位值自己不会显示出来，但记录活得下来。
+  const PLACEHOLDER = "__float_first_crystal__";
+  const crystal = base.crystal || PLACEHOLDER;
   const prefs = { ...(base.prefs || {}) };
-  if (base.crystal) prefs.readerStoryCrystal = base.crystal;
+  prefs.readerDesk = {
+    windows: [
+      {
+        kind: "storyline",
+        path: "",
+        crystal,
+        cam: null,
+        page: 1,
+        from: 1,
+        to: 1,
+        x: 0,
+        y: 0,
+        w,
+        h,
+        docked: false,
+      },
+    ],
+  };
+  // 那一栏是「结构窗固定看哪颗」的记忆。窗里换晶体时它会跟着改。
+  // **占位值不写进偏好**——`storyCrystalPref()` 拿 `model.hasNode()` 判它，
+  // 判不过就当"没挑过"，那颗按钮会转去弹文件夹选择器（那不是我们要的）。
+  if (crystal !== PLACEHOLDER) prefs.readerStoryCrystal = crystal;
+
   return { ...base, prefs };
 }
 
@@ -210,7 +247,7 @@ export async function boot(cfg) {
   handle.reader.open();
   await new Promise((r) => setTimeout(r, 120));
 
-  if (role === "story") await bootStory(handle, seed, adapter);
+  if (role === "story") await bootStory(handle, seed);
   else await bootReader(handle, seed);
 
   // 桥断了要让用户**看见**，而不是留一扇正在编辑僵尸文件的窗（见 README 的风险清单）。
@@ -238,123 +275,39 @@ async function bootReader(handle, seed) {
 }
 
 /**
- * 结构窗：**直接挂那个组件，不开桌面层。**
+ * 结构窗：开桌面层，但**桌上只有一扇铺满的结构窗**。
  *
- * ── 这一版为什么推翻了上一版 ──
- *
- * 1.0.2 是「开桌面层 + 桌上只摆一扇铺满的结构窗」。用户 2026-10-07 说不对：
- * 「让你把边看边记和结构窗两个**组件**单独分出去，而不是仅把桌面模式的
- * 整扇窗分出去」。量了一遍屏幕上到底有什么，他说得对——那一扇窗里实际是：
- *
- *     .kb-v13-trigger      976×80    ← 晶体库的入口按钮（跟浮窗毫无关系的库层残渣）
- *     .kb-v13-reader-desk  976×778   ← 整个桌面层容器
- *       .kb-v13-desk-win  1378×1180  ← 桌面窗，带自己的 bar「结构：甲晶体 收纳 ✕」+ 拖拽角
- *
- * 那就是「桌面模式的整扇窗」。所以现在**不碰桌面层**，直接把
- * `createEmbedStory` 这个组件挂进窗口——它自带顶栏（画线：看/写、
- * 晶体：X、导入卡片），那才是结构窗本来的样子。
- *
- * ── 两处代价，以及怎么处理的 ──
- *
- * · `onPickCrystal` / `onPickCard` 那两棵树渲染在**阅读器的笔记栏**里，
- *   所以阅读器还是得挂着（只是它的顶栏、页阵、遮罩全被 CSS 收掉了）。
- *   那两棵树走 `handle.reader.pickCrystal()/pickCard()`（核心为此开的口子）。
- * · `onPlaceCard`（点节点 = 把那张卡摆到桌上）**没有桌面可摆了**，
- *   退而求其次：把那张卡的源文件交给 Obsidian 打开——同一件事的另一半。
+ * 两步都走**真实按钮**（不新开句柄入口，见 app.js 那几行注释）：
+ *   ① 「桌面」——`setDeskMode(true)`。种子里的存档非空，所以它恢复我们那条
+ *      单窗记录，**不会**触发"替你摆一页 PDF"那条兜底。
+ *   ② 「结构窗」——已经开着就只是抬到前面，不会开出第二扇。
  */
-async function bootStory(handle, seed, adapter) {
-  const ctx = handle.ctx;
-  // ⚠️ **按类名找，不是 id。** `.kb-v13-reader-main` 只有类名没有 id
-  // （对比 `#kb-reader-sheets` 是两者都有）——`getElementById` 会回 null，
-  // 于是这里静默 early-return，组件一个都不挂，而**屏幕上什么错都不报**。
-  // 这个坑是量「屏幕上到底有什么」量出来的：窗里只剩一个空的
-  // `.kb-v13-reader-main`，7 个可见元素。
-  const main = document.querySelector(".kb-v13-reader-main");
-  if (!main) return;
+async function bootStory(handle, seed) {
+  clickIfPresent("kb-reader-deskbtn");
+  await new Promise((r) => setTimeout(r, 260));
 
-  let host = document.getElementById("float-story-host");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "float-story-host";
-    main.appendChild(host);
-  }
-
-  const prefs = (ctx.state && ctx.state.prefs) || {};
-  const boot = prefs.floatStoryCam && Number.isFinite(prefs.floatStoryCam.k) ? prefs.floatStoryCam : null;
-
-  const view = createEmbedStory(ctx, {
-    injectStyles: false,
-    camera: boot,
-    onCamera: (cam) => {
-      // 相机是「上次推到哪儿」——跟着这扇窗自己的偏好走（命名空间是 :float:story）。
-      try {
-        ctx.state.prefs.floatStoryCam = cam;
-        if (ctx.savePrefs) ctx.savePrefs();
-      } catch {
-        /* 记不住相机不该影响看 */
-      }
-    },
-    onCrystal: (key) => {
-      try {
-        ctx.state.prefs.readerStoryCrystal = key;
-        if (ctx.savePrefs) ctx.savePrefs();
-      } catch {
-        /* 同上 */
-      }
-      try {
-        view.show(key);
-      } catch {
-        /* 换不过去就留在原来那颗 */
-      }
-    },
-    onPickCrystal: () => {
-      try {
-        handle.reader.pickCrystal();
-      } catch {
-        /* 树开不出来不该把窗搞崩 */
-      }
-    },
-    onPickCard: () => {
-      try {
-        handle.reader.pickCard();
-      } catch {
-        /* 同上 */
-      }
-    },
-    onPlaceCard: (card) => {
-      try {
-        if (card && card.path && adapter) adapter.openNote(card.path);
-      } catch {
-        /* 打开失败就算了 */
-      }
-    },
-  });
-
-  host.appendChild(view.root);
-
-  const keys = (ctx.model && ctx.model.crystalKeys) || [];
-  const want = seed && seed.crystal;
-  const key = ctx.model && want && ctx.model.hasNode(want) ? want : keys[0] || "";
-  if (key) {
+  // 偏好兜一道：没设过的话那颗按钮会**转去开文件夹选择器**（那不是我们要的）。
+  // 占位值**不写**——它不是真晶体，写进去反而会触发选择器。
+  if (seed && seed.crystal && seed.crystal !== "__float_first_crystal__") {
     try {
-      view.show(key, { keepCamera: !!boot });
+      handle.ctx.state.prefs.readerStoryCrystal = seed.crystal;
     } catch {
-      /* 画不出来就留一块空舞台，比把窗搞崩强 */
+      /* 拿不到就让它弹选择器，也不是坏事 */
     }
-  } else {
-    host.textContent = "这张库里还没有晶体。";
   }
+  clickIfPresent("kb-reader-storywin");
+  await new Promise((r) => setTimeout(r, 320));
 
-  // 窗尺寸变了要重画一次线（只是重画，不重新 fit——用户推过的相机不该被悄悄重置）。
+  // 窗尺寸变了要让结构窗重画一次线（桌面窗自己不会跟着重排）。
   const onResize = () => {
     try {
-      view.onResize();
+      const rt = handle.ctx && handle.ctx.reader;
+      if (rt && typeof rt.onResize === "function") rt.onResize();
     } catch {
       /* 重画失败不该把窗搞崩 */
     }
   };
   window.addEventListener("resize", onResize);
-  handle.__floatStory = view;
   handle.__floatResize = onResize;
 }
 

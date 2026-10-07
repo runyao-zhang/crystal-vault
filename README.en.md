@@ -346,6 +346,16 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.4** · **Reverted: the floating windows go back to the 1.4.2 shape.**
+
+1.4.3 made the structure window **mount the component directly** (bypassing the desk layer). Cleaner on paper, wrong in use — so this goes back to the 1.4.2 shape: **two windows, and the structure window one is "the desk layer with a single full-size structure window on it"**.
+
+The 1.4.3 changelog entry below is **left as it was** — that version did ship. This one withdraws it.
+
+⚠️ This needs **CrystalFloat 1.0.4**.
+
+---
+
 **1.4.3** · Changed: **what floats out is the component, not the whole desk mode.**
 
 1.4.2 got the structure window **wrong**: it opened the entire desk layer with one full-size structure window sitting on it. Measured, the window actually contained:
