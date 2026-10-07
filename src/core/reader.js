@@ -282,10 +282,11 @@ export function createReader(ctx, opts = {}) {
   // 那结构窗那份也不能再自己注一份——同一个道理。
   const injectStyles = opts.injectStyles !== false;
   // 草稿纸落在哪儿（见 app.js 那段）。null = 宿主没给，那颗按钮整颗不出现。
+  //
+  // ⚠️ 3.0 刀 43 删掉了 `scratchPath`（那个固定的 `_` 路径）。草稿纸从刀 12 起
+  // 就是**用户起名的一张真卡**，路径由 `scratchPathOf(name)` 现算；
+  // 那个常量只剩「返回」那条路在用，而那条路整个删了。
   const scratchSpec = opts.scratch && opts.scratch.folder ? opts.scratch : null;
-  const scratchPath = scratchSpec
-    ? String(scratchSpec.folder).replace(/\/+$/, "") + "/" + (scratchSpec.name || "_") + ".md"
-    : "";
   const el = opts.el;
 
   const st = {
@@ -297,12 +298,11 @@ export function createReader(ctx, opts = {}) {
     // 「不用退出文献模式」。对外的 isOpen() 认的是「露没露」（`open && !hidden`），
     // 所以挂起时不拦截 Esc、也不影响关晶体库那一路。
     hidden: false,
-    // 3.0 刀 18：「边看边记」那一栏被用户收起来了没有。**运行时不落盘**——
-    // 阅读器的可见性今天一个都不落盘（`desk.on` 也不落），收不收那一栏是
-    // 「我这一会儿想读宽一点」，不是「我的工作台长什么样」。
-    sideTucked: false,
-    // 3.0 刀 38：顶栏收起来了没有。**运行时不落盘**——同 `sideTucked`，
-    // 是"这一会儿想读宽一点"的临时动作，不是「上次看到哪儿」的一部分。
+    // 3.0 刀 43：`sideTucked` **没了**——「边看边记」那一栏整个撤掉，它没有
+    // "收没收起来"这回事了。同刀还撤掉了那一栏的 `paintSide`/`setSideTucked`。
+    // 3.0 刀 38：顶栏收起来了没有。**运行时不落盘**——阅读器的可见性今天
+    // 一个都不落盘（`desk.on` 也不落），收不收顶栏是"这一会儿想读宽一点"，
+    // 不是「我的工作台长什么样」。
     topTucked: false,
     // 3.0 刀 18：左边的收纳栏开着没有。同样不落盘。
     dockOn: false,
@@ -326,9 +326,15 @@ export function createReader(ctx, opts = {}) {
   // ---- DOM ----
   el.innerHTML =
     '<div class="kb-v13-reader-bar">' +
+    // 3.0 刀 43（用户 10-07）：**文献名与计数两颗撤掉。**
+    //
+    // 理由不是"不好看"：文献名说的是"你读的是哪一份"，而那份文献是**你自己
+    // 刚在上一屏挑的**——顶栏再念一遍是重复；计数说的是"第几页到第几页"，
+    // 而页码就印在每一页的页眉上（`.kb-v13-reader-cap`），也是重复。
+    // 两颗加起来占掉顶栏左边一整段，换回来的信息量为零。
+    //
+    // ⚠️ **`‹ 返回` 必须留着**——它是回到晶体库的唯一出口（见 `close()`）。
     '<button type="button" class="kb-v13-reader-back" id="kb-reader-back" title="回到晶体库">‹ 返回</button>' +
-    '<span class="kb-v13-reader-title" id="kb-reader-title">文献</span>' +
-    '<span class="kb-v13-reader-count" id="kb-reader-count"></span>' +
     '<span class="kb-v13-reader-spacer"></span>' +
     '<button type="button" class="kb-v13-reader-pick" id="kb-reader-pick" title="换一份文献">换一份</button>' +
     // 3.0 刀 9-A：桌面。网格是「一屏摊开 N 页、位置由 computeGrid 算」，
@@ -337,13 +343,53 @@ export function createReader(ctx, opts = {}) {
     ' title="桌面模式：一页一扇可拖、可缩的窗，摆法自己定">桌面</button>' +
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-addpage"' +
     ' title="把当前这份文献的下一页摆到桌面上">＋ 页</button>' +
-    // 3.0 刀 18。收纳栏与「边看边记」是一对**收放**：一个收窗、一个收栏。
-    // 两颗都只在阅读器里——桌面窗只在这儿有。
+    // 3.0 刀 18。收纳栏：桌面窗拖到左边那条栏上就收起来，栏里留一条。
+    // ⚠️ 它从前与「边看边记」那一颗并列写在这儿；3.0 刀 43 把「边看边记」
+    // 那一栏整个撤了（见下面那段），所以这条注释只剩收纳栏自己。
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-dockbtn" aria-pressed="false"' +
     ' title="收纳栏：桌面窗拖到左边那条栏上（或按窗上的「收纳」）就收起来，' +
     '栏里留一条，点那条再拿出来。收起来的窗关掉阅读器也还在。">收纳栏</button>' +
-    '<button type="button" class="kb-v13-reader-nav" id="kb-reader-sidebtn" aria-pressed="false"' +
-    ' title="边看边记：把右边那一栏收起来，读宽一点。再点一下就推回来。">边看边记</button>' +
+    // ── 3.0 刀 43（用户 10-07）：文件改动 + 新建卡片 ──────────────────────
+    //
+    // 这两颗把原来长在「边看边记」那一栏里的东西**全搬了上来**：
+    //   · 文件改动 → 从前那一排五颗（新建晶体 / 删除晶体 / 重命名晶体 /
+    //     重命名卡片 / 删除卡片）收进一个下拉。**逻辑一行没改**，只换入口。
+    //   · 新建卡片 → 从前那一栏的表单（卡片名 / 概念 / 来源 / 正文 / 存进晶体库）
+    //     压成"一个框 + 存进晶体库"，另外三格收进「更多」。
+    //
+    // **为什么值得搬**：那一栏是竖着占 320px 的一整列，而它只做两件事——建卡、
+    // 改文件。建卡是高频（读一句记一句），改文件是低频（偶尔整库）。两件事挤在
+    // 一列里，代价是高频那件每次都要把视线挪到屏幕右边再挪回来。
+    //
+    // ⚠️ 菜单是**浮层**（`.kb-v13-reader-filemenu` 绝对定位），不占顶栏的高度——
+    // 顶栏本来就挤，再塞五行进去会把阅读区整块往下推。
+    '<button type="button" class="kb-v13-reader-nav" id="kb-reader-fileops" aria-expanded="false"' +
+    ' title="改库里已有的东西：新建 / 删除 / 重命名晶体，删除 / 重命名卡片。' +
+    '每一颗都是「先让你挑、再问你一句」才动手。">文件改动</button>' +
+    // ⚠️ 菜单本身**不在这儿**（挂在 `#kb-reader` 上，见顶栏后面那段）：
+    // 顶栏有 `overflow:hidden`，挂进来会被裁掉，症状是"点了什么都没出来"。
+    // 「新建卡片」那颗 + 它右边摊开的框（用户 10-07 的原话：
+    // 「点击新建卡片，在这个按钮的右侧出现：一个方框，再右侧是按钮：存进晶体库」）。
+    //
+    // ⚠️ 那一整块**默认 `display:none`**，点「新建卡片」才摊开（`.kb-v13-reader-compose.on`）。
+    // 常驻的话它会把顶栏撑成两行，而建卡是"想记的时候才记"，不是一直在记。
+    '<button type="button" class="kb-v13-reader-nav" id="kb-reader-newcard" aria-pressed="false"' +
+    ' title="新建卡片：在这颗按钮右边摊开一个框，写完点「存进晶体库」。' +
+    '没打开文献也能用——它落在你上次挑的那个文件夹里。">新建卡片</button>' +
+    '<div class="kb-v13-reader-compose" id="kb-reader-compose">' +
+    // 正文那一格是**多行**的（用户 10-07 选的）。先前那一栏里它也是 textarea，
+    // 理由没变：卡片正文本来就是多行 markdown，压成单行等于把卡片模型降级。
+    '<textarea class="kb-v13-reader-compose-body" id="kb-reader-body" rows="2"' +
+    ' placeholder="读到什么就记什么；双链直接写 [[]]" aria-label="卡片正文"></textarea>' +
+    // 「更多」——卡片名 / 概念 / 来源 / 将建在，四样都收在这颗里（用户 10-07 选的那一档）。
+    // 常态下看不见它们：这一格是"随手记一笔"，一上来就摆四个输入框会让人以为
+    // 得填完才能存。
+    '<button type="button" class="kb-v13-reader-more" id="kb-reader-more" aria-expanded="false"' +
+    ' title="卡片名、概念、来源、建在哪个文件夹——不填也能存。">更多</button>' +
+    // ⚠️ 「更多」里面那一摊**不在这儿**——它和三样东西一起挂在 `#kb-reader` 上，
+    // 见顶栏后面那段。顶栏有 `overflow:hidden`，挂进来会被裁掉。
+    '<button type="button" class="kb-v13-reader-save" id="kb-reader-save">存进晶体库</button>' +
+    "</div>" +
     // 3.0 刀 9-B：卡片盒。旧卡片和正在读的这一页在哪儿碰头。
     '<button type="button" class="kb-v13-reader-nav" id="kb-reader-cardbox" aria-pressed="false"' +
     ' title="卡片盒：搜库里的卡片，点一张就摆到桌面上，并在那张卡里留一行指回这一页的链接">卡片盒</button>' +
@@ -388,6 +434,45 @@ export function createReader(ctx, opts = {}) {
     '<svg viewBox="0 0 1024 1024" width="13" height="13" aria-hidden="true" focusable="false">' +
     '<path fill="currentColor" d="M201.088 552.512l220.416 211.456-49.472 51.584L64 520l306.688-328 52.224 48.832L201.28 477.824h556.16v74.688H201.088z m687.424-351.36H960v632.192h-71.488V201.216z"/>' +
     "</svg></button>" +
+    "</div>" +
+    // ── 两个浮层菜单：文件改动 + 更多 ────────────────────────────────
+    //
+    // ⚠️ **必须挂在 `#kb-reader` 上，不能挂在顶栏里。** 顶栏那条样式有
+    // `overflow:hidden`（height 过渡要用它），把菜单挂在顶栏里会被**裁掉**——
+    // 症状是"点了「文件改动」，什么都没出来"，而 DOM 里它明明在、也能查到。
+    // 这种坏法很难查：从"按钮坏了"一路查到"样式裁了"，中间隔着两层。
+    //
+    // 位置由 `placeUnder(node, anchor)` 现算（见下），所以 CSS 里不写 top/left
+    // ——顶栏会换行（`flex-wrap:wrap`），写死一个 `top` 在窄窗里就是错的。
+    '<div class="kb-v13-reader-filemenu" id="kb-reader-filemenu">' +
+    // 顺序按用户 10-07 给的那一串原样排：新建晶体 / 删除晶体 / 删除卡片 /
+    // 重命名卡片 / 重命名晶体。
+    '<button type="button" class="kb-v13-filemenu-item" id="kb-reader-fo-newcrystal">新建晶体</button>' +
+    '<button type="button" class="kb-v13-filemenu-item" id="kb-reader-fo-delcrystal">删除晶体</button>' +
+    '<button type="button" class="kb-v13-filemenu-item" id="kb-reader-fo-delcard">删除卡片</button>' +
+    '<button type="button" class="kb-v13-filemenu-item" id="kb-reader-fo-renamecard">重命名卡片</button>' +
+    '<button type="button" class="kb-v13-filemenu-item" id="kb-reader-fo-renamecrystal">重命名晶体</button>' +
+    "</div>" +
+    // 「更多」里面那一摊（卡片名 / 概念 / 来源 / 将建在）。常驻会让人以为
+    // 得填完才能存，所以收在一颗按钮后面。
+    '<div class="kb-v13-reader-morebox" id="kb-reader-morebox">' +
+    // ⚠️ 卡片名留空时**从正文第一行取**（见 `submitCard`）。从前那一栏里它是必填，
+    // 而现在这一格的默认用法是"打完正文直接存"——逼人先起个名字，
+    // 这个框就不再是"随手记一笔"了。
+    '<label class="kb-v13-reader-field"><span>卡片名</span>' +
+    '<input type="text" id="kb-reader-name" placeholder="留空就取正文第一行" autocomplete="off"></label>' +
+    '<label class="kb-v13-reader-field"><span>概念</span>' +
+    '<input type="text" id="kb-reader-concept" placeholder="一句话说清它是什么" autocomplete="off"></label>' +
+    '<label class="kb-v13-reader-field"><span>来源</span>' +
+    '<input type="text" id="kb-reader-source" autocomplete="off"></label>' +
+    // 「将建在」那一行（3.0 刀 9 第二版）。它原本长在「边看边记」那一栏里；
+    // 那一栏撤了之后，这是**全应用唯一**还能改 `prefs.readerFolder` 的地方
+    // ——丢了它，建卡目录就永远停在用户上次挑的那一个上，再也改不动。
+    '<div class="kb-v13-reader-target">' +
+    '<span class="kb-v13-reader-target-lab">将建在</span>' +
+    '<button type="button" class="kb-v13-reader-target-pick" id="kb-reader-target"' +
+    ' aria-expanded="false" title="挑一个文件夹；默认跟着文献所在的文件夹走"></button>' +
+    "</div>" +
     "</div>" +
     '<div class="kb-v13-reader-main">' +
     // 收纳栏（3.0 刀 18）。
@@ -436,62 +521,28 @@ export function createReader(ctx, opts = {}) {
     // 自成一个层叠上下文——所以桌面上的窗压得住阅读器自己的内容，
     // 却又不会跑到 tooltip 上面去。
     '<div class="kb-v13-reader-desk" id="kb-reader-desk"></div>' +
-    '<div class="kb-v13-reader-side" id="kb-reader-side">' +
-    '<div class="kb-v13-reader-side-hd">边看边记</div>' +
-    '<label class="kb-v13-reader-field"><span>卡片名</span>' +
-    '<input type="text" id="kb-reader-name" placeholder="比如：抽样定理" autocomplete="off"></label>' +
-    '<label class="kb-v13-reader-field"><span>概念</span>' +
-    '<input type="text" id="kb-reader-concept" placeholder="一句话说清它是什么" autocomplete="off"></label>' +
-    '<label class="kb-v13-reader-field"><span>来源</span>' +
-    '<input type="text" id="kb-reader-source" autocomplete="off"></label>' +
-    // ⚠️ 这一格是**故意**留着 `<textarea>` 的，不是漏了接 `mountEditor`
-    // （3.0 刀 9 第三版，用户 09-17 拍板）。
+    // ── 3.0 刀 43（用户 10-07）：「边看边记」那一栏整条撤掉 ──────────────
     //
-    // 宿主那个原生编辑器是**文件视图**——它必须挂在一个**真实存在的文件**上。
-    // 而这一格背后是一张**还没建出来的卡**（名字、概念、正文都还只是表单里的值，
-    // 点「存进晶体库」才落盘），没有文件可挂。宿主那边也没有「无文件的编辑器」
-    // 这种东西：Obsidian 里要写一篇笔记，就是先建出那个文件。
+    // 它里面的东西**一样没丢，全搬了家**：
+    //   · 卡片名 / 概念 / 来源 / 正文 / 存进晶体库 → 顶栏「新建卡片」摊开的那个框
+    //   · 新建晶体 / 删除晶体 / 重命名晶体 / 重命名卡片 / 删除卡片
+    //     → 顶栏「文件改动」那颗下拉
+    //   · 「将建在」文件夹选择 → 「更多」里面
     //
-    // 所以两条路摆在用户面前过：①「新建」时就把卡建出来摆到桌面上、在原生编辑器
-    // 里写（Obsidian 自己存盘，「存进晶体库」按钮退休）；②保持这个输入框。
-    // 用户选了 ②——它是「随手记一笔」，本来就等于新建笔记，先有文件反而多一步。
-    '<label class="kb-v13-reader-field kb-v13-reader-field-body"><span>正文</span>' +
-    '<textarea id="kb-reader-body" placeholder="读到什么就记什么；双链直接写 [[]]"></textarea></label>' +
-    // 「在编辑器里写」（3.0 刀 9 第三版）。用户 09-18 要的：正文那一格也用 Obsidian
-    // 原生的 markdown 实时渲染编辑器。上面那段写着「没有文件可挂」——那是真的，
-    // 所以这一颗按钮做的事就是**先把文件建出来**：用上面填的卡片名与概念/来源建一张
-    // 空正文的卡，然后把正文那一格换成绑这张卡的宿主编辑器。
+    // 两样是**真删了**，不是搬家：
+    //   · `✎ 在编辑器里写`（连同它那一套「返回 = 把刚建的卡撤掉」）
+    //     —— 建卡从此只有一条路。两条路各有一套"卡建到一半"的善后，
+    //     而那一套本来就只为它自己存在。
+    //   · 草稿纸 —— 它的起名框就长在这一栏里，栏没了它无处落脚。
+    //     （`ensureScratchNamed` 那些留着，见文件后半段那几条注释。）
     //
-    // 这一步之后**写盘归宿主**（它随编辑自动存盘），所以底下的「存进晶体库」跟着收起来
-    // ——卡已经建出来了，再点一次只会报「已经有一张叫…的卡」。要记下一张，点「写下一张」。
-    '<div class="kb-v13-reader-nativebar">' +
-    '<button type="button" class="kb-v13-reader-nativeopen" id="kb-reader-nativeopen"' +
-    ' title="按上面的卡片名先把这张卡建出来，正文改用 Obsidian 自己的编辑器写（边写边渲染、自动存盘）">✎ 在编辑器里写</button>' +
-    '<button type="button" class="kb-v13-reader-nativeback" id="kb-reader-nativeback">写下一张</button>' +
-    // 3.0 刀 12 第二半「返回」（用户 09-19）：**撤掉刚建出来的那张卡**，
-    // 正文原封不动转进草稿纸。排在「写下一张」右边——两颗都是「离开这台编辑器」，
-    // 但一颗是**继续**（卡留着）、一颗是**反悔**（卡删掉）。
-    '<button type="button" class="kb-v13-reader-nativeback" id="kb-reader-nativereturn"' +
-    ' title="撤掉刚建出来的这张卡（进回收站），正文转进草稿纸——一个字不丢。">返回</button>' +
-    '</div>' +
-    '<div class="kb-v13-reader-nativehost" id="kb-reader-nativehost"></div>' +
-    // 草稿纸那条（3.0 刀 12 第二半）。与上面那条**共用 nativehost**——
-    // 两者互斥（开着这个就开不了那个），共用一块地方最简单。
-    // 起名那一步（用户 09-20）：草稿纸**不是**固定叫 `_`，是让用户起名的一张卡，
-    // 落在「草稿纸」那颗晶体里。所以先摊开一个输入框，回车才开写。
-    '<div class="kb-v13-reader-scratchform" id="kb-reader-scratchform">' +
-    '<input type="text" id="kb-reader-scratch-name" placeholder="草稿纸名（= 一张卡）" autocomplete="off">' +
-    '<button type="button" class="kb-v13-reader-scratchgo" id="kb-reader-scratch-go">写</button>' +
-    '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratch-cancel">取消</button>' +
-    '</div>' +
-    // 「将建在」那一行（3.0 刀 9 第二版）。从前它是一句死文案「将建在：文献/xxx/」，
-    // 卡只能长在文献自己那个文件夹里。用户要的是**自己挑一个文件夹**，
-    // 而且挑的那个界面要复用首页「文件夹」面板那棵树。
-    '<div class="kb-v13-reader-target">' +
-    '<span class="kb-v13-reader-target-lab">将建在</span>' +
-    '<button type="button" class="kb-v13-reader-target-pick" id="kb-reader-target"' +
-    ' aria-expanded="false" title="挑一个文件夹；默认跟着文献所在的文件夹走"></button>' +
-    "</div>" +
+    // ⚠️ **下面三块必须留着，而且就在原地**（它们是 `.kb-v13-reader-main` 的子项，
+    // 靠 CSS 绝对定位浮在自己那一层，不参与 flex 排布）：
+    //   · `#kb-reader-folderpick` —— 那棵树。**入口根本不止这一栏里那几颗**：
+    //     顶栏「故事线」、结构窗的「换晶体」「导入卡片」都走它。跟着删 = 全死。
+    //   · `#kb-reader-msg` —— `say()` 的话全写这儿，`return.message()` 也认它。
+    //   · `#kb-reader-newcrystal` —— 删除那几路的「确认删除」按钮就长在它的 msg 里。
+
     '<div class="kb-v13-reader-folderpick" id="kb-reader-folderpick">' +
     // 这句抬头两档共用（见 folderPick.purpose）：挑建卡的文件夹 / 挑看故事线的晶体。
     // 文案由 openFolderPick 每次改写，别在 HTML 里写死。
@@ -512,30 +563,26 @@ export function createReader(ctx, opts = {}) {
     ' placeholder="搜文件夹" autocomplete="off" aria-label="搜文件夹">' +
     '<div class="kb-v13-op-body" id="kb-reader-folderbody"></div>' +
     "</div>" +
-    '<button type="button" class="kb-v13-reader-save" id="kb-reader-save">存进晶体库</button>' +
     '<div class="kb-v13-reader-msg" id="kb-reader-msg"></div>' +
-    // 新建晶体（3.0 刀 9 第三版）。读着文献当场开一颗新晶体装接下来的卡，
-    // 不必先回晶体库、回文件管理器。**建在「将建在」那个文件夹里面**（用户 09-18 选的），
-    // 所以它跟着上面那行走——想建哪里，先把「将建在」指到哪儿。
+    // 新建晶体 / 重命名那一路的表单（3.0 刀 9 第三版，3.0 刀 21 起双用）。
+    //
+    // ⚠️ **那一排五颗按钮 3.0 刀 43 搬去了顶栏「文件改动」下拉**，这里只剩
+    // 表单和提示行。表单仍然归这个盒子管——`closeNewCrystal` 摘的是它的 `.open`。
+    //
+    // ⚠️ 提示行（`sayNewCrystal`）**不能跟着按钮一起搬走**：删除那几路的
+    // 「确认删除 / 取消」两颗就渲染在它里面（`sayNewCrystal` 的 `actions`），
+    // 而删除的入口现在是下拉里的一颗——提示得留在**看得见的地方**。
+    // 它跟着这个盒子绝对定位浮在阅读区上面，见 styles.js 里那两条。
     '<div class="kb-v13-newcrystal" id="kb-reader-newcrystal">' +
-    // 3.0 刀 12：新建在左、删除在右（用户 09-19 点名要的位置）。
-    '<div class="kb-v13-newcrystal-row">' +
-    '<button type="button" class="kb-v13-newcrystal-open" id="kb-reader-newcrystal-open">＋ 新建晶体</button>' +
-    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystaldel"' +
-    ' title="删掉一颗晶体（连同里面的卡片）。走回收站——按你在「文件与链接 → 删除的文件」里选的那一档，能捡回来。">删除晶体</button>' +
-    // 3.0 刀 21（用户 09-24）：重命名并进删除那一对。
-    // 顺序是「新建 → 改名 → 删除」，读下来是一条顺的动作线。
-    // 四颗都用 `.kb-v13-newcrystal-del` 的样式——**它们都会动用户的东西**，
-    // 长得一样反而是诚实的。
-    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-crystalrename"' +
-    ' title="给一颗晶体（= 一个文件夹）改名。走 Obsidian 自己的改名通道，' +
-    '全库指向里面卡片的 [[双链]] 不受影响。">重命名晶体</button>' +
-    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-cardrename"' +
-    ' title="给一张卡片改名。走 Obsidian 自己的改名通道——别的卡片里指向它的 ' +
-    '[[双链]] 会一起跟着改。">重命名卡片</button>' +
-    // 3.0 刀 12 第三版（用户 09-20）：「删除晶体」旁边加「删除卡片」。
-    '<button type="button" class="kb-v13-newcrystal-del" id="kb-reader-carddel"' +
-    ' title="删掉一张卡片（不碰它所在的那颗晶体）。同样走回收站。">删除卡片</button>' +
+    // 草稿纸的起名框（3.0 刀 12 第二半，用户 09-20）。**3.0 刀 43 从那一栏搬到这里。**
+    //
+    // ⚠️ **草稿纸这个功能没删**，只是它起名那一步原来长在「边看边记」那一栏里，
+    // 而那一栏整个撤了。这个盒子是阅读器里唯一一块"浮着的、可以放表单的地方"
+    // （删除那几路的确认按钮也在这里），所以它搬进来最省事。
+    '<div class="kb-v13-reader-scratchform" id="kb-reader-scratchform">' +
+    '<input type="text" id="kb-reader-scratch-name" placeholder="草稿纸名（= 一张卡）" autocomplete="off">' +
+    '<button type="button" class="kb-v13-reader-scratchgo" id="kb-reader-scratch-go">写</button>' +
+    '<button type="button" class="kb-v13-reader-scratchback" id="kb-reader-scratch-cancel">取消</button>' +
     '</div>' +
     '<div class="kb-v13-newcrystal-form" id="kb-reader-newcrystal-form">' +
     '<input type="text" id="kb-reader-newcrystal-name" placeholder="晶体名（= 一个文件夹）" autocomplete="off">' +
@@ -544,7 +591,12 @@ export function createReader(ctx, opts = {}) {
     '</div>' +
     '<div class="kb-v13-newcrystal-msg" id="kb-reader-newcrystal-msg"></div>' +
     '</div>' +
-    "</div>" +
+    // ⚠️ 这里从前还有一颗 `"</div>"` —— 它关的是「边看边记」那一栏的外壳。
+    // 外壳 3.0 刀 43 撤了，**这一颗必须跟着走**：留着它就会把
+    // `.kb-v13-reader-main` 提前关掉，下面的浮窗宿主、hold、文献选择器
+    // 全变成 main 的**兄弟**——而选择器是 `inset:0` 铺满 main 那一层的，
+    // 跑到外面就盖不住任何东西，症状是「换一份」点了不出东西。
+    //
     // 浮窗宿主（3.0 刀 9-B 卡片盒）。
     //
     // ⚠️ **必须挂在 `#kb-reader` 里面**，不能像别处那样用默认的 `ctx.overlay`。
@@ -573,10 +625,7 @@ export function createReader(ctx, opts = {}) {
   const pickerEl = $("kb-reader-picker");
   const docListEl = $("kb-reader-doclist");
   const searchEl = $("kb-reader-search");
-  const titleEl = $("kb-reader-title");
-  const countEl = $("kb-reader-count");
   const msgEl = $("kb-reader-msg");
-  const sideEl = $("kb-reader-side");
   const targetBtn = $("kb-reader-target");
   const folderSearch = $("kb-reader-foldersearch");
   const newCrystalBox = $("kb-reader-newcrystal");
@@ -584,7 +633,6 @@ export function createReader(ctx, opts = {}) {
   const newCrystalName = $("kb-reader-newcrystal-name");
   const newCrystalGo = $("kb-reader-newcrystal-go");
   const newCrystalMsg = $("kb-reader-newcrystal-msg");
-  const nativeHost = $("kb-reader-nativehost");
   const nameEl = $("kb-reader-name");
   const conceptEl = $("kb-reader-concept");
   const sourceEl = $("kb-reader-source");
@@ -600,7 +648,15 @@ export function createReader(ctx, opts = {}) {
   const dockEl = $("kb-reader-dock");
   const dockListEl = $("kb-reader-docklist");
   const dockBtn = $("kb-reader-dockbtn");
-  const sideBtn = $("kb-reader-sidebtn");
+  // 3.0 刀 43：顶栏新添的两颗，以及它们各自带的那两摊东西。
+  //   · 文件改动 —— 那颗按钮 + 它下面那个浮层菜单（五颗文件操作）
+  //   · 新建卡片 —— 那颗按钮 + 它右边摊开的框（正文 / 更多 / 存进晶体库）
+  const fileOpsBtn = $("kb-reader-fileops");
+  const fileMenuEl = $("kb-reader-filemenu");
+  const newCardBtn = $("kb-reader-newcard");
+  const composeEl = $("kb-reader-compose");
+  const moreBtn = $("kb-reader-more");
+  const moreBox = $("kb-reader-morebox");
   // 3.0 刀 38：顶栏收起那颗，以及顶栏本身（`paintTop` 要挂类）。
   const topFoldBtn = $("kb-reader-topfold");
   const barEl = el.querySelector(".kb-v13-reader-bar");
@@ -699,14 +755,8 @@ export function createReader(ctx, opts = {}) {
   function refreshBar() {
     const total = pageCount();
     const per = st.grid.per;
-    const { from, to } = pageRange(st.offset, per, total);
-    const screens = screenCount(total, per);
-    const cur = total ? Math.floor(st.offset / per) + 1 : 0;
-
-    titleEl.textContent = st.doc ? st.doc.name : "文献";
-    countEl.textContent = total
-      ? "第 " + from + "–" + to + " 页 / 共 " + total + " 页 · 第 " + cur + "/" + screens + " 屏"
-      : "";
+    // ⚠️ `from / to / screens / cur` 原本在这里算出来喂那颗计数。计数撤掉之后
+    // 它们一个用处都没有了，**不要留**——留着会让下一个人以为还有谁在等它们。
     // 按钮的可用性跟着**结果**走，不跟着「有没有下一页」猜：停用态是用户唯一
     // 能看出「到头了」的地方，而点了没反应是这个库里最不受欢迎的一种反馈。
     prevBtn.disabled = !total || st.offset <= 0;
@@ -714,37 +764,39 @@ export function createReader(ctx, opts = {}) {
     zoomVal.textContent = Math.round(st.zoom * 100) + "%";
     zoomIn.disabled = st.zoom >= 3;
     zoomOut.disabled = st.zoom <= 0.4;
+    paintMode();
     paintTargetFolder();
-    paintSide();
   }
 
   /**
-   * 「边看边记」那一栏露不露（3.0 刀 18）。
+   * 3.0 刀 43（用户 10-07）：**顶栏那两组控件各归各的模式。**
    *
-   * 三个调用点原来各写各的 `classList`，加了「用户收起来」这一档之后必须收口：
-   * 口径一旦分成三份，就会出现「关掉文件夹树之后右边多出一栏空的」——那种坏法
-   * 看着像布局坏了，查起来要绕远路（`hideFolderPick` 里原来就写着这条）。
+   * 桌面档：`‹上一屏 / 下一屏 / － / 100% / ＋` **收起来**——它们控制的正是页阵，
+   * 而桌面一开 `#kb-reader-sheets` 就 `display:none` 了（见 `refreshDeskUi`）。
+   * 留着它们不只是噪音：**它们控制的东西已经不在屏幕上了**，点下去只会
+   * 改一个看不见的偏移量。
    *
-   * @param {boolean} [force] 这一趟**不管用户收没收**都要亮出来。给「换一份」
-   *   的文件夹树用：它长在这一栏里，而挑晶体的两颗按钮在顶栏永远点得到——
-   *   拦着不亮的话，树会「打开」在一块看不见的地方，表现就是点了没反应。
-   *   **不动 `st.sideTucked`**：树收起来时那一栏该回到用户收成的样子，不是
-   *   被这一趟顺手改了主意。
+   * 页阵档：反过来，`＋ 页` 收起来。它只往**桌面**上摆页（`addDeskPage`），
+   * 桌面没开时它按下去本来也只能是 `disabled`——一颗永远按不动的按钮不如不摆。
+   *
+   * ⚠️ 这条与 `refreshDeskUi` 里那句 `addPageBtn.disabled` **不重复**：
+   * 那句管"按不按得动"，这句管"在不在"。两句都要有——收起态的按钮是
+   * `display:none`，而 `disabled` 只对看得见的按钮有意义。
    */
-  function paintSide(force) {
-    sideEl.classList.toggle("kb-v13-reader-side-off", !st.doc);
-    // 收起走的是**另一个类**，不是 `-off`：那个是 `display:none`（没文献，
-    // 该当场消失），这个是宽度过渡（用户自己收的，该「挤」回去）。
-    sideEl.classList.toggle("kb-v13-reader-side-tucked", !!st.doc && !!st.sideTucked && !force);
-    // 按钮跟着画。放在这里而不是 `setSideTucked` 里，是为了「没文献」那条路也对：
-    // 一份文献都没开时那一栏是藏着的，而按钮亮着会让人以为是自己收的。
-    sideBtn.setAttribute("aria-pressed", st.sideTucked ? "true" : "false");
-    sideBtn.classList.toggle("kb-v13-reader-nav-on", !!st.sideTucked);
+  function paintMode() {
+    const onDesk = !!desk.on;
+    for (const b of [prevBtn, nextBtn, zoomOut, zoomVal, zoomIn]) {
+      b.classList.toggle("kb-v13-reader-nav-off", onDesk);
+    }
+    addPageBtn.classList.toggle("kb-v13-reader-nav-off", !onDesk);
   }
 
   /**
-   * 3.0 刀 38：**把顶栏收起来**（用户 09-29）。和 `paintSide` 一个套路——
-   * 收起走一个类、由 CSS 做过过渡，这里只负责挂类。
+   * 3.0 刀 38：**把顶栏收起来**（用户 09-29）。和「边看边记」那一栏当年一个套路
+   * ——收起走一个类、由 CSS 做过过渡，这里只负责挂类。
+   *
+   * ⚠️ 那一栏 3.0 刀 43 整个撤了，所以 `paintSide` / `setSideTucked` /
+   * `st.sideTucked` 三样一起没了。**别把它们加回来**：那一栏现在一个元素都不剩。
    *
    * ⚠️ **桌面那一块不用自己算**：它是 `bar` 后面的 flex 兄弟，顶栏一矮它自己就高，
    * 于是结构窗/页面窗能摆到原先顶栏占的位置上——「展开时碰不到、收起时碰得到」
@@ -769,16 +821,6 @@ export function createReader(ctx, opts = {}) {
     if (next === st.topTucked) return;
     st.topTucked = next;
     paintTop();
-  }
-
-  function setSideTucked(on) {
-    const next = !!on;
-    if (next === st.sideTucked) return;
-    st.sideTucked = next;
-    paintSide();
-    // 宽度是**过渡**过去的，`transitionend` 那一头会补一次重新排布（见下面
-    // 那个监听）。这里不重复调——过渡中间量到的宽度是个不存在的几何，
-    // 拿它算出来的网格和夹取都是废的（`styles.js` 里卫星那条记过同一类坑）。
   }
 
   // ---- 翻页 ----
@@ -2445,6 +2487,11 @@ export function createReader(ctx, opts = {}) {
     deskEl.classList.toggle("on", desk.on);
     sheetsEl.classList.toggle("kb-v13-reader-sheets-off", desk.on);
     addPageBtn.disabled = !desk.on || !st.doc;
+    // 顶栏那两组控件跟着换班（见 `paintMode`）。**必须挂在这儿**，不能只在
+    // `setDeskMode` 里调——`refreshDeskUi` 有十来个调用点，而它们里有一部分
+    // （`closeDesk`、`restoreDesk`）会**绕过 `setDeskMode` 直接改 `desk.on`**，
+    // 挂错地方就会留下「桌面关了、翻页那几颗还没回来」。
+    paintMode();
     // 收口在这儿：凡是「窗的名单变了」「某扇窗收进/拿出了」的路径都会走到
     // `refreshDeskUi`，栏跟着重画一遍就不会有落后于模型的时候。
     refreshDock();
@@ -3148,8 +3195,12 @@ export function createReader(ctx, opts = {}) {
   //   "story"        —— 挑看哪颗晶体的故事线，选中直接落进那颗晶体。
   // 之所以不是两套 DOM：用户点名要的就是「复用首页文件夹那棵树」，
   // 而且两边要看的本来就是同一批晶体/文件夹，分开画只会长出两处要同步的代码。
-  // 草稿纸那台编辑器（3.0 刀 12 第二半）。null = 没开着。
-  let scratch = null;
+  // ⚠️ 3.0 刀 43 删了 `let scratch = null`（草稿纸那台宿主编辑器）。
+  // 它在刀 12 把草稿纸改成"摆到桌面上一扇真卡的窗"之后就**一直是 null**——
+  // 留着它等于留一个永远不成立的状态位。
+  //
+  // 同刀删了 `paintComposeMode`（它切的是 `kb-v13-reader-native-on`，
+  // 而那个类和「在编辑器里写」一起没了）。
 
   const folderPick = { query: "", open: new Set(), el: null, body: null, purpose: "target" };
 
@@ -3157,11 +3208,6 @@ export function createReader(ctx, opts = {}) {
   function targetFolder() {
     const saved = ctx.state && ctx.state.prefs ? toStr(ctx.state.prefs.readerFolder) : "";
     return saved || (st.doc ? toStr(st.doc.folder) : "");
-  }
-
-  /** 这一栏现在在「填表单」还是「宿主编辑器」那一档——两档的按钮与字段不一样。 */
-  function paintComposeMode() {
-    sideEl.classList.toggle("kb-v13-reader-native-on", !!nativeCompose);
   }
 
   function paintTargetFolder() {
@@ -3253,16 +3299,15 @@ export function createReader(ctx, opts = {}) {
   }
 
   function hideFolderPick() {
-    // 收尾与开场**必须用同一个判据**（`pickNeedsSide`）：两边一旦不一样，
-    // 就会出现「关掉树之后右边多出一栏空的」或者「该还回来的那层没还」。
-    const wasStory = pickNeedsSide(folderPick.purpose);
+    // 收尾与开场**必须用同一个判据**（`pickHidesPicker`）：两边一旦不一样，
+    // 就会出现「该还回来的那层没还」。
+    const wasStory = pickHidesPicker(folderPick.purpose);
     folderPick.el.classList.remove("open");
     targetBtn.setAttribute("aria-expanded", "false");
-    // 把上面 openFolderPick 临时点亮的那一栏还回去。判据收口在 `paintSide` 里
-    // （没文献就藏、用户收过就还收着），不另立规则——两处口径一旦不一样，
-    // 就会出现「关掉树之后右边多出一栏空的」，而那种坏法看着像布局坏了，
-    // 查起来要绕远路。
-    paintSide();
+    // ⚠️ 3.0 刀 43：这里原本还有一句 `paintSide()`——它把刚才被
+    // `openFolderPick` 临时点亮的那一栏还回去。那一栏整个撤了，
+    // 树现在浮在阅读区上面，**不需要谁替它腾地方**。
+    //
     // 顺手把刚才请走的那一层还回来（只有「什么都没打开」时才需要它）。
     // 阅读器已经挂起/关掉时不做——那会儿屏幕上不该再冒出任何东西，
     // 该由 resume() 按 open() 同一条规矩摆回来。
@@ -3297,28 +3342,24 @@ export function createReader(ctx, opts = {}) {
   /** 这一档挑的是**卡片**（收 path），树里要保留卡片那一级。 */
   const pickIsCard = (p) => p === "deletecard" || p === "renamecard" || p === "importcard";
   /**
-   * 这几档的**入口不在「边看边记」那一栏里**，所以得先把那一栏请出来
-   * ——树长在那儿，而那一栏没有文献时是整块藏着的（见 `openFolderPick` 里那段）。
+   * 这几档**要先把「选哪份文献」那一层请走**。
+   *
+   * ⚠️ 3.0 刀 43 之前这条叫 `pickNeedsSide`——那时树长在「边看边记」那一栏里，
+   * 而那一栏没文献时整块藏着，所以挑晶体的几档得先把**那一栏**请出来。
+   * 那一栏撤了，树现在浮在阅读区上面，**"请出那一栏"这半件事没有了**；
+   * 剩下的是另半件——「选哪份文献」那层是 `inset:0` 铺满整个页区的，
+   * 它盖着的时候（一份文献都没开）树点不到，症状和「这颗按钮坏了」一模一样。
    *
    * ⚠️ 不能直接写成 `pickIsCrystal(p) || pickIsCard(p)`：删除卡片 / 重命名卡片
-   * 那两颗按钮**就长在那一栏里**，点得到它们说明那一栏开着，多请一次是白跑；
-   * 而更要紧的是那两档现在**不该**顺手 `hidePicker()`——那个动作有副作用
-   * （把"选哪份文献"那层请走），改的是它们今天的行为。
+   * 那两档**不该**顺手 `hidePicker()`——那个动作有副作用（把"选哪份文献"
+   * 那层请走），而它们本来打开时那层通常已经不在，改的是它们今天的行为。
    */
-  const pickNeedsSide = (p) => pickIsCrystal(p) || p === "importcard";
+  const pickHidesPicker = (p) => pickIsCrystal(p) || p === "importcard";
 
   /** 打开这棵树。`purpose` 见 folderPick 那只常量上面那段。 */
   function openFolderPick(purpose) {
     folderPick.purpose = PICK_TEXT[purpose] ? purpose : "target";
-    const byCrystal = pickNeedsSide(folderPick.purpose);
-    // 那棵树长在「边看边记」这一栏里，而这一栏**没有文献时是整块藏着的**
-    // （见 refreshBar 最后一行）。挑晶体那两颗按钮却在顶栏、永远点得到——
-    // 一份文献都没开就点它的话，树会「打开」在一栏看不见的地方，表现就是
-    // 点了没反应。所以这两档临时把那一栏亮出来，收起来时再还回去。
-    if (byCrystal) {
-      paintSide(true);
-      // 一份文献都没开的时候，整块屏盖着「选哪份文献」那一层。树就长在它底下，
-      // 不请走它就等于点不到——症状和「这颗按钮坏了」一模一样。
+    if (pickHidesPicker(folderPick.purpose)) {
       hidePicker();
     }
     const text = PICK_TEXT[folderPick.purpose];
@@ -3391,29 +3432,21 @@ export function createReader(ctx, opts = {}) {
     openFolderPick("story");
   }
 
-  // ---- 边看边记：在宿主编辑器里写（3.0 刀 9 第三版）----
+  // ---- 草稿纸（3.0 刀 12 第二半）----
   //
-  // 宿主那个编辑器是**文件视图**，必须挂在真实存在的文件上；而这一栏背后是一张
-  // **还没建出来的卡**。所以这条路的第一步是**把文件建出来**（这也是 Obsidian 自己
-  // 的做法：要写一篇笔记，先建出那篇笔记），建完再把正文那一格换成绑它的编辑器。
+  // 读文献时手边那块**用宿主原生编辑器写的便签**。落在宿主指定的草稿纸文件夹里。
   //
-  // 一旦切过去，**写盘就归宿主了**（它随编辑自动存盘），所以：
-  //   · 「存进晶体库」收起来——卡已经建出来了，再点只会报「已经有一张叫…的卡」；
-  //   · 正文不再走核心的 textarea，`nativeCompose.handle.getValue()` 是想读正文时的入口。
-  let nativeCompose = null; // { handle, path, title }
-
-  /** 把这一栏切回「填表单 → 存进晶体库」那一档。 */
-  /**
-   * 「草稿纸」（3.0 刀 12 第二半，用户 09-19）。
-   *
-   * 读文献时手边那块**用 Obsidian 原生编辑器写的便签**。它**不是卡片**：
-   * 落在宿主指定的草稿纸文件夹里、不参与晶体库的关系图。
-   *
-   * 和「在编辑器里写」的分工：那个是「我要建一张卡」，这个是「我先记下来再说」。
-   *
-   * ⚠️ **关掉不删文件**。它是常驻的便签——用户按「收起」的意思是「先不看了」，
-   * 不是「把刚才写的扔掉」。删的那条路在「返回」那边，而且只删**刚建出来的卡**。
-   */
+  // ⚠️ **它其实是一张真卡**（用户 09-20 拍板）：参与关系图、会出现在库里。
+  // 「草稿纸」只是它那一刻的用途，不是另一种文件。
+  //
+  // ⚠️ **关掉不删文件**。它是常驻的便签——用户按「收起」的意思是「先不看了」，
+  // 不是「把刚才写的扔掉」。
+  //
+  // ⚠️ **3.0 刀 43 它少了两样东西**：
+  //   · 起名那个框从「边看边记」那一栏搬到了浮层里（`#kb-reader-scratchform`）；
+  //   · 「在编辑器里写」那套（`nativeCompose`）整个删了——它和草稿纸**共用**
+  //     同一块宿主编辑器，而那一整套「先把文件建出来、写盘归宿主、点返回
+  //     就把刚建的卡删掉」的善后只为它自己存在。建卡从此只有「新建卡片」一条路。
   /** 一张草稿纸的路径。名字由用户给（用户 09-20）。 */
   function scratchPathOf(name) {
     return String(scratchSpec.folder).replace(/\/+$/, "") + "/" + safeFileName(name) + ".md";
@@ -3509,24 +3542,112 @@ export function createReader(ctx, opts = {}) {
    */
   function openScratchForm() {
     if (!scratchSpec) return;
-    if (nativeCompose) {
-      sayNewCrystal("先把上面那张卡写完（或者点「返回」）。", false);
-      return;
-    }
-    if (scratch) {
-      closeScratch(); // 已经开着 = 再点一下收起
+    // 已经开着 = 再点一下收起（同从前那一档的手感）
+    if (scratchForm.classList.contains("open")) {
+      hideScratchForm();
       return;
     }
     hideScratchForm();
     scratchForm.classList.add("open");
     scratchName.value = "";
     sayNewCrystal("", true);
+    paintOps();
     scratchName.focus();
   }
 
   function hideScratchForm() {
     scratchForm.classList.remove("open");
     scratchName.value = "";
+    paintOps();
+  }
+
+  /**
+   * 3.0 刀 43：**那块浮着的小面板什么时候露头。**
+   *
+   * 它装着三样东西（草稿纸起名框 / 新建·重命名晶体的表单 / `sayNewCrystal` 的话），
+   * 三样都可能是"这一刻才有的"。做成常驻的话，阅读区右上角会永远挂着一块空的
+   * 虚线框——而阅读器的默认状态应该是"什么都没有"。
+   *
+   * ⚠️ **必须是一个函数，不能在三个地方各判一次**：口径一旦分成三份，就会出现
+   * "表单收起来了、那块面板还在"或者"有话要说、却看不见"——后者尤其坏，
+   * 因为删除那几路的「确认删除」按钮就长在话里。
+   */
+  function paintOps() {
+    // ⚠️ 判的是**盒子**那个 `.open`，不是表单的。表单的显隐是 CSS 从盒子的
+    // `.open` 推出来的（`.kb-v13-newcrystal.open .kb-v13-newcrystal-form`），
+    // 表单自己**从来没有** `.open` 类——写成表单那一头，条件是恒假的。
+    const on =
+      newCrystalBox.classList.contains("open") ||
+      scratchForm.classList.contains("open") ||
+      !!newCrystalMsg.textContent.trim();
+    newCrystalBox.classList.toggle("on", on);
+  }
+
+  // ---- 3.0 刀 43：顶栏那两摊东西的开合 -------------------------------
+
+  /**
+   * 把一个浮层摆到某颗按钮的正下方。
+   *
+   * ⚠️ **必须现算，不能在 CSS 里写 `top:calc(100% + 6px)` 挂到按钮底下**：
+   * 两个浮层都挂在 `#kb-reader` 上（不在顶栏里，见模板那段），而顶栏是
+   * `flex-wrap:wrap` —— 窄窗口下它会换行，按钮的纵向位置就变了。
+   * 写死一个 `top` 的结果是「窗口一窄，菜单就飘到别处去」。
+   *
+   * ⚠️ 调用时机是**加完 `.open` 之后**：`offsetWidth` 要元素已经参与布局才量得到，
+   * 藏在 `display:none` 里量出来是 0，右对齐那条就会把它顶到容器外面去。
+   */
+  function placeUnder(node, anchor) {
+    const host = el.getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    const w = node.offsetWidth;
+    // 左边对齐按钮左缘，但**夹回容器里**（贴右边那颗按钮上时不能溢出）
+    const want = a.left - host.left;
+    node.style.left = Math.round(Math.max(8, Math.min(want, host.width - w - 8))) + "px";
+    node.style.top = Math.round(a.bottom - host.top + 6) + "px";
+  }
+
+  /** 「文件改动」那颗下拉。 */
+  function setFileMenu(on) {
+    const next = !!on;
+    fileMenuEl.classList.toggle("open", next);
+    fileOpsBtn.setAttribute("aria-expanded", next ? "true" : "false");
+    fileOpsBtn.classList.toggle("kb-v13-reader-nav-on", next);
+    if (next) placeUnder(fileMenuEl, fileOpsBtn);
+  }
+
+  function hideFileMenu() {
+    setFileMenu(false);
+  }
+
+  /**
+   * 「新建卡片」那颗右边摊开的框（用户 10-07 的原话："在这个按钮的右侧出现"）。
+   *
+   * ⚠️ **关掉不收内容**。框里可能已经有半句话了——用户点一下那颗按钮多半是
+   * "先看看"或者"腾点地方"，不是"我不要了"。要清空只有一条路：存下去
+   * （`submitCard` 成功之后清）。
+   */
+  function setCompose(on) {
+    const next = !!on;
+    composeEl.classList.toggle("on", next);
+    newCardBtn.setAttribute("aria-pressed", next ? "true" : "false");
+    newCardBtn.classList.toggle("kb-v13-reader-nav-on", next);
+    // 摊开就把光标放进去——这一格的整套意义就是"少点一下"，
+    // 摊开了还要用户再点一次输入框，那一下白省了。
+    if (next) {
+      try {
+        bodyEl.focus();
+      } catch (e) {
+        /* 聚焦失败无所谓 */
+      }
+    }
+  }
+
+  /** 「更多」那个折叠（卡片名 / 概念 / 来源 / 将建在）。 */
+  function setMore(on) {
+    const next = !!on;
+    moreBox.classList.toggle("open", next);
+    moreBtn.setAttribute("aria-expanded", next ? "true" : "false");
+    if (next) placeUnder(moreBox, moreBtn);
   }
 
   /** 起名那一步回车 / 点「写」。 */
@@ -3547,32 +3668,19 @@ export function createReader(ctx, opts = {}) {
     if (ok) sayNewCrystal("「" + name + "」开着——它是**一张真卡**，Obsidian 自己存盘。", true);
   }
 
-  /** 收起草稿纸。**不删文件**（见 openScratch 那段）。 */
-  function closeScratch() {
-    if (scratch) {
-      try {
-        scratch.handle.destroy(); // 背后挂着宿主一个视图对象，不摘就是每开一次漏一个
-      } catch (e) {
-        /* 收尾失败不该挡住界面 */
-      }
-      scratch = null;
-    }
-    sideEl.classList.remove("kb-v13-reader-scratch-on");
-    nativeHost.textContent = "";
-  }
+  // ⚠️ 3.0 刀 43 删掉了三样东西，**它们不是搬走，是没有了**：
+  //
+  //   · `closeScratch()` —— 它收的是那块**宿主编辑器**（`scratch` 那个变量），
+  //     而草稿纸从刀 12 起改成"摆到桌面上一扇真卡的窗"（`openScratchAt`），
+  //     那个变量**从那时起就一直是 null**。留着它等于留一个永远不跑的函数。
+  //   · `#kb-reader-nativehost` 那块挂宿主编辑器的地儿 —— 随「在编辑器里写」一起走。
+  //   · `「返回」= 撤掉刚建的卡 + 正文转草稿纸` —— 它只为「在编辑器里写」存在
+  //     （那条路一进去就把文件建出来了，才需要"反悔"这个出口）。**建卡不再有
+  //     半成品状态**：`submitCard` 要么整张写下去、要么什么都不写。
+  //
+  // 下面这两颗**留着**：删除晶体那几路要靠 `pendingDelete` 接 Esc，
+  // 而新建/重命名晶体那一套（刀 21 起双用）也还在。
 
-  /**
-   * 「返回」：**撤掉刚建出来的那张卡**，正文原封不动转进草稿纸。
-   *
-   * 用户 09-19 的原话：「删除刚才创建的文件，并且所有正文内容原封不动复制到编辑器中」。
-   *
-   * 这条要存在，是因为「在编辑器里写」**一进去就已经把文件建出来了**
-   * （宿主的编辑器是文件视图，没有文件挂不上）——所以写了两行发现不对、
-   * 想退回表单，会剩下一张半成品卡在库里。这个是那个的出口。
-   *
-   * ⚠️ 顺序：先**读正文**，再删文件，最后才动界面。反过来的话编辑器一拆就读不到了。
-   * ⚠️ 删卡走 `model.removeCard`（摘一张卡），**不是** `removeFolder`（那是摘一棵子树）。
-   */
   /** 有一件破坏性的事在等用户点头（目前只有「删除晶体」）。Esc 认它。 */
   let pendingDelete = null;
 
@@ -3581,219 +3689,6 @@ export function createReader(ctx, opts = {}) {
   // UI（用户 09-24 选的）。
   let newCrystalMode = "create"; // create | rename-crystal | rename-card
   let renameTarget = null; // 晶体那条收 **key**，卡片那条收 **path**（同删除那两档）
-
-  async function returnFromNativeCompose() {
-    const nc = nativeCompose;
-    if (!nc) return;
-    // 1) 先把正文抓出来——拆了编辑器就读不到了
-    // ⚠️ **契约里的编辑器句柄是 `getValue()`，不是 `value()`。**
-    // `value()` 是 `mountEditArea` 那层包装的口径（`saveDeskEdit` 用的是它），
-    // 而这里拿到的是**适配层直接给的** handle——两个不是同一个对象。
-    // 第一版写成 `.value()`，`try/catch` 把 TypeError 吃成空串：
-    // 卡删掉了、正文没了，**而且一声不响**。这是全流程最不能接受的一种收场。
-    let text = "";
-    try {
-      text = toStr(nc.handle.getValue());
-    } catch (e) {
-      text = "";
-    }
-    const title = nc.title;
-    const path = nc.path;
-
-    closeNativeCompose(true);
-
-    // 2) 删掉刚建出来的那张卡（回收站），模型跟着摘
-    let res = null;
-    try {
-      res = await adapter.trashFile(path);
-    } catch (e) {
-      res = { ok: false, reason: "error", message: (e && e.message) || String(e) };
-    }
-    if (!res || !res.ok) {
-      say("那张卡没删掉，" + (res && res.reason === "missing" ? "文件已经不在了。" : "它在库里还留着。"), false);
-      return;
-    }
-    if (ctx.model.removeCard) ctx.model.removeCard(path);
-    if (ctx.renderCrystals) ctx.renderCrystals();
-    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-    if (ctx.refreshOrphans) ctx.refreshOrphans();
-    if (ctx.refreshFolders) ctx.refreshFolders();
-
-    // 3) 正文转进草稿纸。**没有草稿纸位置就直接说清正文去哪了**——
-    //    静默丢掉用户刚写的东西是最不能接受的一种收场。
-    if (!scratchSpec || !text.trim()) {
-      say(
-        text.trim()
-          ? "「" + title + "」撤掉了，但这个宿主没有草稿纸——刚写的正文没了，对不住。"
-          : "「" + title + "」撤掉了。",
-        !text.trim()
-      );
-      return;
-    }
-    // 草稿纸里已经有东西就**接着写**，不覆盖——那是一张便签，不是一次性缓冲。
-    //
-    // 读旧内容走 `readBinary` + 解码：契约里只有这一个通用的「读文件」入口
-    // （`listDocs` 只列清单）。**读不到就当空的**——那样最坏是覆盖一张空便签，
-    // 而「因为读不了就干脆不写」会把用户刚写的正文扔掉，那个后果重得多。
-    let prev = "";
-    try {
-      const bytes = await adapter.readBinary(scratchPath);
-      if (bytes) prev = new TextDecoder().decode(bytes);
-    } catch (e) {
-      prev = "";
-    }
-    const content = prev.trim() ? prev.replace(/\s+$/, "") + "\n\n" + text : text;
-    // 草稿纸的名字 = **此时的卡片名 + 「草稿纸」**（用户 09-20）。
-    // 同名的那张已经有了就**不新建，直接写进去**——再点一次「返回」时不该长出一堆。
-    const scratchTitle = title + "草稿纸";
-    const ensured = await ensureScratchNamed(scratchTitle);
-    if (!ensured.ok) {
-      say("「" + title + "」撤掉了，但草稿纸没建起来，正文没能转过去。", false);
-      return;
-    }
-    const sPath = ensured.path;
-    // 那张草稿纸里已经有东西就接着写（读旧内容走 readBinary，见上面那段）
-    let prev2 = "";
-    try {
-      const bytes2 = await adapter.readBinary(sPath);
-      if (bytes2) prev2 = new TextDecoder().decode(bytes2);
-    } catch (e) {
-      prev2 = "";
-    }
-    const content2 = prev2.trim() ? prev2.replace(/\s+$/, "") + "\n\n" + text : text;
-    let w = null;
-    try {
-      w = await adapter.writeCard(sPath, content2, {});
-    } catch (e) {
-      w = { ok: false };
-    }
-    if (!w || !w.ok) {
-      say("「" + title + "」撤掉了，但正文没能写进草稿纸。", false);
-      return;
-    }
-    // 无论新建还是写进已有那张，**都直接把它打开**（用户 09-20）
-    const opened = await openScratchAt(sPath, scratchTitle);
-    say(
-      opened
-        ? "「" + title + "」撤掉了，正文转到草稿纸「" + scratchTitle + "」里了。"
-        : "「" + title + "」撤掉了，正文写进草稿纸了（但它没打开）。",
-      true
-    );
-  }
-
-  function closeNativeCompose(keepSource) {
-    if (nativeCompose) {
-      try {
-        nativeCompose.handle.destroy(); // 背后挂着宿主一个视图对象，不摘就是每开一次漏一个
-      } catch (e) {
-        /* 收尾失败不该挡住界面 */
-      }
-      nativeCompose = null;
-    }
-    sideEl.classList.remove("kb-v13-reader-native-on");
-    // ⚠️ 草稿纸开着时**不能清**——两者共用 nativeHost，清了就把它的编辑器摘了
-    if (!scratch) nativeHost.textContent = "";
-    nameEl.value = "";
-    conceptEl.value = "";
-    bodyEl.value = "";
-    if (!keepSource) sourceEl.value = "";
-  }
-
-  /**
-   * 建一张**空正文**的卡，然后把正文那一格换成绑它的宿主编辑器。
-   *
-   * 建卡那一段与 `submitCard` 是同一套（composeCard → createCard 的三态 → addCard
-   * → 重画），差别只有正文传空串——正文接下来由宿主写。
-   */
-  async function openNativeCompose() {
-    if (nativeCompose) return;
-    // 草稿纸和这台编辑器**共用同一块地方**（nativeHost），不能同时开。
-    // 不挡的话后开的那个会把先开的 DOM 顶掉，而先开的那个 handle 还挂着
-    // ——「关掉的时候收不干净」那类漏，症状是关阅读器时才炸。
-    if (scratch) closeScratch();
-    if (!st.doc) {
-      say("先选一份文献", false);
-      return;
-    }
-    const name = safeFileName(nameEl.value);
-    if (!name) {
-      say("先给这张卡起个名字", false);
-      nameEl.focus();
-      return;
-    }
-    const concept = conceptEl.value.trim();
-    const source = sourceEl.value.trim();
-    const content = composeCard({ 概念: concept, 来源: source, tags: [], body: "" });
-    let res;
-    try {
-      res = await adapter.createCard(name, content, targetFolder());
-    } catch (e) {
-      say("写不进去：" + ((e && e.message) || e), false);
-      return;
-    }
-    if (!res || !res.ok) {
-      say(
-        res && res.reason === "exists"
-          ? "已经有一张叫「" + name + "」的卡了，换个名字"
-          : res && res.reason === "error"
-            ? "写盘失败：" + toStr(res.message || "")
-            : "这张卡没能建起来",
-        false
-      );
-      return;
-    }
-    const path = toStr(res.path);
-    const card = ctx.model.addCard({
-      path,
-      folder: parentOf(path),
-      name: baseName(path).replace(/.md$/i, ""),
-      concept,
-      source,
-      tags: [],
-      content: toStr(res.content),
-    });
-
-    // 3.0 刀 34：**新卡摆到"你正看着的那一屏"的正中央**（用户 09-29 报的
-    // 「不建在当前窗口的中央…还要回去找」）。
-    //
-    // 两屏都试一遍：**结构窗在前**（阅读器开着的时候，它才是用户眼前那块），
-    // 然后才是晶体库那一屏的故事线。两边都**只在这张卡正好属于那一层时才摆**
-    // ——判断在 `placeNewCard` 里，摆到别处是没有意义的坐标。
-    // ⚠️ 排在 `renderCrystals` **前面**：那一趟会把这一屏整个重画掉，
-    // 位置得先定好，重画出来的才是摆好的样子。
-    const sw = desk.wins.find((w) => w.kind === "storyline");
-    const swRt = sw ? rtOf(sw.id) : null;
-    if (!(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
-
-    if (ctx.renderCrystals) ctx.renderCrystals();
-    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-    if (ctx.refreshOrphans) ctx.refreshOrphans();
-    if (ctx.refreshFolders) ctx.refreshFolders();
-
-    // 到这儿文件真的存在了，才轮到宿主编辑器。拿不到就明说——卡已经建好了，
-    // 用户可以回库里打开它写，功能没丢。
-    let handle = null;
-    try {
-      handle = await adapter.mountEditor(nativeHost, { path, line: 0, text: toStr(res.content) });
-    } catch (e) {
-      handle = null;
-    }
-    if (!handle) {
-      say("这张卡已经建好了（「" + (card ? card.title : name) + "」），但这个宿主没给出编辑器——回库里打开它写吧。", true);
-      nameEl.value = "";
-      conceptEl.value = "";
-      bodyEl.value = "";
-      return;
-    }
-    nativeCompose = { handle, path, title: card ? card.title : name };
-    sideEl.classList.add("kb-v13-reader-native-on");
-    say("「" + nativeCompose.title + "」已经建好了，正文由 Obsidian 自己存盘。", true);
-    try {
-      handle.focus();
-    } catch (e) {
-      /* 聚焦失败无所谓 */
-    }
-  }
 
   // ---- 新建晶体 ----
   //
@@ -3859,6 +3754,11 @@ export function createReader(ctx, opts = {}) {
       btn.addEventListener("click", act.onClick);
       newCrystalMsg.appendChild(btn);
     }
+    // ⚠️ **每一句话都要重算一次那块浮层露不露头**（见 `paintOps`）。
+    // 漏了这一步的坏法很具体：删除那一路「挑一颗要删的晶体」说完话，
+    // 那块面板还是 `display:none`——**树开着、提示看不见、确认按钮点不到**。
+    // 那两颗粒「确认删除 / 取消」就长在 `newCrystalMsg` 里。
+    paintOps();
   }
 
   /**
@@ -4385,7 +4285,7 @@ export function createReader(ctx, opts = {}) {
   }
 
   /**
-   * 把右栏那张表单存成一张真卡片。
+   * 把顶栏「新建卡片」那个框存成一张真卡片。
    *
    * 三件事的顺序不能换：
    *   1. `composeCard` 拼全文（YAML 的引号规则只有 frontmatter.js 那一份）
@@ -4395,26 +4295,44 @@ export function createReader(ctx, opts = {}) {
    *
    * 第 3 步漏了的话，症状是「卡建好了，但库里看不见」——而这一步没有任何东西
    * 会替你兜底（`applyExternalChange` 对不认识的路径是直接返回的）。
+   *
+   * ── 3.0 刀 43 改了两处口径（用户 10-07）──
+   *
+   * ① **不再要求先打开文献。** 从前第一条就是 `if (!st.doc) say("先选一份文献")`。
+   *    那颗按钮现在常驻顶栏，点得到它说明用户想记点什么——把他挡回去选文献，
+   *    记的那句话就没了。没文献时落点是 `prefs.readerFolder`，没有就落卡片根目录
+   *    （`adapter.createCard` 对空 folder 本来就回落到根，见 adapter.js）。
+   *
+   * ② **卡片名可以从正文第一行取。** 从前名字是必填；现在那一格收进了「更多」，
+   *    不填就取正文第一行——这一格的默认用法就是"打完正文直接存"。
+   *    取不出名字（正文是空的、或者整行都是 `#`/`[]` 这类被 `safeFileName`
+   *    吃光的字符）还是**要拦**：没有名字就没有文件。
    */
   async function submitCard() {
-    if (!st.doc) {
-      say("先选一份文献", false);
-      return null;
-    }
-    const name = safeFileName(nameEl.value);
+    const body = bodyEl.value;
+    const typed = safeFileName(nameEl.value);
+    // 正文第一行当名字。**先去掉行首的 markdown 记号**（`#`、`-`、`>`、
+    // `1.` 这些）——直接拿 `## 抽样定理` 去当文件名，卡在库里就叫「## 抽样定理」。
+    const firstLine = body
+      .split("\n")
+      .map((l) => l.replace(/^\s*(#{1,6}\s*|[-*+>]\s*|\d+[.)]\s*)/, "").trim())
+      .find((l) => l);
+    const name = typed || safeFileName(firstLine || "");
     if (!name) {
-      say("先给这张卡起个名字", false);
-      nameEl.focus();
+      say("写点什么，或者去「更多」里给这张卡起个名字", false);
+      if (!body.trim()) bodyEl.focus();
+      else nameEl.focus();
       return null;
     }
     const concept = conceptEl.value.trim();
     const source = sourceEl.value.trim();
-    const content = composeCard({ 概念: concept, 来源: source, tags: [], body: bodyEl.value });
+    const content = composeCard({ 概念: concept, 来源: source, tags: [], body });
 
     let res;
     try {
       // 目标文件夹是**用户挑的**（`prefs.readerFolder`），没挑过就跟着文献走
-      // ——老行为原样保留。见 `targetFolder()`。
+      // ——老行为原样保留。**两边都没有时 `targetFolder()` 回空串**，
+      // 适配层把空 folder 当"卡片根目录"（见 adapter.js 的 createCard）。
       res = await adapter.createCard(name, content, targetFolder());
     } catch (e) {
       say("写不进去：" + ((e && e.message) || e), false);
@@ -4466,12 +4384,15 @@ export function createReader(ctx, opts = {}) {
     if (ctx.refreshOrphans) ctx.refreshOrphans();
     if (ctx.refreshFolders) ctx.refreshFolders();
 
-    // 清掉卡名和正文、**留着来源**：边看边记是一串同一份文献里的小卡，
+    // 清掉卡名、概念和正文，**留着来源**：这一串卡通常出自同一份文献，
     // 每张都重打一遍来源是白费力气；而卡名和正文每张都不一样，留着反而要删。
+    //
+    // ⚠️ **存完不把那个框收起来**，光标回正文那一格。用户 10-07 要的是
+    // "读一句记一句"——记完一句紧接着是下一句，收起再点开是白加两道手续。
     nameEl.value = "";
     conceptEl.value = "";
     bodyEl.value = "";
-    nameEl.focus();
+    bodyEl.focus();
     say("已建：「" + card.title + "」→ " + (shortFolder(card.folder) || "卡片根目录"), true);
     return { ...card };
   }
@@ -4578,13 +4499,14 @@ export function createReader(ctx, opts = {}) {
   folderPick.body = $("kb-reader-folderbody");
   targetBtn.addEventListener("click", () => toggleFolderPick());
   // 3.0 刀 42（用户 09-30 第 2 条）：面板抬头那颗「取消」。
-  // 收尾交给 `hideFolderPick()`——它是**唯一**的关法，`aria-expanded`、还回
-  // 「边看边记」那一栏、把「选哪份文献」那层请回来，全在它里面。
-  // 自己写一遍 `classList.remove("open")` 的话，那颗「将建在」会永远停在
-  // 展开态（aria-expanded 还是 true），下次点它反而不开了。
+  // 收尾交给 `hideFolderPick()`——它是**唯一**的关法，`aria-expanded`、
+  // 把「选哪份文献」那层请回来，全在它里面。自己写一遍
+  // `classList.remove("open")` 的话，那颗「将建在」会永远停在展开态
+  // （aria-expanded 还是 true），下次点它反而不开了。
   $("kb-reader-foldercancel").addEventListener("click", () => hideFolderPick());
-  $("kb-reader-nativeopen").addEventListener("click", () => openNativeCompose());
-  // 草稿纸那两颗（宿主没给位置时那颗按钮压根不在，所以绑之前先问一句）
+  // 草稿纸那两颗（宿主没给位置时那颗按钮压根不在，所以绑之前先问一句）。
+  // ⚠️ 3.0 刀 43：起名框从「边看边记」那一栏搬进了浮层，但这两条绑定**一字没改**
+  // ——id 全留着，搬的只是它挂在谁的下面。
   if (scratchSpec) $("kb-reader-scratch").addEventListener("click", () => openScratchForm());
   $("kb-reader-scratch-go").addEventListener("click", () => startScratch());
   $("kb-reader-scratch-cancel").addEventListener("click", () => hideScratchForm());
@@ -4597,17 +4519,33 @@ export function createReader(ctx, opts = {}) {
       e.stopImmediatePropagation();
     }
   });
-  $("kb-reader-nativereturn").addEventListener("click", () => returnFromNativeCompose());
-  $("kb-reader-nativeback").addEventListener("click", () => {
-    closeNativeCompose(true); // 留着来源：边看边记是一串同一份文献里的小卡
-    say("", true);
+  // ── 3.0 刀 43：顶栏那两颗新按钮 ──────────────────────────────────────
+  //
+  // ⚠️ **五颗文件操作全部复用原来的函数**（`openNewCrystal` / `deleteCrystalFlow`
+  // / `deleteCardFlow` / `renameCardFlow` / `renameCrystalFlow`）——这一刀是搬家，
+  // 不是重写。点完先把菜单收起来，不然那一层会盖着接下来要弹出的树面板。
+  const pickFromMenu = (fn) => () => {
+    hideFileMenu();
+    fn();
+  };
+  $("kb-reader-fo-newcrystal").addEventListener("click", pickFromMenu(() => openNewCrystal()));
+  $("kb-reader-fo-delcrystal").addEventListener("click", pickFromMenu(() => deleteCrystalFlow()));
+  $("kb-reader-fo-delcard").addEventListener("click", pickFromMenu(() => deleteCardFlow()));
+  $("kb-reader-fo-renamecard").addEventListener("click", pickFromMenu(() => renameCardFlow()));
+  $("kb-reader-fo-renamecrystal").addEventListener("click", pickFromMenu(() => renameCrystalFlow()));
+  fileOpsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setFileMenu(!fileMenuEl.classList.contains("open"));
   });
-  $("kb-reader-newcrystal-open").addEventListener("click", () => openNewCrystal());
+  // 点菜单里的东西不该被"点别处"那条顺手收掉——它自己会收（见 `pickFromMenu`）。
+  fileMenuEl.addEventListener("pointerdown", (e) => e.stopPropagation());
+  // 「新建卡片」那颗是个开关：摊开 / 收起。
+  newCardBtn.addEventListener("click", () => setCompose(!composeEl.classList.contains("on")));
+  // 「更多」——卡片名 / 概念 / 来源 / 将建在（用户 10-07 选的那一档）。
+  moreBtn.addEventListener("click", () => {
+    setMore(!moreBox.classList.contains("open"));
+  });
   // 3.0 刀 21：重命名两颗。和删除那两颗同一套「先挑、再填、再确认」。
-  $("kb-reader-crystalrename").addEventListener("click", () => renameCrystalFlow());
-  $("kb-reader-cardrename").addEventListener("click", () => renameCardFlow());
-  $("kb-reader-crystaldel").addEventListener("click", () => deleteCrystalFlow());
-  $("kb-reader-carddel").addEventListener("click", () => deleteCardFlow());
   $("kb-reader-newcrystal-cancel").addEventListener("click", () => closeNewCrystal());
   $("kb-reader-newcrystal-go").addEventListener("click", () => createCrystal());
   // 输入框里的按键不许漏给阅读器（方向键会去翻屏、Esc 会关掉整块阅读器）。
@@ -4655,7 +4593,22 @@ export function createReader(ctx, opts = {}) {
       else if (folderPick.purpose === "crystal") chooseStoryCrystal(node.key);
       else if (folderPick.purpose === "delete") confirmDeleteCrystal(node.key);
       else if (folderPick.purpose === "renamecrystal") startRenameCrystal(node);
-      else chooseFolder(node.folder);
+      else if (folderPick.purpose === "target") chooseFolder(node.folder);
+      // ⚠️ 3.0 刀 43：**这里从前是一个没有守卫的 `else`，现在不是了。**
+      //
+      // 从前写成 `else chooseFolder(node.folder)`，意思是"剩下那档就是 target"。
+      // 那个写法有一个很坏的坏法：**任何漏加的 purpose 会被静默当成"设定建卡目录"**
+      // ——点一下「重命名晶体」却把建卡目录改了，屏幕上什么都不说，而用户的
+      // 设置已经变了。（3.0 刀 31 那次"导入卡片"踩的正是这个洞，见上面那段注释。）
+      //
+      // 现在把 `target` **显式写出来**，剩下的落进一个会说话、会留痕的分支。
+      // 它不该有触发路径（`openFolderPick` 会把不认识的 purpose 归一到 `target`），
+      // 所以真走到这儿 = 有人加了新档却忘了在这儿接上——那要**当场说出来**，
+      // 而不是替用户猜他想要哪一档。
+      else {
+        console.error("[晶体库] 文件夹树：这个 purpose 没接「点文件夹」这一下 =", folderPick.purpose);
+        sayNewCrystal("这个操作没接上文件夹树，先别继续——它什么都没改。", false);
+      }
       return;
     }
     // 卡片那一行（只有「删除哪张卡」「重命名哪张卡」这两档树里才有它）
@@ -4663,6 +4616,13 @@ export function createReader(ctx, opts = {}) {
       if (folderPick.purpose === "deletecard") confirmDeleteCard(hit.path);
       else if (folderPick.purpose === "renamecard") startRenameCard(hit.path);
       else if (folderPick.purpose === "importcard") importCardToStory(hit.path);
+      // 同上：能看见卡片行说明这一档该认卡片，认不出来就是接漏了。
+      // 这条没有"静默改设置"那么坏，但它同样属于**点了没反应**——
+      // 本仓最不受欢迎的一种反馈。
+      else {
+        console.error("[晶体库] 文件夹树：这个 purpose 没接「点卡片」这一下 =", folderPick.purpose);
+        sayNewCrystal("这个操作没接上卡片，先别继续——它什么都没改。", false);
+      }
       return;
     }
     if (hit.kind !== "toggle") return;
@@ -4671,14 +4631,14 @@ export function createReader(ctx, opts = {}) {
     renderFolderPick();
   });
   deskBtn.addEventListener("click", () => setDeskMode(!desk.on));
-  // 3.0 刀 18。两颗一起看：一颗收窗、一颗收栏，都是「把地方腾出来读」。
+  // 3.0 刀 18。收纳栏那颗。**「边看边记」那颗 3.0 刀 43 删了**——那一栏没有了，
+  // 按钮留着就是一颗按了空转的开关。
   dockBtn.addEventListener("click", () => setDockMode(!st.dockOn));
-  sideBtn.addEventListener("click", () => setSideTucked(!st.sideTucked));
   topFoldBtn.addEventListener("click", () => setTopTucked(!st.topTucked));
-  // 顶栏高度是**过渡**过去的（同「边看边记」那条）。过渡走完再夹一遍桌面窗——
-  // 桌面变矮之后，绝对定位的窗不会自己动，得有人把它们推下来。
+  // 顶栏高度是**过渡**过去的。过渡走完再夹一遍桌面窗——桌面变矮之后，
+  // 绝对定位的窗不会自己动，得有人把它们推下来。
   // ⚠️ **绝不能在过渡中间夹**：那会儿 `deskBounds()` 量到的是一个不存在的几何，
-  // 算出来的盒子全落在错误的位置上（`sideEl` 那条监听记过同一件事）。
+  // 算出来的盒子全落在错误的位置上。
   barEl.addEventListener("transitionend", (e) => {
     if (e.target !== barEl || e.propertyName !== "height") return;
     resizeNow();
@@ -4694,14 +4654,9 @@ export function createReader(ctx, opts = {}) {
     if (e.key === "Enter") commitDockUrl();
     else if (e.key === "Escape") showDockNew(false);
   });
-  // 「边看边记」是**挤**过去的，不是瞬间换版式：宽度过渡中间量到的那个宽度是个
-  // 不存在的几何，拿它去算网格、去夹桌面窗，算出来的都是废的。所以过渡期间什么都
-  // 不算，等它走完再补一次——`resizeNow()` 就是那个唯一的出口（桌面开着时重新夹
-  // 桌上的窗，否则重排网格）。
-  sideEl.addEventListener("transitionend", (e) => {
-    if (e.target !== sideEl || e.propertyName !== "flex-basis") return;
-    resizeNow();
-  });
+  // ⚠️ 这里原本挂着 `sideEl` 的 `transitionend`——「边看边记」那一栏是**挤**过去的，
+  // 宽度过渡中间量到的几何是假的，所以要等过渡走完再补一次 `resizeNow()`。
+  // **3.0 刀 43 那条监听随那一栏一起删了**：顶栏的高度过渡还留着，它那条在上面。
   addPageBtn.addEventListener("click", () => addDeskPage());
   cardBoxBtn.addEventListener("click", () => toggleCardBox());
   storyBtn.addEventListener("click", () => {
@@ -4720,6 +4675,15 @@ export function createReader(ctx, opts = {}) {
       const t = e.target;
       if (t && t.closest && t.closest(".kb-v13-newcrystal-msg")) return; // 点提示自己不算
       dismissTransient();
+      // 3.0 刀 43：「文件改动」那个下拉点别处要收。
+      // ⚠️ **豁免那颗按钮自己**——不然点它就成了「先被这一下收掉、再被它自己的
+      // click 打开」，永远关不上。点菜单里面也豁免（菜单自己会收，见 pickFromMenu）。
+      const inMenu =
+        t && t.closest && (t.closest("#kb-reader-filemenu") || t.closest("#kb-reader-fileops"));
+      if (!inMenu) hideFileMenu();
+      // ⚠️ **「新建卡片」那个框故意不在这里收**。框里可能已经有半句话，
+      // 用户点一下 PDF 是想接着读、不是想扔掉刚打的字。关它只有两条路：
+      // 再点一次那颗按钮，或者把它存下去。
     },
     true
   );
@@ -4879,11 +4843,13 @@ export function createReader(ctx, opts = {}) {
       if (cb) closeFloat(ctx, cb, false);
     }
     cardBoxBtn.setAttribute("aria-pressed", "false");
+    // 3.0 刀 43：顶栏那两摊东西也要收。「新建卡片」那个框**只在关阅读器时收**——
+    // 它是"我正写着"的草稿，日常点别处不能把它和里面的字一起抹掉（见 pointerdown
+    // 那条监听），但阅读器都关了还留着它是没意义的。
+    hideFileMenu();
+    setCompose(false);
+    setMore(false);
     closeDesk();
-    // 边看边记里那台宿主编辑器也得摘掉——它背后挂着宿主一个视图对象，
-    // 不摘就是每关一次阅读器漏一个（同 app.js 里 __kbV13Reader.destroy 那条）。
-    closeNativeCompose(false);
-    closeScratch();
     // ⚠️ `st.doc = null` **必须排在 `closeSource()` 前面**：releaseSource 看到
     // 网格还占着这份就不肯关，那份 source（连同它的 worker）就漏在那儿了。
     st.doc = null;

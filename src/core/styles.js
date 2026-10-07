@@ -1544,9 +1544,9 @@ const READER = [
   ".kb-v13-reader-topfold svg{transition:transform .25s ease;}",
   ".kb-v13-reader-topfold svg{transform:rotate(90deg);}",
   ".kb-v13-reader-bar-tucked .kb-v13-reader-topfold svg{transform:rotate(-90deg);}",
-  ".kb-v13-reader-title{font-size:15px;font-weight:700;letter-spacing:.5px;color:var(--text-accent, rgba(0,200,255,.8));",
-  "  max-width:calc(var(--kb-vw,100vw)*.38);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
-  ".kb-v13-reader-count{font-size:12px;color:var(--text-muted, rgba(160,190,220,.5));}",
+  // `.kb-v13-reader-title` 与 `.kb-v13-reader-count` 两条随那两颗元素一起撤了
+  // （3.0 刀 43，见 reader.js 模板里那段）。**别把这两条留在表里**——
+  // 留着就是一串永远匹配不到东西的选择器，下一个人会去 DOM 里找一个不存在的元素。
   ".kb-v13-reader-spacer{flex:1;}",
   ".kb-v13-reader-bar button{",
   "  cursor:pointer;border-radius:8px;padding:6px 12px;font-size:12px;",
@@ -1565,6 +1565,16 @@ const READER = [
   "  color:var(--text-on-accent, rgba(230,245,255,.95))!important;",
   "  border-color:var(--interactive-accent, rgba(0,200,255,.55))!important;",
   "}",
+  // 3.0 刀 43（用户 10-07）：这一档是「**这个模式下用不着它**」，所以藏。
+  //
+  // ⚠️ 与 `button:disabled` 那条**是两件事**，别合并：`disabled` 说的是
+  // 「按得动但此刻不行」（翻到头了），用户要**看见**它才知道自己到哪儿了；
+  // 这条说的是「它控制的东西不在这一档里」，看见反而是误导。
+  //
+  // ⚠️ `!important` 是因为 `paintTop` 那条收起态的 `> *{display:none}` 与
+  // 本条的**优先级打平**，靠"后到的赢"决定胜负——那条在文件前面，所以这里
+  // 不加 `!important` 也能过；但顶栏的样式迟早还会有人加，钉死比碰运气好。
+  ".kb-v13-reader-nav-off{display:none!important;}",
   // 3.0 刀 9-C：阅读器被挂起（人正在故事线上）时顶栏那颗「文献」的样子。
   // 它这会儿说的是「回到刚才那份」，得跟平时那颗长得不一样——不然用户会以为
   // 点下去是**新开**一份，而他要的东西（桌面摆法、开着的文献、页码）其实还在里头。
@@ -1899,18 +1909,16 @@ const READER = [
   "}",
   ".kb-v13-reader-note-on{display:flex;}",
 
-  "/* 右栏：边看边记 */",
-  ".kb-v13-reader-side{",
-  "  width:320px;flex:0 0 320px;display:flex;flex-direction:column;gap:10px;",
-  "  padding:16px 18px;border-left:1px solid var(--background-modifier-border, rgba(255,255,255,.08));",
-  "  background:var(--background-secondary, rgba(6,12,22,.6));overflow-y:auto;",
-  "}",
-  // 没选文献时整栏收起来：那时候「将建在：卡片根目录」是一句猜的话，
-  // 而建卡按钮按下去只会报错——不如不摆。
-  ".kb-v13-reader-side-off{display:none;}",
-  ".kb-v13-reader-side-hd{font-size:13px;font-weight:700;letter-spacing:1px;color:var(--text-accent, rgba(0,200,255,.7));}",
+  // 「右栏：边看边记」那一整组样式（`.kb-v13-reader-side` / `-off` / `-tucked` /
+  // `-hd` / `-scratch-on` / `-native-on` …）**3.0 刀 43 全部撤掉了**——那一栏
+  // 整个没有了。别把它们加回来：留着就是一串永远匹配不到东西的选择器，
+  // 下一个人会去 DOM 里找一个不存在的元素。
+  //
+  // 从那一栏里活下来的是**输入框**那两条（卡片名 / 概念 / 来源还在用它们），
+  // 所以 `-field` 这条留着，只是缩进从 320px 一栏变成了顶栏那一格。
   ".kb-v13-reader-field{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-muted, rgba(150,185,215,.55));}",
-  ".kb-v13-reader-field-body{flex:1;min-height:120px;}",
+  // `.kb-v13-reader-field-body`（正文那一格）随那一栏一起撤了——正文现在是
+  // 顶栏里那颗 `.kb-v13-reader-compose-body`，尺寸按顶栏那一行定，不再"吃满一栏"。
   ".kb-v13-reader-field input,.kb-v13-reader-field textarea,.kb-v13-reader-search{",
   "  width:100%;box-sizing:border-box;padding:7px 10px;border-radius:7px;font-size:13px;",
   "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.18));",
@@ -1921,20 +1929,16 @@ const READER = [
   ".kb-v13-reader-field input:focus,.kb-v13-reader-field textarea:focus,.kb-v13-reader-search:focus{",
   "  border-color:var(--text-accent, rgba(0,200,255,.5));",
   "}",
-  ".kb-v13-reader-field-body textarea{flex:1;min-height:110px;}",
   // 「将建在」那一行（3.0 刀 9 第二版）。从前这里是一句死文案 `.kb-v13-reader-hint`
   // （「将建在：文献/xxx/」），现在换成一个能点的按钮 + 一棵复用首页那套样式的树。
   ".kb-v13-reader-target{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted, rgba(150,185,215,.55));}",
-  // 「在编辑器里写」那一档（3.0 刀 9 第三版）。两档互斥：填表单那一档有正文输入框
-  // 和「存进晶体库」，宿主编辑器那一档换成编辑器本身加「写下一张」。
-  // ⚠️ 切档只靠右栏上这一个类，所以两边的显隐都必须写在这儿——漏一条的表现是
-  // 「两个都在」或者「两个都没有」，而用户只会看到一栏乱掉的界面。
-  ".kb-v13-reader-nativebar{display:flex;gap:6px;align-items:center;}",
-  // 草稿纸那条（3.0 刀 12 第二半）。收起时整条不占位置（同「在编辑器里写」那条）。
-  ".kb-v13-reader-scratchbar{display:none;gap:6px;align-items:center;margin-top:6px;}",
-  ".kb-v13-reader-scratch-on .kb-v13-reader-scratchbar{display:flex;}",
+  // `.kb-v13-reader-nativebar` / `.kb-v13-reader-scratchbar` / `.kb-v13-reader-scratch-on`
+  // **3.0 刀 43 全撤了**——「在编辑器里写」那条路没有了，草稿纸也不再共用那块宿主编辑器
+  // （它改走桌面窗，见 `openScratchAt`）。
   // 起名那一步（用户 09-20）：草稿纸不是固定叫 `_`，是让用户起名的一张卡。
-  ".kb-v13-reader-scratchform{display:none;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;}",
+  // ⚠️ 3.0 刀 43 起它住在浮层 `#kb-reader-newcrystal` 里，`margin-top` 跟着去掉
+  // ——那块浮层用 `gap` 排版，多一个 margin 会让它跟上面那行错开。
+  ".kb-v13-reader-scratchform{display:none;gap:6px;align-items:center;flex-wrap:wrap;}",
   ".kb-v13-reader-scratchform.open{display:flex;}",
   ".kb-v13-reader-scratchform input{",
   "  flex:1 1 120px;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border-radius:6px;",
@@ -1960,25 +1964,10 @@ const READER = [
   "  background:none;color:var(--text-muted, rgba(170,205,235,.85));",
   "}",
   ".kb-v13-reader-scratchback:hover{color:var(--text-normal, rgba(215,232,250,.95));}",
-  ".kb-v13-reader-nativeopen{",
-  "    cursor:pointer;padding:6px 10px;border-radius:7px;font-size:11px;font-family:inherit;",
-  "    border:1px dashed var(--background-modifier-border, rgba(0,200,255,.28));",
-  "    background:none;color:var(--text-muted, rgba(160,195,230,.8));",
-  "  }",
-  ".kb-v13-reader-nativeopen:hover{color:var(--text-normal, rgba(215,232,250,.9));border-color:var(--text-accent, rgba(0,200,255,.5));}",
-  ".kb-v13-reader-nativeback{display:none;}",
-  // 编辑器那一档：正文编辑器吃满右栏剩下的高度
-  ".kb-v13-reader-nativehost{display:none;flex:1 1 auto;min-height:160px;}",
-  ".kb-v13-reader-nativehost{display:none;flex:1 1 auto;min-height:160px;}",
-  ".kb-v13-reader-native-on .kb-v13-reader-field-body{display:none;}",
-  ".kb-v13-reader-native-on .kb-v13-reader-save{display:none;}",
-  ".kb-v13-reader-native-on .kb-v13-reader-nativeopen{display:none;}",
-  ".kb-v13-reader-native-on .kb-v13-reader-nativeback{display:inline-block;}",
-  ".kb-v13-reader-native-on .kb-v13-reader-nativehost{display:flex;flex-direction:column;}",
-  // ⚠️ 草稿纸也用这一格当宿主（两者互斥，共用一块地方），所以那一档也要把它露出来。
-  // 少了这一条的表现是「编辑器建出来了、挂在 DOM 上，但 `display:none`」——
-  // 用户点什么都没反应，而控制台里一句红字都没有。
-  ".kb-v13-reader-scratch-on .kb-v13-reader-nativehost{display:flex;flex-direction:column;}",
+  // `.kb-v13-reader-nativeopen` / `-nativeback` / `-nativehost` 以及那一整组
+  // `.kb-v13-reader-native-on *` 规则 **3.0 刀 43 全撤了**——「在编辑器里写」
+  // 那条路连同它的宿主编辑器一起没有了（见 reader.js 里那段）。
+  // `-scratch-on` 也是同一条路上的，草稿纸现在走桌面窗，不共用这块地方了。
   ".kb-v13-reader-target-lab{flex:0 0 auto;}",
   ".kb-v13-reader-target-pick{",
   "  flex:1 1 auto;min-width:0;cursor:pointer;text-align:left;padding:4px 8px;border-radius:6px;",
@@ -1988,11 +1977,22 @@ const READER = [
   "  color:var(--text-normal, rgba(215,232,250,.9));",
   "}",
   ".kb-v13-reader-target-pick:hover{border-color:var(--text-accent, rgba(0,200,255,.5));}",
-  // 挑文件夹的那一屏。压在右栏内容上（右栏本来就能滚），点开才出现。
+  // 挑文件夹的那棵树。**3.0 刀 43 它从「边看边记」那一栏搬到了浮层上。**
+  //
+  // 那一栏撤了之后它没有落脚处了，而它**不能跟着走**：入口不止那一栏里那几颗
+  // ——顶栏「故事线」、结构窗的「换晶体」「导入卡片」都要用它。
+  //
+  // ⚠️ `position:absolute` 锚的是 `.kb-v13-reader-main`（它是 `position:relative`），
+  // 所以 `top:12px` 是"顶栏下面 12px"，不是"屏幕顶上 12px"。
+  // `z-index:6` 要**高于** `#kb-reader-picker` 那层的 2——挑晶体那几档会
+  // 先把「选哪份文献」请走（见 `pickHidesPicker`），但 target 那一档不会，
+  // 两者叠着的时候树必须在上面，否则点不到。
   ".kb-v13-reader-folderpick{",
-  "  display:none;flex-direction:column;gap:6px;padding:8px;border-radius:8px;",
+  "  display:none;flex-direction:column;gap:6px;padding:10px;border-radius:10px;",
+  "  position:absolute;top:12px;right:14px;width:300px;z-index:6;",
+  "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
   "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.22));",
-  "  background:var(--background-secondary, rgba(6,12,22,.75));",
+  "  background:var(--background-secondary, rgba(6,12,22,.97));",
   "}",
   ".kb-v13-reader-folderpick.open{display:flex;}",
   // 3.0 刀 42（用户 09-30 第 2 条）：这一行现在是「抬头 + 取消」两颗。
@@ -2026,33 +2026,86 @@ const READER = [
   "  background:none;font:inherit;font-size:11px;color:var(--text-muted, rgba(150,185,215,.7));",
   "}",
   ".kb-v13-reader-folderpick-all:hover{background:var(--background-modifier-hover, rgba(90,150,230,.16));}",
-  // 「新建晶体」那个方框（3.0 刀 9 第三版）。它在「存进晶体库」下面——
-  // 用户 09-18 点名要的位置：读到一半想开一颗新晶体装接下来的卡。
-  // 收起时只有一颗按钮，点开才长出输入框（免得平时占着右栏那点地方）。
-  ".kb-v13-newcrystal{margin-top:2px;border-radius:8px;border:1px dashed var(--background-modifier-border, rgba(0,200,255,.24));}",
-  ".kb-v13-newcrystal.open{border-style:solid;padding:8px;}",
-  ".kb-v13-newcrystal-open{",
-  "  display:block;width:100%;cursor:pointer;padding:7px 10px;border:0;border-radius:7px;",
-  "  background:none;font:inherit;font-size:12px;text-align:left;",
-  "  color:var(--text-muted, rgba(160,195,230,.75));",
+  // ── 3.0 刀 43：顶栏「文件改动」那颗下拉 ──────────────────────────────
+  //
+  // ⚠️ 它是**浮层**，不是把顶栏撑高。顶栏本来就十一二颗按钮，再塞五行进去
+  // 会把阅读区整块往下推——而这一颗是低频动作（偶尔整库），不值那个代价。
+  //
+  // ⚠️ **它必须挂在 `#kb-reader` 上，不能挂在 `.kb-v13-reader-bar` 里。**
+  // 顶栏那条有 `overflow:hidden`（height 过渡要用），把菜单挂在里面会被**裁掉**
+  // ——症状是"点了文件改动，什么都没出来"，而 DOM 里它明明在。
+  // 位置由 `placeUnder()` 现算（见 reader.js），所以这里不写 top/left。
+  ".kb-v13-reader-filemenu{",
+  "  display:none;flex-direction:column;gap:2px;padding:6px;border-radius:10px;",
+  "  position:absolute;width:150px;z-index:20;",
+  "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.22));",
+  "  background:var(--background-secondary, rgba(6,12,22,.98));",
   "}",
-  ".kb-v13-newcrystal-open:hover{background:var(--background-modifier-hover, rgba(0,90,150,.18));color:var(--text-normal, rgba(215,232,250,.9));}",
-  ".kb-v13-newcrystal.open .kb-v13-newcrystal-open{display:none;}",
-  // 3.0 刀 12：新建在左、删除在右，同一行。
-  // **表单打开时整行收起**（不是只藏新建那颗）——不然「删除晶体」会孤零零留在
-  // 一个正在填表单的框上面，看着像它属于那个表单。
-  // 三颗按钮（新建 / 删除晶体 / 删除卡片）在一条 320px 宽的栏里，
-  // 放不下就让它**换行**——挤成三根筷子比换行难认得多。
-  ".kb-v13-newcrystal-row{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;}",
-  ".kb-v13-newcrystal.open .kb-v13-newcrystal-row{display:none;}",
-  ".kb-v13-newcrystal-row .kb-v13-newcrystal-open{flex:1 1 auto;min-width:0;}",
-  // 删除那颗用暖色描边，和旁边那颗长得不一样——它是**这一栏里唯一会动你笔记的按钮**。
-  ".kb-v13-newcrystal-del{",
-  "  flex:0 0 auto;cursor:pointer;font:inherit;font-size:12px;padding:7px 10px;",
-  "  border:1px solid rgba(255,150,140,.35);border-radius:7px;background:none;",
-  "  color:rgba(255,175,165,.9);white-space:nowrap;",
+  ".kb-v13-reader-filemenu.open{display:flex;}",
+  // ⚠️ 选择器要写**两截**：`.kb-v13-reader-bar button` 那条（0,1,1）比单独一个
+  // 类（0,1,0）优先级高，菜单是挂在 `#kb-reader` 上的、不在顶栏里，本来不会撞上
+  // ——但顶栏那几条以后要是放宽了范围，这里就是第一个塌的地方。钉死。
+  ".kb-v13-reader-filemenu .kb-v13-filemenu-item{",
+  "  cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:7px 10px;",
+  "  border:0;border-radius:6px;background:none;",
+  "  color:var(--text-normal, rgba(215,232,250,.9));white-space:nowrap;",
   "}",
-  ".kb-v13-newcrystal-del:hover{background:rgba(120,30,30,.28);color:rgba(255,205,195,.98);}",
+  ".kb-v13-reader-filemenu .kb-v13-filemenu-item:hover{background:var(--background-modifier-hover, rgba(0,90,150,.35));}",
+  // ⚠️ 后三项（删除晶体 / 删除卡片 / 重命名两颗）**会动用户的东西**，用暖色描边
+  // 和「新建晶体」区分开——下拉里五颗长得一样的话，手指滑一格就是删一颗晶体。
+  "#kb-reader-fo-delcrystal, #kb-reader-fo-delcard{color:rgba(255,175,165,.92);}",
+  "#kb-reader-fo-delcrystal:hover, #kb-reader-fo-delcard:hover{",
+  "  background:rgba(120,30,30,.35);color:rgba(255,205,195,.98);",
+  "}",
+  // ── 3.0 刀 43：「新建卡片」那颗右边摊开的框 ───────────────────────────
+  //
+  // 用户 10-07 的原话：「点击新建卡片，在这个按钮的右侧出现：一个方框，
+  // 再右侧是按钮：存进晶体库」。所以它是**内联**在顶栏那一行里的。
+  //
+  // ⚠️ `.kb-v13-reader-bar` 是 `flex-wrap:wrap`，这一块放不下时会**整体换到
+  // 第二行**（而不是把它自己切开）——`flex:0 0 auto` 保证它不被压缩。
+  ".kb-v13-reader-compose{",
+  "  display:none;flex:0 0 auto;align-items:flex-start;gap:6px;",
+  "}",
+  ".kb-v13-reader-compose.on{display:flex;}",
+  ".kb-v13-reader-compose-body{",
+  "  box-sizing:border-box;width:300px;min-height:32px;max-height:160px;resize:vertical;",
+  "  padding:6px 9px;border-radius:8px;font-size:12px;font-family:inherit;outline:none;",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.18));",
+  "  background:var(--background-modifier-form-field, rgba(4,10,20,.75));",
+  "  color:var(--text-normal, rgba(215,232,250,.9));",
+  "}",
+  ".kb-v13-reader-compose-body:focus{border-color:var(--text-accent, rgba(0,200,255,.5));}",
+  // 「更多」那颗折叠。**它和里面那一摊是一对**：按钮在顶栏那一行上，
+  // 摊开的内容挂到它下面（同「文件改动」那颗的做法，位置同样由 `placeUnder()` 现算）。
+  // ⚠️ 和「文件改动」一样**挂在 `#kb-reader` 上，不在顶栏里**——理由见上面那条。
+  ".kb-v13-reader-morebox{",
+  "  display:none;flex-direction:column;gap:8px;padding:10px;border-radius:10px;",
+  "  position:absolute;width:260px;z-index:20;",
+  "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.22));",
+  "  background:var(--background-secondary, rgba(6,12,22,.98));",
+  "}",
+  ".kb-v13-reader-morebox.open{display:flex;}",
+  // ⚠️ 里面那三个 `label` 用的是 `.kb-v13-reader-field`（纵向排列、`flex:1` 会
+  // 把它撑开），在浮层里得压住：`width:100%` + 不参与 flex 伸展。
+  ".kb-v13-reader-morebox .kb-v13-reader-field{flex:0 0 auto;}",
+  // ── 那一块浮着的小面板（表单 + 提示）────────────────────────────────
+  //
+  // ⚠️ 开合由 `.on` 管（`paintOps` 算出来的），**不是 `.open`**：
+  //   `.open` 说的是"新建/改名那个表单摊开了"，`.on` 说的是"这块地方整体露不露头"。
+  //   分开是因为「表单没开、但有一句话要说」是常态——点一下「删除卡片」就会这样，
+  //   而那句话里挂着「确认删除／取消」两颗按钮，藏了就等于那颗按钮不存在。
+  ".kb-v13-newcrystal{",
+  "  display:none;flex-direction:column;gap:8px;padding:10px;border-radius:10px;",
+  "  position:absolute;top:12px;left:14px;z-index:7;",
+  "  max-width:min(560px, calc(100% - 340px));",
+  "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.24));",
+  "  background:var(--background-secondary, rgba(6,12,22,.97));",
+  "}",
+  ".kb-v13-newcrystal.on{display:flex;}",
   ".kb-v13-newcrystal-form{display:none;gap:6px;}",
   ".kb-v13-newcrystal.open .kb-v13-newcrystal-form{display:flex;flex-wrap:wrap;}",
   ".kb-v13-newcrystal-form input{",
@@ -2070,14 +2123,27 @@ const READER = [
   ".kb-v13-newcrystal-go{background:var(--interactive-accent, rgba(0,90,150,.45));}",
   ".kb-v13-newcrystal-msg{font-size:11px;line-height:1.6;color:var(--text-success, rgba(120,220,160,.85));}",
   ".kb-v13-newcrystal-msg.kb-v13-newcrystal-bad{color:var(--text-error, #f87171);}",
+  // 「存进晶体库」。**3.0 刀 43 它从右栏底下一颗大按钮变成了顶栏里的一颗。**
   ".kb-v13-reader-save{",
-  "  cursor:pointer;padding:9px 12px;border-radius:8px;font-size:13px;font-weight:600;",
+  "  flex:0 0 auto;cursor:pointer;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;",
+  "  white-space:nowrap;font-family:inherit;",
   "  border:1px solid var(--interactive-accent, rgba(0,200,255,.3));",
   "  background:var(--interactive-accent, rgba(0,90,150,.35));",
   "  color:var(--text-on-accent, rgba(215,240,255,.92));",
   "}",
   ".kb-v13-reader-save:hover{background:var(--interactive-accent-hover, rgba(0,120,190,.45));}",
-  ".kb-v13-reader-msg{font-size:11px;line-height:1.7;color:var(--text-success, rgba(120,220,160,.85));min-height:1.7em;}",
+  // `say()` 那行话。**3.0 刀 43 它从右栏底下浮到了左下角。**
+  //
+  // ⚠️ 用 `:empty` 藏起来，**不留 `min-height`**：它现在是浮层，常驻一行 1.7em 的
+  // 空白会在阅读区左下角挂一块看不见却点得到的东西。
+  ".kb-v13-reader-msg{",
+  "  position:absolute;bottom:14px;left:14px;z-index:5;max-width:60%;",
+  "  font-size:12px;line-height:1.7;padding:6px 10px;border-radius:8px;",
+  "  color:var(--text-success, rgba(120,220,160,.85));",
+  "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.2));",
+  "  background:var(--background-secondary, rgba(6,12,22,.94));",
+  "}",
+  ".kb-v13-reader-msg:empty{display:none;}",
   ".kb-v13-reader-msg-bad{color:var(--text-error, #f87171);}",
 
   "/* 文档选择器。铺在页区上面——它是「换一份」的动作，换完就走 */",
@@ -2230,25 +2296,11 @@ const READER_DOCK = [
   ".kb-v13-desk-open:hover{background-color:rgba(255,255,255,.12)!important;color:var(--text-normal, #d7e8fa)!important;}",
   // ---- 「边看边记」收起来（3.0 刀 18）----
   //
-  // ⚠️ 收起走 `-tucked` 而**不是复用 `-off`**：那个是 `display:none`，而
-  // `display` 不参与过渡——用户要的是「从右边挤出去」，得让宽度真的动起来。
+  // ⚠️ **整组 `.kb-v13-reader-side` / `-tucked` 的过渡规则 3.0 刀 43 撤了。**
+  // 那一栏没有了，"从右边挤出去"这件事也就不存在了。连带 reader.js 里那条
+  // `sideEl` 的 `transitionend` 监听（补 `resizeNow()` 用的）也一起删了
+  // ——过渡没了，就没有"过渡中间不许量尺寸"这个约束了。
   //
-  // ⚠️ **这一条在过渡一个会被测量到的宽度。** `deskBounds()`（夹桌面窗）和
-  // `relayout()`（算网格）量的都是活元素的实宽，过渡中间那个值是个不存在的几何。
-  // 处置：过渡期间一次都不量，由 reader.js 那个 `transitionend` 补一次
-  // `resizeNow()`。上面卫星那段注释记的是同一类坑（给面板 width 加 transition，
-  // 卫星会按一个不存在的几何摆一圈）。
-  //
-  // 收起态要**连 padding 和左边框一起归零**：`flex-basis:0` 只让内容盒归零，
-  // 那 16px+18px 的内边距和 1px 边框照旧占着，屏幕上会永远留一条 37px 的死边。
-  ".kb-v13-reader-side{",
-  "  transition:flex-basis .22s cubic-bezier(.22,.61,.36,1),",
-  "    padding .22s cubic-bezier(.22,.61,.36,1),",
-  "    border-left-width .22s cubic-bezier(.22,.61,.36,1),opacity .22s;",
-  "}",
-  ".kb-v13-reader-side-tucked{",
-  "  flex-basis:0;padding-left:0;padding-right:0;border-left-width:0;opacity:0;overflow:hidden;",
-  "}",
   // 桌面窗标题栏上那颗「收纳」（3.0 刀 18）。和 `✎` / `✕` 同一排。
   // ⚠️ 必须是**真 `<button>`**：`desk.js` 的 `e.target.closest("button")` 靠它把
   // 这一颗从拖动起点里排掉——做成 `<div>` 的话按下去会变成拖窗。
@@ -2393,13 +2445,16 @@ const REDUCED_MOTION = [
   "  .kb-v13-mask-cover{transition:none!important;}",
   // #9 顶栏模式按钮：同样只有 hover 那一点过渡
   "  .kb-v13-mode-btn,.kb-v13-ifloat-mode-btn{transition:none!important;}",
-  // 3.0 刀 18：收纳栏那几颗按钮的 hover，以及「边看边记」挤出挤进的那一段宽度。
-  // 后者尤其要停——它本来就是为了让人看清"挤"的过程，而这个设置的意思正是别动。
-  // 3.0 刀 23：收纳方框的悬停闪烁。**这一条尤其要停**——它是纯粹的强调动画，
-  // 而这个设置的意思正是「别动」。框本身仍然画着，只是不闪。
+  // 3.0 刀 18：收纳栏那几颗按钮的 hover。3.0 刀 23：收纳方框的悬停闪烁。
+  // **后者尤其要停**——它是纯粹的强调动画，而这个设置的意思正是「别动」。
+  // 框本身仍然画着，只是不闪。
+  //
+  // ⚠️ 3.0 刀 43 把 `.kb-v13-reader-side` 从这一串里删了——那一栏没有了。
+  // 顶栏自己那条 height 过渡（收起态）还留着，**也应该停**：它同样属于
+  // "让人看清这个过程"，而 `prefers-reduced-motion` 的意思正是别动。
   "  .kb-v13-sbox-flash{animation:none!important;border-color:rgba(255,210,80,1)!important;}",
   "  .kb-v13-dock-name,.kb-v13-dock-drop,.kb-v13-dock-add,.kb-v13-dock-ok,.kb-v13-dock-cancel,",
-  "  .kb-v13-desk-dock,.kb-v13-desk-open,.kb-v13-desk-webbtn,.kb-v13-reader-side{transition:none!important;}",
+  "  .kb-v13-desk-dock,.kb-v13-desk-open,.kb-v13-desk-webbtn,.kb-v13-reader-bar{transition:none!important;}",
   "}",
 ];
 
@@ -2416,9 +2471,9 @@ export const CSS = BASE.concat(
   MULTILEVEL,
   CANVAS,
   READER,
-  // ⚠️ 必须排在 READER **后面**：收起态那条 `.kb-v13-reader-side-tucked` 和
-  // 基础那条 `.kb-v13-reader-side` 同优先级，靠"后到的赢"把 `flex-basis` 压下去。
-  // 挪到 READER 前面的话，收起会静默失效（屏幕上什么都不发生）。
+  // ⚠️ 从前这里写着「必须排在 READER 后面」——因为 `.kb-v13-reader-side-tucked`
+  // 要靠"后到的赢"压掉基础那条的 `flex-basis`。**3.0 刀 43 那一组没了**，
+  // 这条顺序约束跟着作废（`READER_DOCK` 自己与顺序无关）。
   READER_DOCK,
   STORY_BOXES,
   REDUCED_MOTION

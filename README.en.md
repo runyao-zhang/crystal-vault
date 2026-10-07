@@ -346,6 +346,49 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.5** · Changed: **the reader's top bar is rearranged, and the read-and-note column is gone.**
+
+The top bar now reads (new items in parentheses):
+
+```
+‹ Back │ Swap  Desk  + Page  Dock (File ops) (New card) Card box Scratch Storyline Structure  Collapse
+        └ in desk mode: prev / next / − / 100% / + are hidden
+        └ in page-grid mode: "+ Page" is hidden
+```
+
+**Removed**: the document name, the page counter, and the `read-and-note` toggle.
+The name and the counter both described **the document you just picked yourself** —
+saying it again in the bar is repetition, and the page number is already on every page.
+
+**Two new buttons**:
+
+- **File ops** — a dropdown holding the old five: new crystal / delete crystal / delete
+  card / rename card / rename crystal. **Nothing about them changed** — they simply moved
+  from the right-hand column up to the bar.
+- **New card** — opens, to its right: a box for the body → `More` (card name / concept /
+  source / target folder) → `Save to vault`. **Leave the name empty and it is taken from
+  the body's first line**, so the default flow is "type, then save".
+  **Works with no document open** — the card lands in the folder you last picked
+  (or the card root if you never picked one).
+
+**The read-and-note column is gone entirely**; nothing in it was lost:
+
+| Was there | Now |
+| --- | --- |
+| The five file operations | The `File ops` dropdown |
+| Name / concept / source / body / Save | The `New card` box |
+| The "will be created in" folder picker | Inside `More` |
+| The scratch-note name box | Moved into a flyout, **still works** |
+
+**One thing was deleted**: `✎ Write in the editor` (and its "Back = trash the card I just
+created" flow). It was a second, parallel way to create a card — and that one left a
+half-finished card behind in the vault.
+
+⚠️ This release **only touches the in-app reader**. The floating companion was not touched
+this time — how its two windows should split is still open.
+
+---
+
 **1.4.4** · **Reverted: the floating windows go back to the 1.4.2 shape.**
 
 1.4.3 made the structure window **mount the component directly** (bypassing the desk layer). Cleaner on paper, wrong in use — so this goes back to the 1.4.2 shape: **two windows, and the structure window one is "the desk layer with a single full-size structure window on it"**.

@@ -80,19 +80,10 @@ function wireChrome(role) {
   const close = document.getElementById("float-close");
   if (close) close.addEventListener("click", () => shell.close());
 
-  // 「只有笔记栏」那颗开关**只对边看边记那扇有意义**（结构窗没有页阵可藏）。
-  const side = document.getElementById("float-sideonly");
-  if (side) {
-    if (role !== "reader") {
-      side.style.display = "none";
-    } else {
-      side.addEventListener("click", () => {
-        const on = document.documentElement.classList.toggle("kb-float-sideonly");
-        side.setAttribute("aria-pressed", String(on));
-        side.textContent = on ? "显示阅读区" : "只看笔记栏";
-      });
-    }
-  }
+  // ⚠️ 这里原本接着一颗「只看笔记栏」的开关注（3.0 刀 43 撤掉）。
+  // 它切的是 `kb-float-sideonly`，而那一档靠 `.kb-v13-reader-side` 铺满窗口
+  // —— 那一栏整个没有了（用户 10-07 改的架构）。按钮本体也一并从
+  // floating/index.html 撤了，`theme.css` 里那三条规则同理。
 }
 
 /**
