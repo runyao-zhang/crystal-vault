@@ -21,7 +21,7 @@
 // 导出成 PDF 或每页一张图（3.0 路线图里写明了，别在这里偷偷试）。
 
 import { EL, esc, toStr } from "./dom.js";
-import { composeCard, patchBody, splitCard, stripBodyPrefix } from "./frontmatter.js";
+import { composeCard, patchBody, readCardFields, splitCard, stripBodyPrefix } from "./frontmatter.js";
 import { splitSegments, applyCardFields } from "./model.js";
 // 卡片盒与「将建在」那个选择器都复用首页「文件夹」面板那棵树——同一份画法、
 // 同一套点击分流、同一个筛选。用户点名要的就是这个「复用」。
@@ -372,6 +372,20 @@ export function createReader(ctx, opts = {}) {
     // ⚠️ **`‹ 返回` 必须留着**——它是回到晶体库的唯一出口（见 `close()`）。
     '<button type="button" class="kb-v13-reader-back" id="kb-reader-back" title="回到晶体库">‹ 返回</button>' +
     '<span class="kb-v13-reader-spacer"></span>' +
+    // 3.0 刀 45（用户 10-09）：**「将建在」从「更多」里搬出来，落在「换一份」左边。**
+    //
+    // 理由：卡片名 / 概念 / 来源是"这一张卡才用得上"的东西，收着是对的；
+    // 而「将建在」是**跨卡片**的设置——你改一次，后面每一张卡都建到那儿去。
+    // 那种东西埋在两层里，等于每次建卡都要先开一次盒子确认落在哪儿。
+    //
+    // **显示的是最后一段**（`paintTargetFolder` 走 `shortFolder`，它本来就只取
+    // 末尾那段）：顶栏这一行已经十几颗按钮了，摆全路径会把整行挤到换行。
+    // 全路径在 `title` 里，悬停就看得到。
+    '<span class="kb-v13-reader-target">' +
+    '<span class="kb-v13-reader-target-lab">将建在</span>' +
+    '<button type="button" class="kb-v13-reader-target-pick" id="kb-reader-target"' +
+    ' aria-expanded="false" title="挑一个文件夹；默认跟着文献所在的文件夹走"></button>' +
+    "</span>" +
     '<button type="button" class="kb-v13-reader-pick" id="kb-reader-pick" title="换一份文献">换一份</button>' +
     // 3.0 刀 9-A：桌面。网格是「一屏摊开 N 页、位置由 computeGrid 算」，
     // 桌面是「一页一扇窗、位置由你说了算」。两套并存，这颗按钮切。
@@ -501,14 +515,8 @@ export function createReader(ctx, opts = {}) {
     '<input type="text" id="kb-reader-concept" placeholder="一句话说清它是什么" autocomplete="off"></label>' +
     '<label class="kb-v13-reader-field"><span>来源</span>' +
     '<input type="text" id="kb-reader-source" autocomplete="off"></label>' +
-    // 「将建在」那一行（3.0 刀 9 第二版）。它原本长在「边看边记」那一栏里；
-    // 那一栏撤了之后，这是**全应用唯一**还能改 `prefs.readerFolder` 的地方
-    // ——丢了它，建卡目录就永远停在用户上次挑的那一个上，再也改不动。
-    '<div class="kb-v13-reader-target">' +
-    '<span class="kb-v13-reader-target-lab">将建在</span>' +
-    '<button type="button" class="kb-v13-reader-target-pick" id="kb-reader-target"' +
-    ' aria-expanded="false" title="挑一个文件夹；默认跟着文献所在的文件夹走"></button>' +
-    "</div>" +
+    // 「将建在」3.0 刀 45 搬去顶栏了（在「换一份」左边）——见上面那段。
+    // 它是**跨卡片**的设置，收在这里每次都要多开一层才是别扭的。
     "</div>" +
     '<div class="kb-v13-reader-main">' +
     // 收纳栏（3.0 刀 18）。
@@ -2041,12 +2049,30 @@ export function createReader(ctx, opts = {}) {
     if (ed.kind === "card") {
       // 顺序与 `editform.js` 的 refreshAfterWrite 一致：模型 → 关系图 → 重画 → 落状态。
       const card = findCardByPath(w.path);
-      if (card) applyCardFields(card, {}, res.content);
+      // ⚠️⚠️ 3.0 刀 45（用户 10-09 报的）：**字段也要读回来。**
+      //
+      // 桌面卡片窗那个 ✎ 走的是宿主原生编辑器，保存时写的是**整份文件**
+      // （`selfSaving` 那一支，YAML 也可以在里头改）。而这里原来传的是**空字段表**
+      // `applyCardFields(card, {}, …)`，于是只更新正文——**用户改了「概念」，
+      // 文件对了、模型还是旧的**，结构窗上那个概念怎么都不变（强制重画也没用，
+      // 画的是旧值）。`editform.js` 那边传的是真字段，所以面板那条路没这个病。
+      if (card) applyCardFields(card, readCardFields(res.content), res.content);
       if (ctx.refreshRelations) ctx.refreshRelations();
       // 同 writeBacklink：**不调 `ctx.refreshCard`**（那是 showHologram，会 closeAllFloats）。
       if (ctx.refreshCards) ctx.refreshCards();
       if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
       if (ctx.flushViewState) ctx.flushViewState();
+      // ⚠️ 3.0 刀 45：**还得叫一次结构窗重画。**
+      //
+      // 整份代码里能让一扇**已挂载的结构窗**重画的只有两个口子：
+      // `ctx.renderCrystals()`（它内部转 `refreshStoryWindows`）和这一颗
+      // `refreshStoryWindows()` 本身。上面那五条**一个都没碰到它**——
+      // 所以改完概念，那扇窗一直是旧的，只能关掉重开（那会走它自己的 `render()`）。
+      //
+      // 这里**直接调 `refreshStoryWindows()` 而不是 `ctx.renderCrystals()`**：
+      // 后者是"整片库重画"，每存一次卡就整库重来一遍太重；而这里要的就是
+      // "让结构窗跟上"，那一颗正是为这件事存在的。
+      refreshStoryWindows();
     } else {
       // 文献那条路多一件事：**把缓存里那份 source 丢掉**。
       // 它还攥着改之前那份原文（`src.raw`），不丢的话这一窗重画之后

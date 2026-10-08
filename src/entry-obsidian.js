@@ -305,6 +305,15 @@ export function createObsidianAdapter({
         const lost = Array.from(dead);
         pending.clear();
         dead.clear();
+        // 有一件"文件夹层面"的事发生了（新建/删除/改名）→ 叫核心整份对账。
+        // ⚠️ **排在最前面**：对账是"拿盘上现在有什么重新对一遍"，它自己就会把
+        // 这一批 pending/dead 的结果一起算进去；排在后面的话，前面那几条增量
+        // 通知会先拿旧模型算一次，屏幕上闪一下又变。
+        // 第三个参数（`gone`）是核心用来判"这一条要整份对账"的哨兵，非空即可。
+        if (whole) {
+          whole = false;
+          cb(null, undefined, "__reconcile__");
+        }
         // 先报「没了」。改名会同时产生「旧路径消失」和「新路径出现」两条，
         // 而核心那边是拿**盘上现在有什么**重新对账的，先后其实不影响结果——
         // 但先清旧的读起来顺。
@@ -323,8 +332,35 @@ export function createObsidianAdapter({
         clearTimeout(timer);
         timer = setTimeout(flush, WATCH_DEBOUNCE_MS);
       };
+      // ── 3.0 刀 45：外面新增 / 删掉 / 改名**文件夹**（用户 10-09 报的）──────
+      //
+      // 从前这条路什么都不通：`create` 没订，文件夹又被下面那两句
+      // `endsWith(".md")` 直接滤掉。于是"在 Obsidian 的文件列表里新建一个文件夹"
+      // 晶体库**永远不知道**——它手上那份清单是打开库那一刻数出来的，之后再也不重数。
+      //
+      // 修法不去给文件夹造一套专门的通知：**叫核心整份对账一次**就够
+      // （`applyExternalChange` 收到 `gone` 就走 `reconcileCards`，那一条会重读
+      // 卡片清单、并且重跑 `listFolders`）。文件夹不多，对账一次很便宜。
+      //
+      // ⚠️ 判文件夹用 `children` 而不是 `instanceof TFolder`：纯数据判断，
+      // 少一个对 Obsidian 全局构造器的依赖。
+      const isFolder = (f) => !!f && Array.isArray(f.children);
+      const inRoot = (p) => !!p && p.startsWith(cardsFolder + "/");
+      let whole = false;
+      const markWhole = () => {
+        if (whole) return;
+        whole = true;
+        schedule();
+      };
+
       const bump = (file, from) => {
         const path = file && file.path;
+        // 文件夹（新建 / 改名 / 移动）：上面那段说过，整份对账。
+        // `from` 不以 `.md` 结尾 = 它是从一个文件夹改过来的（旧路径还在这一支里）。
+        if (isFolder(file) || (from && !String(from).endsWith(".md"))) {
+          markWhole();
+          return;
+        }
         // 前缀一定带斜杠：不带的话「知识卡片2」这种同前缀目录会被误伤
         if (!path || !path.startsWith(cardsFolder + "/") || !path.endsWith(".md")) return;
         // `from` 只有改名那一支有。核心靠它知道「这张卡以前在哪儿」——
@@ -337,6 +373,11 @@ export function createObsidianAdapter({
       // 只把这个路径推给核心，让它知道那份卡已经不在了。
       const gone = (file) => {
         const path = file && file.path;
+        // 文件夹被删 / 被移出卡片目录：整份对账（否则那颗晶体永远留在图上）
+        if (isFolder(file) || (path && !path.endsWith(".md"))) {
+          markWhole();
+          return;
+        }
         if (!path || !path.startsWith(cardsFolder + "/") || !path.endsWith(".md")) return;
         dead.add(path);
         schedule();
@@ -353,8 +394,20 @@ export function createObsidianAdapter({
       // 而 `乙` 从没进过它的 byPath——于是给 [[乙]] 登记一张**内容为空的影子卡**
       // （灰色、「暂无描述」、点进去什么都没有）。用户 09-24 报的就是这个。
       //
-      // ⚠️ **`create` 故意不订**：我们自己建的卡走 `addCard`（已经登记过了），
-      // 而「外面新增一张卡」是另一个特性。这是有意留白，不是漏了。
+      // ⚠️ 3.0 刀 45：**`create` 现在订了。**
+      //
+      // 原来这里写着"`create` 故意不订：我们自己建的卡走 `addCard`，而
+      // 「外面新增一张卡」是另一个特性。这是有意留白，不是漏了"——那句留白
+      // 用户 10-09 要了：他在 Obsidian 的文件列表里新建文件夹/拖 `.md` 进来，
+      // 晶体库要跟着变。
+      //
+      // 走的是同一条"整份对账"，不给新增造第二条路：`addCard` 那种增量登记
+      // 要自己判重、判同名、判落在哪颗晶体里，而 `reconcileCards` 已经是
+      // "拿盘上现在有什么重新对一遍"的现成实现——新增本来就该是它的一部分。
+      const refCreate = app.vault.on("create", (f) => {
+        if (isFolder(f)) markWhole();
+        else if (inRoot(f && f.path) && String(f.path).endsWith(".md")) markWhole();
+      });
       const refModify = app.vault.on("modify", (f) => bump(f));
       const refMeta = app.metadataCache.on("changed", (file) => bump(file));
       const refRename = app.vault.on("rename", (file, oldPath) => bump(file, oldPath));
@@ -363,6 +416,7 @@ export function createObsidianAdapter({
         clearTimeout(timer);
         pending.clear();
         dead.clear();
+        app.vault.offref(refCreate);
         app.vault.offref(refModify);
         app.metadataCache.offref(refMeta);
         app.vault.offref(refRename);

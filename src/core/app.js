@@ -577,7 +577,10 @@ async function reconcileCards(ctx) {
   //    ⚠️ 只在 `listFolders` 真的给出数组时才做。它的契约是「装着 .md 的文件夹、
   //    或者一个文件都没有的文件夹」，所以「被清空的合法文件夹」会被列出来、不会
   //    被误删；而它抛了、或某个宿主没实现时，宁可留一个空壳也不冒删错的风险。
-  if (hitFolders.size && typeof ctx.adapter.listFolders === "function") {
+  // ⚠️ 3.0 刀 45：**这个守卫从 `hitFolders.size &&` 放宽成"只要有 listFolders 就跑"。**
+  // 原来只在"有卡片消失"时才进来，所以**外面新建一个文件夹**永远走不到这儿
+  // ——用户 10-09 报的就是这个（"在 Obsidian 里新建文件夹，晶体库看不到"）。
+  if (typeof ctx.adapter.listFolders === "function") {
     let live = null;
     try {
       live = await ctx.adapter.listFolders();
@@ -596,6 +599,34 @@ async function reconcileCards(ctx) {
         if (stillHome) continue;
         if (ctx.model.removeFolder) {
           ctx.model.removeFolder(f);
+          touched = true;
+        }
+      }
+
+      // ── 3.0 刀 45：反过来那一半 —— **盘上多出来的文件夹要补进模型** ──
+      //
+      // 上面那段只做"删"（幽灵文件夹），而**新增**从来没有过：`listFolders`
+      // 除了打开库那一次，全仓再没被谁调过。于是"在 Obsidian 的文件列表里
+      // 新建一个文件夹"这件事，晶体库永远不知道。
+      //
+      // ⚠️ **空文件夹也算一颗晶体**（`listFolders` 的契约明文写着"一个文件都
+      // 没有的文件夹"也列出来），所以这里**不能**拿"它下面有没有卡"当条件。
+      //
+      // ⚠️ 拿树上的 `folder`（宿主路径）去对，不是拿 `key`：`listFolders` 给的
+      // 是宿主路径，而 `crystalKeys` 是相对卡片根目录的 key，两者对不上。
+      const havePaths = new Set();
+      const walk = (ns) => {
+        for (const n of ns || []) {
+          const p = toStr(n && n.folder).replace(/\/+$/, "");
+          if (p) havePaths.add(p);
+          walk(n && n.children);
+        }
+      };
+      walk(ctx.model.folderTree ? ctx.model.folderTree() : []);
+      for (const p of ok) {
+        if (havePaths.has(p)) continue;
+        if (ctx.model.addFolder) {
+          ctx.model.addFolder(p);
           touched = true;
         }
       }

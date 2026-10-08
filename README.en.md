@@ -346,6 +346,36 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.13** · Changed: **three things — the target folder moves to the top bar, editing a concept updates the structure window, and vault changes made outside the plugin now show up.**
+
+**1. The 「将建在」 (will be created in) button moved out of `More`, to the left of 「换一份」.**
+Card name / concept / source are per-card, so folding them away is right. The target
+folder is a **cross-card** setting — change it once and every later card lands there.
+Burying it two levels deep meant opening a box before every card just to check where it
+was going. It shows the **last path segment**; hover for the full path.
+
+**2. Change a concept in the card window and the structure window follows immediately.**
+There were **two** defects stacked here, and fixing only one would not have worked:
+
+- Saving goes through the host's native editor, which writes the **whole file** (YAML
+  included) — but the core then passed an **empty field table**, so only the body was
+  updated and **`card.concept` in the model stayed stale**. It now **reads those fields
+  back**.
+- And **nothing told the structure window to redraw**: the only funnel that refreshes a
+  mounted structure window is `renderCrystals`, which this path never touched. Now it does.
+
+(The card-box path shares the same code, so it is fixed too.)
+
+**3. Creating or deleting files/folders in Obsidian's own file list now reaches the vault.**
+This was never implemented — deliberately left out (the code said "`create` is
+intentionally not subscribed; a new card from outside is a separate feature"). It is now
+done: `create` is subscribed, folder events are no longer filtered out by the `.md` check,
+and either one triggers a **full reconcile** (re-read the card list + re-run `listFolders`;
+an empty folder still counts as a crystal). Debounced at 400ms so a sync batch does not
+fire a storm.
+
+---
+
 **1.4.12** · Fixed: **deleting a line left its `晶体接法` entry behind in the card.**
 
 1.4.11 made deleting a line also drop the matching `晶体接法` entry — but it could not, because `patchFrontmatter` **has no way to delete a field at all**: it only ever writes `key: value`. And when a field is emptied, the caller *skipped the write* rather than leave an empty field on the card. Together:
@@ -431,7 +461,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.12**.
+⚠️ Needs **CrystalFloat 1.0.13**.
 
 ---
 

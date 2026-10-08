@@ -1977,6 +1977,11 @@ const READER = [
   "  color:var(--text-normal, rgba(215,232,250,.9));",
   "}",
   ".kb-v13-reader-target-pick:hover{border-color:var(--text-accent, rgba(0,200,255,.5));}",
+  // ⚠️ 3.0 刀 45：「将建在」搬到**顶栏**之后要压住它的伸展。
+  // 上面那条基础样式写的是 `flex:1 1 auto`（它原来长在一栏里，该吃满那一栏的宽），
+  // 而在顶栏那一行里"吃满"会把旁边所有按钮挤走。这里改成"按内容宽、最多这么多"。
+  ".kb-v13-reader-bar .kb-v13-reader-target{flex:0 1 auto;min-width:0;max-width:260px;}",
+  ".kb-v13-reader-bar .kb-v13-reader-target-pick{flex:0 1 auto;max-width:180px;}",
   // 挑文件夹的那棵树。**3.0 刀 43 它从「边看边记」那一栏搬到了浮层上。**
   //
   // 那一栏撤了之后它没有落脚处了，而它**不能跟着走**：入口不止那一栏里那几颗

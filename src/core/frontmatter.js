@@ -414,6 +414,47 @@ function mustQuote(s) {
 // ⚠️ 解析器**只此一份**，模型 / 真适配层 / 假适配层三处都调它。
 //    这和 `晶体坐标` 那条路不一样——那边 `posOf` / `posPair` 抄了两遍（各端
 //    "同一条口径"），多一处抄写就多一处漂移的机会。这里不重复那个取舍。
+/**
+ * 从一份卡片全文里**读回那几个字段**（3.0 刀 44，用户 10-09 报的）。
+ *
+ * 起因：桌面卡片窗那个 ✎ 走的是宿主原生编辑器，保存时写的是**整份文件**——
+ * YAML **也可以在里面改**。而核心保存之后只 `applyCardFields(card, {}, content)`，
+ * 字段表是空的，于是 `card.concept` 一直是旧的：**文件对了、模型没对**，
+ * 结果结构窗上那个概念怎么都不变（就算强制重画也没用，画的是旧值）。
+ *
+ * ⚠️ **故意写得保守**：只认 `概念 / 来源 / tags` 三个键、只认 `键: 值` 的行内式
+ * （这份 frontmatter 的既定形状，见文件头那段）。读不出来就**不写这一项**
+ * （调用方拿 `undefined` 就不会覆盖旧值）——宁可少更新一个字段，
+ * 也不能因为解析猜错而把卡片数据改坏。
+ *
+ * @param {string} content 卡片全文
+ * @returns {{概念?: string, 来源?: string, tags?: string[]}}
+ */
+export function readCardFields(content) {
+  const out = {};
+  const { fmBlock } = splitCard(content == null ? "" : String(content));
+  if (!fmBlock) return out;
+  for (const raw of innerLines(fmBlock)) {
+    const m = /^\s*(概念|来源|tags)\s*:\s*(.*)$/.exec(String(raw || ""));
+    if (!m) continue;
+    const key = m[1];
+    let val = m[2].trim();
+    if (/^".*"$/.test(val) || /^'.*'$/.test(val)) val = val.slice(1, -1);
+    if (key === "tags") {
+      const inner = /^\[(.*)\]$/.exec(val);
+      out.tags = inner
+        ? inner[1]
+            .split(",")
+            .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+            .filter(Boolean)
+        : [];
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
 export const SIDES_FIELD = "晶体接法";
 
 /**
