@@ -346,6 +346,22 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.8** · Changed: **in desk mode, saving a card puts it in front of you, ready to keep writing.**
+
+Saving used to create the card while nothing moved on screen — you had to go find it in the
+vault yourself.
+
+Now, in **desk mode**, saving a card will
+
+- **open it as a window**, pinned to the bottom-right (the window's **right edge** 5% in from
+  the desk's right edge, its **bottom edge** 5% up from the bottom);
+- and **drop straight into edit mode**, cursor in the body, ready for the next sentence.
+
+Desk mode only. Grid mode is "N pages at once, for scanning" — forcing a window open there
+would yank you out of the page you are reading.
+
+---
+
 **1.4.7** · Fixed: **the three capabilities added in 1.4.6 never reached the reader.**
 
 `mount()` takes **named parameters**, and the line inside it that builds the reader is a
@@ -366,7 +382,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.6**.
+⚠️ Needs **CrystalFloat 1.0.8**.
 
 ---
 

@@ -2485,6 +2485,11 @@ export function createReader(ctx, opts = {}) {
     const b = deskBounds();
     // 桌面上还没有尺寸（比如刚切过来还没量到），先给一个能算的兜底
     const box = defaultDeskBox(desk.wins.length, spec.want || { w: 460, h: 620 }, b.w || 900, b.h || 700);
+    // 3.0 刀 44（用户 10-08）：落点**可以由调用方指定**。
+    // 起因是"刚建出来的卡要贴在右下角"——`defaultDeskBox` 那套是"一扇扇错开摆"，
+    // 表达不了"离右边 5%、离下边 5%"这种话。
+    // ⚠️ 只覆盖 x/y，**尺寸仍走 `defaultDeskBox`**：那一套里带着"不超出桌面"的夹取。
+    const at = spec.at && Number.isFinite(spec.at.x) && Number.isFinite(spec.at.y) ? spec.at : null;
     const w = {
       id: "dw" + ++deskSeq,
       kind: spec.kind,
@@ -2497,8 +2502,8 @@ export function createReader(ctx, opts = {}) {
       from: spec.from || 1,
       to: spec.to || DESK_PER_PAGE,
       total: 0,
-      x: box.x,
-      y: box.y,
+      x: at ? Math.round(at.x) : box.x,
+      y: at ? Math.round(at.y) : box.y,
       w: box.w,
       h: box.h,
       // 3.0 刀 18 收纳栏：新摆上的窗当然不在栏里。
@@ -2512,6 +2517,37 @@ export function createReader(ctx, opts = {}) {
     refreshDeskUi();
     persistDesk();
     return w;
+  }
+
+  /**
+   * 把一张卡摆到桌面上、**贴右下角**，并且**直接进编辑态**（用户 10-08）。
+   *
+   * 用户的原话：「存进晶体库之后就自动打开那张卡片，并且进入编辑模式，
+   * 且这张卡片放在屏幕右侧 5%、下侧 5% 的位置」。
+   *
+   * ⚠️ 「右侧 5% / 下侧 5%」说的是**窗的边缘**离桌面那条边 5%，不是左上角：
+   * 右上角写成 `W * 0.95` 的话，窗会比桌子还靠右半扇身位（`x` 是左上角）。
+   * 所以两处都要**减掉窗自己的宽 / 高**。
+   *
+   * ⚠️ 尺寸按桌面的比例给（34% × 50%），不是定值：桌面尺寸随机型/窗口而变，
+   * 写死一个 460×620 在小屏上会顶到边、在大屏上小得看不清。
+   */
+  function openCardOnDesk(path) {
+    const b = deskBounds();
+    const W = b.w || 900;
+    const H = b.h || 700;
+    const w = Math.max(240, Math.round(W * 0.34));
+    const h = Math.max(200, Math.round(H * 0.5));
+    const made = addDeskWin({
+      kind: "card",
+      path,
+      want: { w, h },
+      at: { x: Math.max(0, Math.round(W * 0.95 - w)), y: Math.max(0, Math.round(H * 0.95 - h)) },
+    });
+    // 用户要的是"能接着往下写"，所以摆完**直接进编辑态**——
+    // 还要用户再去找那颗 ✎ 的话，这一条就只做了一半。
+    if (made) toggleDeskEdit(made);
+    return made;
   }
 
   function removeDeskWin(id) {
@@ -4463,6 +4499,21 @@ export function createReader(ctx, opts = {}) {
       const sw = desk.wins.find((w) => w.kind === "storyline");
       const swRt = sw ? rtOf(sw.id) : null;
       if (!viaHost && !(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
+    }
+
+    // ── 3.0 刀 44（用户 10-08）：**存下来就当面把它摆出来，并进编辑态。** ──
+    //
+    // ⚠️ **只在桌面模式下做。** 网格模式下"桌上有一扇窗"这回事根本不存在，
+    // 硬开一扇会把正在翻页扫读的人拽出来。用户点名的也是「桌面模式」。
+    //
+    // ⚠️ `viaHost` 那一档（悬浮伴侣）不做：那边"打开这张卡"是**另一扇系统窗**
+    // 的事，由宿主自己决定（见 `onCardCreated`），核心不该替它摆到桌面上。
+    if (desk.on && !viaHost) {
+      try {
+        openCardOnDesk(path);
+      } catch (e) {
+        // 摆不出去**不该**把"卡已经建好了"这件事搞坏——那句话下面照说。
+      }
     }
 
     // 新卡可能**长出一颗新晶体**（建在一个还没有卡的文件夹里时），所以重画
