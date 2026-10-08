@@ -346,6 +346,14 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.14** · Fixed: **panels opened from File ops could be covered by desk windows.**
+
+The folder tree and the new/rename crystal box used to sit at `z-index` 6 and 7 — enough to beat the pick-a-document layer, but **desk windows** (page / card / structure) raise their z-index **every time you click one** (click-to-front). So after a while they climbed above the panels: you would click Delete card, the tree would be sitting behind a card window, and nothing on screen said why it would not respond.
+
+Those two panels now sit at **100000 / 100001** — the desk would need ten thousand clicks to catch up. A panel is a "temporarily cover everything" thing; a desk window is a "persistent, stackable" thing. The two should not be compared by size.
+
+---
+
 **1.4.13** · Changed: **three things — the target folder moves to the top bar, editing a concept updates the structure window, and vault changes made outside the plugin now show up.**
 
 **1. The 「将建在」 (will be created in) button moved out of `More`, to the left of 「换一份」.**
@@ -461,7 +469,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.13**.
+⚠️ Needs **CrystalFloat 1.0.14**.
 
 ---
 

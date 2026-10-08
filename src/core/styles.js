@@ -1994,7 +1994,18 @@ const READER = [
   // 两者叠着的时候树必须在上面，否则点不到。
   ".kb-v13-reader-folderpick{",
   "  display:none;flex-direction:column;gap:6px;padding:10px;border-radius:10px;",
-  "  position:absolute;top:12px;right:14px;width:300px;z-index:6;",
+  // ⚠️ 3.0 刀 46（用户 10-09）：**拉到整个阅读器的最顶层。**
+  //
+  // 原来这里是 `z-index:6`——比"选哪份文献"那层（2）高一点就够了，因为当时它
+  // 只跟那一层打照面。可**桌面上的窗**（页窗 / 卡片窗 / 结构窗）的 z-index 是
+  // **点一下涨一次**的（`++deskZ`，见 reader.js 的"点一下抬到最前"），
+  // 所以用上一会儿它们就爬到这棵树上面去了——表现为"点「文件改动」选了删除卡片，
+  // 树被一张卡挡住了，点不着"。
+  //
+  // 取一个**大得不可能是 deskZ 追上的**数：desk 那边要点一万下才会到这儿。
+  // 这一层和桌面窗不在同一个量级上，硬比大小是对的——面板本来就是"临时盖住一切"，
+  // 而桌面窗是"常驻、可以互相叠"的东西。
+  "  position:absolute;top:12px;right:14px;width:300px;z-index:100000;",
   "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
   "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.22));",
   "  background:var(--background-secondary, rgba(6,12,22,.97));",
@@ -2104,7 +2115,10 @@ const READER = [
   //   而那句话里挂着「确认删除／取消」两颗按钮，藏了就等于那颗按钮不存在。
   ".kb-v13-newcrystal{",
   "  display:none;flex-direction:column;gap:8px;padding:10px;border-radius:10px;",
-  "  position:absolute;top:12px;left:14px;z-index:7;",
+  "  position:absolute;top:12px;left:14px;z-index:100001;",
+  // ⚠️ 3.0 刀 46：`z-index` 那条同 `.kb-v13-reader-folderpick`——**拉到最顶层**。
+  // 理由逐字同那一条：桌面上那些窗的 z-index 是点一下涨一次，不抬到够高就会被
+  // 它们盖住（新建晶体 / 重命名时输入框点不着，而屏幕上看不出被谁挡了）。
   "  max-width:min(560px, calc(100% - 340px));",
   "  box-shadow:0 14px 36px var(--background-modifier-box-shadow, rgba(0,0,0,.5));",
   "  border:1px solid var(--background-modifier-border, rgba(0,200,255,.24));",
