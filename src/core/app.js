@@ -972,6 +972,20 @@ export async function mount({
   onWindowBox = null,
   /** 想切换全屏 / 浮窗 / 嵌入（库顶栏那颗按钮）。不给就不显示那颗按钮。 */
   onToggleWindow = null,
+  // ── 3.0 刀 44：宿主自己那一套窗口（**悬浮伴侣用**）─────────────────
+  //
+  // ⚠️ **这三个必须在这里列出来、并且在下面 `createReader` 那一行传下去。**
+  // 我第一版只把它们加进了 `createReader` 的 `opts`，忘了 `mount` 这一层——
+  // 而 `mount` 是用**具名参数**收的，没列出来的字段**直接丢掉**，
+  // 于是伴侣拿到的还是老行为（点卡在伴侣窗口里开一个方块、出不去），
+  // 而屏幕上、控制台里**一句错都没有**。这是最难查的一种坏法。
+  //
+  // `storyHost` —— 宿主自己那扇结构窗（给了就不开桌面层）
+  // `cardHost`  —— 宿主自己开卡片窗（给了就"点一张卡 = 一扇自己的窗"）
+  // `onCardCreated` —— 新建卡片成功后告诉宿主一声
+  storyHost = null,
+  cardHost = null,
+  onCardCreated = null,
   // 3.0 刀 37「嵌入」。
   //
   // `true` = 库**就长在它那颗 Obsidian 标签页里**——不盖住笔记、也不浮在笔记上，
@@ -1952,7 +1966,18 @@ export async function mount({
   // 一次就多一个监听，而且每个都指向一棵已经摘下来的树——与 __kbV13Watch /
   // __kbV13Keydown 是同一个套路。
   if (win.__kbV13Reader) win.__kbV13Reader.destroy();
-  ctx.reader = createReader(ctx, { el: readerEl, pdfRenderer, injectStyles, scratch });
+  // ⚠️ **这是一张写死的表。** 往 `createReader` 的 `opts` 里加东西时，
+  // 这里必须同时加一条——漏了的表现是「宿主明明传了、核心就是收不到」，
+  // 而且**一声不响**（3.0 刀 44 的 `storyHost`/`cardHost` 就这么丢过一轮）。
+  ctx.reader = createReader(ctx, {
+    el: readerEl,
+    pdfRenderer,
+    injectStyles,
+    scratch,
+    storyHost,
+    cardHost,
+    onCardCreated,
+  });
   win.__kbV13Reader = ctx.reader;
 
   // ---- 故事线的「写」（3.0 刀 17）----

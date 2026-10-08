@@ -346,6 +346,30 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.7** · Fixed: **the three capabilities added in 1.4.6 never reached the reader.**
+
+`mount()` takes **named parameters**, and the line inside it that builds the reader is a
+**hard-coded list**. 1.4.6 added `storyHost` / `cardHost` / `onCardCreated` to the reader's
+parameter list but forgot to list them on `mount` — and a field that isn't listed is
+**silently dropped**, with no error on screen and none in the console.
+
+The symptom was the companion behaving as before: clicks that did nothing, cards that
+couldn't get out.
+
+Two omissions from the same release are fixed as well:
+
+- Clicking the structure window inside the companion's read-and-note window used to
+  **do nothing** (the capability said "hand it to the host", but the host's structure
+  window only exists in **another** window). It now **opens or focuses that window**, and
+  can push a "show this crystal" into it when it's already open.
+- Clicking a node inside the companion's structure window used to **hand the card to
+  Obsidian**. It now **opens a window of its own for that card** — which is what was asked
+  for.
+
+⚠️ Needs **CrystalFloat 1.0.6**.
+
+---
+
 **1.4.6** · Changed: **the floating companion mounts components directly, and every card gets its own window.**
 
 Nothing visible changes **inside the app** — this release adds the three host

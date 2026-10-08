@@ -51,6 +51,24 @@ function setChromeText(id, text) {
 }
 
 /**
+ * 请外壳去开（或聚焦）**那扇结构窗**（3.0 刀 44）。
+ *
+ * 结构窗是**另一扇原生窗口**，渲染进程造不出来——它只能请求（见
+ * `floating/main.js` 的 `float:openStory`）。
+ *
+ * ⚠️ 结构窗已经开着时，外壳会把 `key` **推进那扇窗**（`float:showCrystal`），
+ * 而不是只把它抬到前面——用户点的是"换一颗晶体看"，窗本来就在。
+ */
+function openStoryWin(key) {
+  try {
+    const s = globalThis.__FLOAT_SHELL__;
+    if (s && typeof s.openStory === "function") s.openStory(key);
+  } catch {
+    /* 开不出来不该把当前这扇窗搞崩 */
+  }
+}
+
+/**
  * 把拖拽条上那几颗按钮接上外壳。
  *
  * **先接按钮、再连桥**：桥连不上的时候，用户至少还能把窗关掉/最小化，
@@ -225,7 +243,17 @@ export async function boot(cfg) {
           importCard: (path) => (storyEmbed ? storyEmbed.importCard(path) : false),
           placeNewCard: (path) => (storyEmbed ? storyEmbed.placeNewCard(path) : false),
         }
-      : null;
+      : role === "reader"
+        ? {
+            // ⚠️ 「边看边记」那扇窗里点「结构窗」= **开/聚焦另一扇窗**。
+            //
+            // 第一版这里什么都没给，于是 `openStoryWindow()` 走 `storyHost` 那一支、
+            // 调到 `storyEmbed`——而它**只存在于专用那扇窗里**（见 `bootStory`），
+            // 在这扇窗里永远是 null。症状就是「点了结构窗，一点反应都没有」。
+            // 结构窗是**另一扇原生窗口**，所以正确动作是请外壳去开它。
+            show: (key) => openStoryWin(key),
+          }
+        : null;
 
   // ── 卡片窗那一档（3.0 刀 44）──────────────────────────────────────
   //
@@ -365,13 +393,20 @@ async function bootStory(handle, publish) {
 
   const view = createEmbedStory(handle.ctx, {
     injectStyles: false, // 样式走 index.html 那份 <link>，与插件逐字节相同
-    // 点节点 = 打开那张卡。**桌面那一版是"摆到桌面上"**，而这里没有桌面可摆
-    // ——交给 Obsidian 打开它（`openNote` 是适配层的方法，伴侣这一侧是 RPC）。
+    // 点节点 = **给那张卡开一扇自己的窗**（用户 10-08 点名要的）。
+    //
+    // ⚠️ 第一版这里写的是 `adapter.openNote(path)`（交给 Obsidian 打开），
+    // 那是**错的**：用户要的是"结构窗里点开的卡片也能成为独立悬浮窗"，
+    // 而不是"跳去 Obsidian 看"。同一个动作在应用内那一版确实是"摆到桌面上"，
+    // 但伴侣里"桌面"就是这扇窗自己，摆到这儿等于出不去。
     onPlaceCard: (card) => {
+      const path = card && card.path;
+      if (!path) return;
       try {
-        handle.ctx.adapter.openNote(card && card.path);
+        const s = globalThis.__FLOAT_SHELL__;
+        if (s && typeof s.openCard === "function") s.openCard(path);
       } catch {
-        /* 打不开不该把窗搞崩 */
+        /* 开不出来不该把窗搞崩 */
       }
     },
     // 幽灵节点：在窗里换一颗晶体看。**偏好也要跟着写**——那是「结构窗固定看
@@ -404,6 +439,31 @@ async function bootStory(handle, publish) {
   });
   publish(view);
   host.appendChild(view.root);
+
+  // 外壳可能**要求这扇窗换一颗晶体看**（用户在「边看边记」那扇里点了「结构窗」，
+  // 而那扇窗已经开着——见 `floating/main.js` 的 `float:openStory`）。
+  // ⚠️ 只把它抬到前面是不够的：用户点的是"换晶体"，窗本来就在。
+  try {
+    const s = globalThis.__FLOAT_SHELL__;
+    if (s && typeof s.onShowCrystal === "function") {
+      s.onShowCrystal((key) => {
+        if (!key) return;
+        try {
+          handle.ctx.state.prefs = { ...(handle.ctx.state.prefs || {}), readerStoryCrystal: key };
+          if (handle.ctx.savePrefs) handle.ctx.savePrefs();
+        } catch {
+          /* 偏好存不下不该挡住这一趟 */
+        }
+        try {
+          view.show(key);
+        } catch {
+          /* 换不过去就还是老的，不该把窗搞崩 */
+        }
+      });
+    }
+  } catch {
+    /* 外壳没给这个能力就当没有 */
+  }
 
   // 走**真按钮**（仓库的规矩：句柄上开操作入口等于把真实那条路绕过去）。
   // `openStoryWindow()` 会：先请走「选哪份文献」那层 → 有晶体就 `storyHost.show()`，
