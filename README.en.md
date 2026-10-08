@@ -346,6 +346,28 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.6** · Changed: **the floating companion mounts components directly, and every card gets its own window.**
+
+Nothing visible changes **inside the app** — this release adds the three host
+capabilities the companion needs:
+
+- **The structure window no longer goes through the desk layer.** It used to bring the
+  whole desk layer along with one full-size structure window on it; now the structure
+  window component is **mounted straight into the window** and the desk layer is not
+  involved at all. (1.4.3 tried this once, but it also stripped the read-and-note
+  window's navigation — this time nothing else is touched.)
+- **Every card gets its own system window.** Click a card in the card box or the
+  structure window and the companion opens a **separate window for that card**: above all
+  other windows, **not minimized along with the companion window**, and draggable outside
+  it.
+- **"New card" is a window of its own**: it opens as a blank card, and once you save, it
+  becomes that card's window.
+
+⚠️ Needs **CrystalFloat 1.0.5**, from the
+[companion's releases](https://github.com/runyao-zhang/crystal-vault-float/releases/latest).
+
+---
+
 **1.4.5** · Changed: **the reader's top bar is rearranged, and the read-and-note column is gone.**
 
 The top bar now reads (new items in parentheses):

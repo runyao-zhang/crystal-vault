@@ -495,6 +495,16 @@ export default class CrystalVaultPlugin extends Plugin {
       name: "独立窗口：结构窗",
       callback: () => this.openFloating("story"),
     });
+    // 3.0 刀 44：**一张空白的新卡，一扇自己的窗**（用户 10-08 点名的那个「1」）。
+    //
+    // ⚠️ 它和上面两条不一样的地方：**没有 `path`**。有 path = 那扇窗是某一
+    // 已有的卡；没有 = 一扇等着你写的新卡。存下去之后伴侣会为那张新卡再开一扇窗
+    // （见 entry-floating.js 的 `onCardCreated`）。
+    this.addCommand({
+      id: "float-card",
+      name: "独立窗口：新建卡片",
+      callback: () => this.openFloating("card"),
+    });
 
     this.addSettingTab(new CrystalVaultSettingTab(this.app, this));
   }
@@ -606,9 +616,15 @@ export default class CrystalVaultPlugin extends Plugin {
   /**
    * 打开悬浮窗。找不到伴侣时给一句人话 + 一个下载入口，而不是静默失败。
    *
-   * @param {"reader"|"story"} role 哪一扇：
-   *   `reader` = 边看边记，`story` = 结构窗。**两扇各自独立**——
-   *   点哪条命令只影响哪扇窗，不会把另一扇关掉（见 companion.js 的 launch）。
+   * @param {"reader"|"story"|"card"} role 哪一扇：
+   *   `reader` = 边看边记，`story` = 结构窗，`card` = 一张空白的新卡。
+   *   **每扇各自独立**——点哪条命令只影响哪扇窗，不会把别的关掉
+   *   （见 companion.js 的 launch）。
+   *
+   * ⚠️ `openFloating` **只用来开这三种"固定"窗**。已有的卡片窗不从这里走：
+   *   那是用户**在伴侣里点一张卡**时开的，走的是伴侣进程内的 IPC
+   *   （`floating/main.js` 的 `float:openCard`）——插件这边根本不知道有那回事，
+   *   也不需要知道。
    */
   async openFloating(role) {
     const exe = this.companionPath();

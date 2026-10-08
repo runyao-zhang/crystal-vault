@@ -287,6 +287,42 @@ export function createReader(ctx, opts = {}) {
   // 就是**用户起名的一张真卡**，路径由 `scratchPathOf(name)` 现算；
   // 那个常量只剩「返回」那条路在用，而那条路整个删了。
   const scratchSpec = opts.scratch && opts.scratch.folder ? opts.scratch : null;
+  /**
+   * 宿主自己那扇结构窗（**悬浮伴侣用**）。
+   *
+   * 给了它 = 「这个宿主把结构窗摆在阅读器**外面**」——于是这几个入口全部改道：
+   *   · `openStoryWindow()`        → `storyHost.show(key)`，**不开桌面层**
+   *   · `chooseStoryCrystal(key)`  → 同上
+   *   · `importCardToStory(path)`  → `storyHost.importCard(path)`
+   *   · `submitCard` 摆新卡         → `storyHost.placeNewCard(path)`
+   *
+   * 不给 = 老行为（结构窗是**桌面上的一扇窗**，那套一行不动）。
+   *
+   * ⚠️ 为什么做成能力位而不是新句柄：这仓库里每一个"宿主能不能提供这个"
+   * 都是这个形状（`opts.scratch` / `opts.pdfRenderer` / `opts.dockColor`），
+   * 而且**能力位是只读的输入**——句柄上多一颗函数，等于给测试开了一条绕过
+   * 真实按钮的路（见 `app.js` 里"给句柄加操作入口"那段）。
+   *
+   * @type {{show: (key: string) => void, importCard?: (path: string) => void,
+   *         placeNewCard?: (path: string) => boolean} | null}
+   */
+  const storyHost = opts.storyHost && typeof opts.storyHost.show === "function" ? opts.storyHost : null;
+  /**
+   * 宿主自己开卡片窗（**悬浮伴侣用**）。
+   *
+   * 给了它 = 「这个宿主把**每一张卡**摆成一扇自己的系统窗」——于是这几条改道：
+   *   · 卡片盒点一张卡（`onCardPick`） → `cardHost.open(card.path)`
+   *   · 结构窗上点一个节点（`onPlaceCard`）→ 同上
+   *
+   * 不给 = 老行为（卡片是**桌面上的一扇窗**）。
+   *
+   * ⚠️ 为什么伴侣要这个：桌面窗是**伴侣那扇窗里的一个方块**——伴侣最小化它就没了，
+   * 也拖不出伴侣的窗口。用户要的是"每张卡自己一扇窗，浮在所有页面之上、
+   * 不随伴侣最小化"。那不是把方块做大一点能得到的，得是**另一个原生窗口**。
+   *
+   * @type {{open: (path: string) => void} | null}
+   */
+  const cardHost = opts.cardHost && typeof opts.cardHost.open === "function" ? opts.cardHost : null;
   const el = opts.el;
 
   const st = {
@@ -2132,6 +2168,28 @@ export function createReader(ctx, opts = {}) {
     // 一份文献都没开的时候，整块屏盖着「选哪份文献」那一层。结构窗开在它底下，
     // 不请走它就等于开了一块点不到的窗——和顶栏那颗「故事线」是同一个坑。
     hidePicker();
+    // ── 宿主自己有结构窗那一档（悬浮伴侣）─────────────────────────────
+    //
+    // ⚠️ **这条分支必须在 `setDeskMode` 前面**：那句会把整个桌面层拉出来，
+    // 而这一档要的正是「桌面层根本不参与」。顺序写反 = 伴侣那扇窗里多出
+    // 一整个空桌面，而结构窗还挂在上面。
+    if (storyHost) {
+      if (!(ctx.model.crystalKeys || []).length) {
+        say("这张库里还没有晶体。", false);
+        return;
+      }
+      const k = storyCrystalPref();
+      if (!k) {
+        // 没挑过就摊开树让他挑；挑完 `chooseStoryCrystal` 会交给 storyHost
+        openFolderPick("crystal");
+        say("挑一颗晶体：结构窗就固定看它。", true);
+        return;
+      }
+      setStoryCrystal(k);
+      storyHost.show(k);
+      say("结构窗在看：" + (shortFolder(k) || k), true);
+      return;
+    }
     if (!desk.on) setDeskMode(true);
     const exist = desk.wins.find((w) => w.kind === "storyline");
     if (exist) {
@@ -2195,8 +2253,14 @@ export function createReader(ctx, opts = {}) {
     // ⚠️ **收完树还要再请一次那层「选哪份文献」。**
     // `hideFolderPick` 结尾有一条「没收成"选哪份文献"那层就还回来」——那是给
     // **取消**准备的（一份文献没开的人关掉树，屏幕上总得有东西）。但这里不是取消：
-    // 用户挑定了晶体，接下来要在**桌面上**干活，那层铺满整屏的东西盖上来就白挑了。
+    // 用户挑定了晶体，接下来要在**结构窗上**干活，那层铺满整屏的东西盖上来就白挑了。
     hidePicker();
+    // 宿主自己那扇：换过去就完了，桌面层不参与（见 `storyHost` 那段）。
+    if (storyHost) {
+      storyHost.show(k);
+      say("结构窗换成：" + (shortFolder(k) || k), true);
+      return;
+    }
     const exist = desk.wins.find((w) => w.kind === "storyline");
     if (!exist) {
       addStoryWin(k);
@@ -3116,6 +3180,18 @@ export function createReader(ctx, opts = {}) {
 
   /** 点一张卡 = 摆到桌面上。**不写盘**（3.0 刀 9 第二版起回链是手动的）。 */
   function onCardPick(card) {
+    const path = toStr(card && card.path);
+    // ── 宿主自己开卡片窗那一档（悬浮伴侣）────────────────────────────
+    //
+    // ⚠️ **这条必须排在 `setDeskMode` 前面**：那句会把整个桌面层拉出来，
+    // 而这一档要的正是"这张卡不进桌面，它自己是一扇系统窗"。
+    //
+    // ⚠️ 选卡盒那句话（「已摆到桌面…」）在这一档里**不说了**——它说的是
+    // 桌面上那件事，而这里没有桌面。留一句话说错的事，比不说更坏。
+    if (cardHost && path) {
+      cardHost.open(path);
+      return;
+    }
     // 桌面没开就先开——「点了没反应」是最不受欢迎的反馈。
     // （开桌面会顺手摆上一扇页窗，它就成了「正在读的那一页」。）
     if (!desk.on) setDeskMode(true);
@@ -3283,6 +3359,13 @@ export function createReader(ctx, opts = {}) {
     // 但用户看到的是一片「选哪份文献」——读起来就是「导入没生效」。
     // （`pickNeedsSide` 把 importcard 并进来之后，这条兜底对导入这条路也成立了。）
     hidePicker();
+    // 宿主自己那扇：能力位是**可选的**（`importCard` 可以不给），
+    // 不给就说清楚，别静默——引卡是用户明确点下来的一下。
+    if (storyHost) {
+      if (typeof storyHost.importCard === "function") storyHost.importCard(path);
+      else say("这个宿主的结构窗还不能引卡。", false);
+      return;
+    }
     if (!rt || !rt.embed) {
       say("结构窗没开着——先打开结构窗再引卡。", false);
       return;
@@ -4371,9 +4454,15 @@ export function createReader(ctx, opts = {}) {
     // 而这条没有——用户走的恰好是这条，于是他看到的是"卡出来了，但在默认位置"。
     // **两条路都是"建一张卡"，位置这件事只能一样。**
     {
+      // 宿主自己那扇结构窗排在**最前面**：阅读器开着的时候它就是用户眼前那块，
+      // 桌面那扇（如果有）在它后面。给出能力位的宿主自己会判「这张卡是不是
+      // 属于我这一层」，判不过回 false，下面那条照旧兜底。
+      const viaHost = storyHost && typeof storyHost.placeNewCard === "function"
+        ? storyHost.placeNewCard(path)
+        : false;
       const sw = desk.wins.find((w) => w.kind === "storyline");
       const swRt = sw ? rtOf(sw.id) : null;
-      if (!(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
+      if (!viaHost && !(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
     }
 
     // 新卡可能**长出一颗新晶体**（建在一个还没有卡的文件夹里时），所以重画
@@ -4394,6 +4483,16 @@ export function createReader(ctx, opts = {}) {
     bodyEl.value = "";
     bodyEl.focus();
     say("已建：「" + card.title + "」→ " + (shortFolder(card.folder) || "卡片根目录"), true);
+    // 宿主想知道"刚建出来的是哪张"（悬浮伴侣的「新建卡片」窗要借它转成那张卡的窗，
+    // 见 `entry-floating.js`）。**可选**，而且**排在所有落盘之后**——
+    // 宿主拿到它时文件已经真的在盘上了，它要真想开一扇窗去看，看得到。
+    if (typeof opts.onCardCreated === "function") {
+      try {
+        opts.onCardCreated({ ...card });
+      } catch {
+        /* 宿主那一头出问题不该把"卡已经建好了"这件事搞坏 */
+      }
+    }
     return { ...card };
   }
 
@@ -4889,6 +4988,22 @@ export function createReader(ctx, opts = {}) {
     // 就等于绕过了「按钮在不在、点得到点不到」那一层。
     deskOn: () => desk.on,
     deskWins: () => desk.wins.map((w) => ({ ...w })),
+    /**
+     * 把「挑晶体」/「挑卡片」那棵树摊开（3.0 刀 44）。
+     *
+     * ⚠️ **这两个是给宿主自己那扇结构窗用的**（`opts.storyHost`）：那扇窗里
+     * 「换晶体」「导入卡片」两颗按钮点下去要开树，而树长在阅读器里，
+     * `openFolderPick` 是闭包里的——宿主没有别的路。
+     *
+     * ⚠️ 它们**不改变任何默认行为**：挑完的落点由 `storyHost` 决定，
+     * 没给能力位的宿主走的还是桌面那扇窗。也就是说这两个口子**只在伴侣里有效果**，
+     * 而伴侣正是那个"没有桌面可摆"的宿主。
+     *
+     * 上面那条"句柄上开后门 = 绕过按钮"的规矩在这里仍然成立，所以它们
+     * **只开树、不代替任何动作**：用户在树里点的那一下才是动作本身。
+     */
+    pickCrystal: () => openFolderPick("crystal"),
+    pickCard: () => openFolderPick("importcard"),
     submitCard,
     /** 窗口变了重新排一次（app.js 的 kbResize 调它）。挂起时它自己会跳过。 */
     onResize: resizeNow,
