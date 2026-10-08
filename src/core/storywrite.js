@@ -14,6 +14,9 @@
 
 import { cutLinkSpans, patchBody, splitCard, stripBodyPrefix } from "./frontmatter.js";
 import { applyCardFields, parseLinks } from "./model.js";
+// 「删一根蓝线」也要**把这条接法从源卡的 frontmatter 里一起摘掉**（3.0 刀 44）。
+// 不清的话那条残留会让这一对**再也连不上**——理由见 `writeStoryLink` 判重那段。
+import { queueCardSides } from "./linksides.js";
 
 /**
  * @param {object} ctx 宿主上下文（晶体库那个真 ctx，或结构窗的影子对象）
@@ -51,7 +54,23 @@ export function createStoryWrite(ctx, ui) {
     if (!card || !target) return "error";
     const link = "[[" + target.title + "]]";
     const base = card.content == null ? "" : card.content;
-    if (base.indexOf(link) >= 0) {
+    // ⚠️⚠️ 3.0 刀 44（**用户 10-08 自己找到的根因**）：**判重只能看正文，不能看整份文件。**
+    //
+    // 原来这里是 `base.indexOf(link)` —— `base` 是**整份文件，含 frontmatter**。
+    // 而 frontmatter 里那个 `晶体接法` 字段存的就是 `"[[目标卡]] 起点 终点"`
+    // （见 model.js 那段示例）。于是：
+    //
+    //   连一次线 → 删掉这条线（正文里的 `[[…]]` 被挖掉，**但「晶体接法」那一条留着**）
+    //   → 再拖同一对 → `indexOf` **命中 frontmatter 里那一条** → 这里说"已经连着了"
+    //   → 不写、不画。**而且永远这样**，因为没人再清那条字段。
+    //
+    // 用户的原话就是这条路径：「首次打开晶体库都能正常连接，连完一条线再删除，
+    // 这时候晶体接法上仍然有刚才的链接」。症状是"那一对再也连不上"。
+    //
+    // 正文才是链接住的地方 —— `parseLinks(body)`、`removeStoryLinks` 都在正文上
+    // 解析和切割，判重没有理由用别的口径。
+    const { body } = splitCard(base);
+    if (body.indexOf(link) >= 0) {
       // 3.0 刀 13：这一句原来只说"没有重复写"，可接法提示**照样会按你拖的改**，
       // 屏幕上那根线会挪。用户读到的是「说没写，可线动了」——那是在说谎。
       say("这两张卡已经连着了。接的位置按你拖的改过来了。", true);
@@ -68,7 +87,6 @@ export function createStoryWrite(ctx, ui) {
       if (ui.afterWrite) ui.afterWrite();
       return "dup";
     }
-    const { body } = splitCard(base);
     const content = patchBody(base, stripBodyPrefix(body) + "\n\n" + link + "\n");
     let res;
     try {
@@ -140,6 +158,8 @@ export function createStoryWrite(ctx, ui) {
     // 按卡分组，**两个方向都塞**：屏幕上一根线只说明"两边之一链向另一个"，
     // fwd/back 是渲染的产物，不能拿它当"这条是谁写的"。
     const want = new Map();
+    /** 源卡路径 → 这一趟要摘掉的**目标标题**集合（接法字段按标题匹配，见 setCardSide）。 */
+    const wantTitles = new Map();
     for (const p of list) {
       if (!p || !p.from || !p.to || p.from === p.to) continue;
       for (const [a, b] of [
@@ -148,6 +168,14 @@ export function createStoryWrite(ctx, ui) {
       ]) {
         if (!want.has(a)) want.set(a, new Set());
         want.get(a).add(b);
+        // ⚠️ 3.0 刀 44（用户 10-08 找到的）：正文里那条 `[[…]]` 挖掉之后，
+        // **frontmatter 的 `晶体接法` 里那一条也得摘**。它不只是垃圾——
+        // `writeStoryLink` 判重命中的就是它，留着等于把这一对**永久锁死**。
+        const t = ctx.model.byPath.get(b);
+        if (t && t.title) {
+          if (!wantTitles.has(a)) wantTitles.set(a, new Set());
+          wantTitles.get(a).add(t.title);
+        }
       }
     }
 
@@ -201,6 +229,24 @@ export function createStoryWrite(ctx, ui) {
         continue;
       }
       applyCardFields(card, {}, res.content);
+      // ── 3.0 刀 44：把这条接法从**源卡自己的 frontmatter** 里摘掉 ──
+      //
+      // 用户 10-08 找到的：删掉一根蓝线之后，源卡的 `晶体接法` 里还留着
+      // `"[[目标卡]] 起点 终点"`。那条残留会让 `writeStoryLink` 判重时**命中它**
+      // （旧版判的是整份文件），于是**这一对再也连不上**。
+      //
+      // ⚠️ 走 `queueCardSides`（防抖合流）而**不是**立刻写盘：一次框选可能删好几根
+      // 线、动同一张卡好几回，每回写一次就是同步风暴（这一条 `cardpos` 那条路也一样）。
+      // ⚠️ 内存那份 `card.sides` 要**当场**改：这一帧的重画就要用它。
+      const drop = wantTitles.get(srcPath);
+      if (drop && drop.size) {
+        const cur = Array.isArray(card.sides) ? card.sides : [];
+        const kept = cur.filter((e) => !e || !drop.has(String(e.title || "").trim()));
+        if (kept.length !== cur.length) {
+          card.sides = kept;
+          queueCardSides(ctx, card.path, kept);
+        }
+      }
       done.push({ path: card.path, prev: base, base: res.content });
       removed += cut.removed;
       if (cut.ateLines) ateLines = true;

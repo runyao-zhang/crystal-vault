@@ -346,6 +346,23 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.11** · Fixed: **after deleting a blue line, that pair could never be linked again.**
+
+The root cause was found by the user: "the first time I open the vault linking works; after I draw a line and then delete it, the **晶体接法** field still holds the link I just drew."
+
+Here is the chain:
+
+1. Drag a line → `[[target card]]` goes into the body, **and** a `晶体接法: ["[[target card]] from-side to-side"]` entry is recorded in that card’s frontmatter.
+2. Delete that line → the `[[…]]` is cut out of the body, **but nothing cleans the `晶体接法` entry.**
+3. Drag the same pair again → the duplicate check used the **whole file** (`card.content.indexOf(...)`), so it **hit that leftover entry in the frontmatter** → "these two are already linked" → no write, no line. **And that state was permanent.**
+
+Two fixes:
+
+- **The duplicate check now looks at the body only** (`splitCard(base).body`). Links live in the body; `parseLinks` and the delete path both work on the body, so the check has no business using a different measure.
+- **Deleting a line now removes the matching `晶体接法` entry too** (through `queueCardSides`, the same debounced path coordinates use, so deleting several lines at once does not cause a sync storm).
+
+---
+
 **1.4.10** · Fixed: **a blue line that is in the file but never on screen — and retrying could never fix it.**
 
 Two things; the second is what got you stuck.
@@ -404,7 +421,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.10**.
+⚠️ Needs **CrystalFloat 1.0.11**.
 
 ---
 
