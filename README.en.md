@@ -346,6 +346,18 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.10** · Fixed: **a blue line that is in the file but never on screen — and retrying could never fix it.**
+
+Two things; the second is what got you stuck.
+
+**1. The early-return branch never redrew.** When `writeStoryLink` finds the link already present in the source card, it says "these two are already linked — the attachment side follows your drag" and then **returns without redrawing anything**.
+
+But that message promises the side just changed — and it did. So whenever the link is already on disk and the screen shows no line for any reason, **every retry lands in that branch**: one message, nothing else. The line can never come back, no matter how many times you redraw it. (Your "it works again now" was a window reopen forcing a full redraw.)
+
+**2. Any throw in the post-write refresh took the final redraw down with it.** Those steps are now wrapped: the error is logged, the redraw still happens.
+
+---
+
 **1.4.9** · Fixed: **the "open the card after saving" feature from 1.4.8 never ran.**
 
 A scoping mistake: `viaHost` was declared **inside** a `{ }` block while the new code read it **outside** — `const` is block-scoped, so reading it there is a `ReferenceError`.
@@ -392,7 +404,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.9**.
+⚠️ Needs **CrystalFloat 1.0.10**.
 
 ---
 

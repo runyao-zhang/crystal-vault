@@ -55,6 +55,17 @@ export function createStoryWrite(ctx, ui) {
       // 3.0 刀 13：这一句原来只说"没有重复写"，可接法提示**照样会按你拖的改**，
       // 屏幕上那根线会挪。用户读到的是「说没写，可线动了」——那是在说谎。
       say("这两张卡已经连着了。接的位置按你拖的改过来了。", true);
+      // ⚠️⚠️ 3.0 刀 44（用户 10-08 报的）：**这一支原来直接 `return`，一次都不重画。**
+      //
+      // 后果是一个**死锁**：只要盘上早就有那条 `[[链接]]`、而屏幕上因为任何原因
+      // 没有线（那一次写完之后的重画断在别处），用户**每拖一次都掉进这一支**——
+      // 它说"已经连着了"、然后什么都不做。于是"文件里明明有、屏幕上永远没有"，
+      // 而且**怎么重拖都出不来**。用户那天的原话是「连蓝色线又不行了」，
+      // 然后过了一会儿「现在又好了」——"好了"是重开窗触发的整窗重画。
+      //
+      // 重画本来就是这一支答应过的事（那句话自己说"接的位置改过来了"，
+      // 而接法是刚写进去的），漏的只是**做**。补上它，这条路就再也卡不住人。
+      if (ui.afterWrite) ui.afterWrite();
       return "dup";
     }
     const { body } = splitCard(base);
@@ -78,13 +89,23 @@ export function createStoryWrite(ctx, ui) {
     }
     // 用**回读的真实全文**更新模型，不是我们自己拼的那份（宿主可能规范化了行尾）。
     applyCardFields(card, {}, res.content);
-    if (ctx.refreshRelations) ctx.refreshRelations();
-    // ⚠️ **不要调 `ctx.refreshCard`**。它的名字看着像「重画那张卡」，实际是
-    // `showHologram(...)`——会把卡片盒收掉、还在背后打开一张卡的面板。
-    // reader.js 的 writeBacklink 在同一个坑上写过一整段注释，这里是同一个坑。
-    if (ctx.refreshCards) ctx.refreshCards();
-    if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
-    if (ctx.flushViewState) ctx.flushViewState();
+    // ⚠️ 3.0 刀 44：**这几步中的一个抛了，不能让最后那一下重画一起陪葬。**
+    //
+    // 用户 10-08 报的就是"写得进文件、屏幕上永远没有线，而且怎么重拖都出不来"
+    // ——盘上有链接、屏幕上没有，正是"写到一半断在这几行里、`ui.afterWrite()`
+    // 没跑到"的形状。断在哪儿我没能复现，但**这一层的责任边界是清楚的**：
+    // 内容已经落盘了，屏幕必须跟上。所以吞掉异常、留痕、继续往下走。
+    try {
+      if (ctx.refreshRelations) ctx.refreshRelations();
+      // ⚠️ **不要调 `ctx.refreshCard`**。它的名字看着像「重画那张卡」，实际是
+      // `showHologram(...)`——会把卡片盒收掉、还在背后打开一张卡的面板。
+      // reader.js 的 writeBacklink 在同一个坑上写过一整段注释，这里是同一个坑。
+      if (ctx.refreshCards) ctx.refreshCards();
+      if (ctx.refreshCrystalLayer) ctx.refreshCrystalLayer();
+      if (ctx.flushViewState) ctx.flushViewState();
+    } catch (e) {
+      console.error("[晶体库] 链接写进去了，但写完之后的刷新断了一步（重画照做）：", e);
+    }
 
     undoState = { entries: [{ path: card.path, prev: base, base: res.content }] };
     ui.setUndoVisible(true);
