@@ -346,6 +346,16 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.9** · Fixed: **the "open the card after saving" feature from 1.4.8 never ran.**
+
+A scoping mistake: `viaHost` was declared **inside** a `{ }` block while the new code read it **outside** — `const` is block-scoped, so reading it there is a `ReferenceError`.
+
+Worse, that code sat inside a `try/catch`, so **the error was swallowed**: no card window, and not a single line in the console.
+
+That `catch` now logs with `console.error` — the same failure will at least be visible next time.
+
+---
+
 **1.4.8** · Changed: **in desk mode, saving a card puts it in front of you, ready to keep writing.**
 
 Saving used to create the card while nothing moved on screen — you had to go find it in the
@@ -382,7 +392,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.8**.
+⚠️ Needs **CrystalFloat 1.0.9**.
 
 ---
 

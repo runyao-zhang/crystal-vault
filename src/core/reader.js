@@ -4489,13 +4489,19 @@ export function createReader(ctx, opts = {}) {
     // ⚠️ 这一段原来只在**另一条**建卡路径（不挂原生编辑器那条）里有，
     // 而这条没有——用户走的恰好是这条，于是他看到的是"卡出来了，但在默认位置"。
     // **两条路都是"建一张卡"，位置这件事只能一样。**
+    // ⚠️ **`viaHost` 必须声明在块外面。**
+    //
+    // 它原来写在下面那个 `{ }` 里，而 3.0 刀 44 那段又在块外读它——`const` 是
+    // 块级作用域，块外读它是 `ReferenceError`，而那段外面套着 `try/catch`，
+    // **报错被吞掉**：屏幕上没有卡片窗、也没有任何一条错。用户 10-08 报的
+    // "这个功能没有实现"就是这个。
+    const viaHost = storyHost && typeof storyHost.placeNewCard === "function"
+      ? storyHost.placeNewCard(path)
+      : false;
     {
       // 宿主自己那扇结构窗排在**最前面**：阅读器开着的时候它就是用户眼前那块，
       // 桌面那扇（如果有）在它后面。给出能力位的宿主自己会判「这张卡是不是
       // 属于我这一层」，判不过回 false，下面那条照旧兜底。
-      const viaHost = storyHost && typeof storyHost.placeNewCard === "function"
-        ? storyHost.placeNewCard(path)
-        : false;
       const sw = desk.wins.find((w) => w.kind === "storyline");
       const swRt = sw ? rtOf(sw.id) : null;
       if (!viaHost && !(swRt && swRt.embed && swRt.embed.placeNewCard(path))) placeNewCard(ctx, path);
@@ -4513,6 +4519,9 @@ export function createReader(ctx, opts = {}) {
         openCardOnDesk(path);
       } catch (e) {
         // 摆不出去**不该**把"卡已经建好了"这件事搞坏——那句话下面照说。
+        // ⚠️ 但**必须留痕**：这一条上面就是"空 catch 把 ReferenceError 吞掉、
+        // 功能静默不生效"的现场。以后再有同样的坏法，控制台里得看得见。
+        console.error("[晶体库] 新卡摆到桌面失败：", e);
       }
     }
 
