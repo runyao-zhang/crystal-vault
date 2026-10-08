@@ -223,17 +223,34 @@ export function patchFrontmatter(raw, patch) {
 
   if (!fmBlock) {
     // 没有 frontmatter 的卡（库里的「123.md」就是）：新建一个块，正文原样接在后面
-    const made = keys.map((k) => k + ": " + encodeValue(p[k]));
+    // ⚠️ `null` 是**删字段**。这儿没有块可删，所以直接跳过——
+    // 不跳的话会写出一个 `晶体接法: null`，凭空造出一个值叫 null 的字段。
+    const made = keys.filter((k) => p[k] !== null).map((k) => k + ": " + encodeValue(p[k]));
+    if (!made.length) return src;
     return "---" + nl + made.join(nl) + nl + "---" + nl + body;
   }
 
   const lines = innerLines(fmBlock);
   for (const key of keys) {
     const at = findKey(lines, key);
+    // ⚠️ 3.0 刀 44：**传 `null` = 把这个字段整个删掉。**
+    //
+    // 从前没有这条路，于是"把一个字段清空"只能拿一张空表去顶
+    // （`晶体接法: []`）——而调用方为了躲那行空字段，**干脆跳过不写**，
+    // 于是删掉最后一个值时那条字段**永远留在文件里**
+    // （用户 10-08 撞上的就是这个：线删了，`晶体接法` 里还留着）。
+    // "删掉"和"写个空值"是两件事，这里补的是前者。
+    if (p[key] === null) {
+      if (at >= 0) lines.splice(at, blockEnd(lines, at) - at);
+      continue;
+    }
     const text = key + ": " + encodeValue(p[key]);
     if (at < 0) lines.push(text);
     else lines.splice(at, blockEnd(lines, at) - at, text);
   }
+  // 整个块被删空了：连那两块 `---` 一起收掉，别在卡头留一对空壳。
+  // （只在"这一张卡的 frontmatter 里只剩被删的那一个字段"时才会走到。）
+  if (!lines.length) return body;
   return "---" + nl + lines.join(nl) + nl + "---" + nl + body;
 }
 

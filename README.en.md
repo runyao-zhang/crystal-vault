@@ -346,6 +346,16 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.12** · Fixed: **deleting a line left its `晶体接法` entry behind in the card.**
+
+1.4.11 made deleting a line also drop the matching `晶体接法` entry — but it could not, because `patchFrontmatter` **has no way to delete a field at all**: it only ever writes `key: value`. And when a field is emptied, the caller *skipped the write* rather than leave an empty field on the card. Together:
+
+> **Deleting a card's last line left that `晶体接法` entry in the file forever.**
+
+`patchFrontmatter` now treats `null` as **delete this field entirely** (taking the two `---` markers with it if the whole block ends up empty), and `linksides` takes that path when the list is empty.
+
+---
+
 **1.4.11** · Fixed: **after deleting a blue line, that pair could never be linked again.**
 
 The root cause was found by the user: "the first time I open the vault linking works; after I draw a line and then delete it, the **晶体接法** field still holds the link I just drew."
@@ -421,7 +431,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.11**.
+⚠️ Needs **CrystalFloat 1.0.12**.
 
 ---
 

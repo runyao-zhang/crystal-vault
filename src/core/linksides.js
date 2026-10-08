@@ -135,12 +135,16 @@ async function flushBatch(ctx, api) {
       continue;
     }
     const vals = list.map(formatSideEntry).filter(Boolean);
-    // 空表不写。`patchFrontmatter` **删不了字段**（它的注释写明"删字段不在本轮
-    // 范围"），写一个 `晶体接法: []` 进去只是凭空在每张卡上多一行空字段。
-    // 现在也没有"清掉一条接法"的入口，所以空表只会来自别处误调。
-    if (!vals.length) continue;
     const base = card.content == null ? "" : card.content;
-    const next = patchFrontmatter(base, { [SIDES_FIELD]: vals });
+    // ⚠️ 3.0 刀 44（用户 10-08）：**空表 = 把这个字段删掉，不是"跳过不写"。**
+    //
+    // 从前这里是 `if (!vals.length) continue;`，理由是"`patchFrontmatter` 删不了
+    // 字段，写一张空表进去只是凭空多一行空字段"。可那一跳的代价是：
+    // **删掉最后一个值时，那条 `晶体接法` 就永远留在文件里**——用户报的正是这个
+    // （"线条确实能连了能删了，但晶体接法没有一起摘掉"）。
+    //
+    // 现在 `patchFrontmatter` 认 `null` = 删字段，空表就交给它删。
+    const next = patchFrontmatter(base, { [SIDES_FIELD]: vals.length ? vals : null });
     // 空操作护栏：算出来跟原文一模一样就什么都别做（同 cardpos 那条）。
     if (next === base) continue;
     let res;
