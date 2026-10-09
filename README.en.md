@@ -469,7 +469,7 @@ Two omissions from the same release are fixed as well:
   Obsidian**. It now **opens a window of its own for that card** — which is what was asked
   for.
 
-⚠️ Needs **CrystalFloat 1.0.14**.
+⚠️ Needs **CrystalFloat 1.0.15**.
 
 ---
 

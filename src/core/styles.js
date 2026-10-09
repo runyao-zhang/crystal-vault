@@ -1649,7 +1649,19 @@ const READER = [
   // 桌面是 `.kb-v13-reader-main` 这一行 flex 里的**第三个子项**（页区 / 右栏 / 桌面），
   // 不是绝对定位盖上去的一层。这样它天然只占页区那一块——右边那栏还在，
   // 底下的窗口夹取也就能按桌面自己的尺寸算（见 desk.js 的 spec.bounds）。
-  ".kb-v13-reader-desk{display:none;flex:1;position:relative;overflow:hidden;}",
+  // ⚠️ 3.0 刀 47（用户 10-09 报的）：**`z-index:1` 不是装饰，是把桌面"封起来"。**
+  //
+  // 原来这条只有 `position:relative`、**没有 z-index**——而 `position:relative` +
+  // `z-index:auto` **不构成层叠上下文**。于是桌面上每一扇窗的 z-index
+  // （`++deskZ`，点一下抬到最前）都**穿透这一层、直接跑到 `.kb-v13-reader-main`
+  // 去和别的兄弟比**。数字上它们比不过"文件改动"那两个面板（100000/100001），
+  // 但结构上**根本没有"桌面整体在面板之下"这条保证**——哪天有谁给桌面设了
+  // 更高的 z-index、或者多出第三层，这层纸就破了。
+  //
+  // 加上它之后：桌面自成一个层叠上下文，**里面所有窗的 z-index 出一律封在这一层里**，
+  // 外面只需要比这一个数字（1）。面板只要 > 1 就永远压得住桌面——不管用户
+  // 点过多少下、deskZ 涨到多少。这才是"不是仅 z-index 能解决"的那件事的正解。
+  ".kb-v13-reader-desk{display:none;flex:1;position:relative;overflow:hidden;z-index:1;}",
   ".kb-v13-reader-desk.on{display:block;}",
   // 桌面开着时把网格收起来。两套版式共用同一块地方，同时显示只会互相压。
   ".kb-v13-reader-sheets-off{display:none;}",
