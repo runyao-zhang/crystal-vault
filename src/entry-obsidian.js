@@ -799,12 +799,42 @@ export function createObsidianAdapter({
         // 用法就是**不打开 .md 标签页**（都在晶体库里读），于是每一次点「编辑」都
         // 掉进降级那条路，还附带一句给开发看的报错话。
         //
+        // ---- 1.4.16：前两条的**顺序倒过来了**（用户 10-12：「桌面模式的卡片的
+        //      编辑模式又用不了了」，界面上写着「编辑器没长出来」）----
+        //
+        // 原来先借**活实例的构造器**，拿不到才去问工厂。真机对照实验（同一颗叶子、
+        // 同一个 app 状态、连 `view.constructor.name` 都一模一样，**只换造视图那一行**）：
+        //
+        //   `creator(leaf)`       → `.cm-editor` **第 0 帧就出现**
+        //   `new ViewCtor(leaf)`  → **60 帧都不出现**（视图挂上了，编辑器不长）
+        //
+        // 两者造出来的是同名类，`instanceof` 分不出来。差别在于
+        // `viewRegistry.viewByType` 那个工厂**不只是 `new` 一下**——它还做了让编辑器
+        // 真正初始化所必需的事（没有文档，只能实测）。
+        //
+        // 于是一个很别扭的症状：**开着一篇 .md 笔记时反而挂不上**（走了借构造器那
+        // 条），一篇都不开时倒好了（才轮到工厂）。用户报的「时灵时不灵」就是这个。
+        //
         // 现在依次试，**任何一条走通就不再往下**：
-        //   ① 活着的 markdown 实例（原路，判据放宽）
-        //   ② `app.viewRegistry.viewByType` 里那个造视图的函数——**不需要任何笔记开着**
+        //   ① `app.viewRegistry.viewByType` 里那个造视图的函数——**唯一真能挂上的那条**
+        //   ② 活着的 markdown 实例的构造器（原路，判据放宽）——**只在①拿不到时才用**
         //   ③ 上一次借成的那一份，本会话内一直有效
-        let ViewCtor = null;
         let creator = null;
+        // ⚠️ 整条包在 try 里：`viewRegistry` 是**没有文档的内部结构**，
+        //    换个 Obsidian 版本可能整个不见。拿不到就往下走，**绝不抛**。
+        try {
+          const reg = app.viewRegistry && app.viewRegistry.viewByType;
+          const c = reg
+            ? typeof reg.get === "function"
+              ? reg.get("markdown")
+              : reg["markdown"]
+            : null;
+          if (typeof c === "function") creator = c;
+        } catch (e) {
+          /* 没有这个口子就没有 */
+        }
+
+        let ViewCtor = null;
         let anyLeaf = null;
         for (const l of app.workspace.getLeavesOfType("markdown") || []) {
           const v = l && l.view;
@@ -817,22 +847,8 @@ export function createObsidianAdapter({
             break;
           }
         }
-        if (!ViewCtor) {
-          // ⚠️ 整条包在 try 里：`viewRegistry` 是**没有文档的内部结构**，
-          //    换个 Obsidian 版本可能整个不见。拿不到就往下走，**绝不抛**。
-          try {
-            const reg = app.viewRegistry && app.viewRegistry.viewByType;
-            const c = reg
-              ? typeof reg.get === "function"
-                ? reg.get("markdown")
-                : reg["markdown"]
-              : null;
-            if (typeof c === "function") creator = c;
-          } catch (e) {
-            /* 没有这个口子就没有 */
-          }
-        }
-        if (!ViewCtor && !creator && editorBorrow) {
+        // 两条路都没问到，才翻本会话记着的那一份。
+        if (!creator && !ViewCtor && editorBorrow) {
           creator = editorBorrow.creator || null;
           ViewCtor = editorBorrow.ctor || null;
         }
@@ -852,9 +868,14 @@ export function createObsidianAdapter({
         if ((!ViewCtor && !creator) || !anyLeaf) {
           // 这句是**给用户看的**，不是给开发看的：说清楚"为什么"和"下一步做什么"。
           // 而且下面那个输入框**照样能写**，所以别把它写成"出错了"。
+          //
+          // ⚠️ 1.4.16：原来这里写的是「库里一篇 Markdown 笔记都没开着，随便打开
+          //    一篇再点一次」。**那条建议现在正好是反的**——实测开着一篇笔记走的是
+          //    借构造器那条路，反而挂不上（见上面那段对照实验）。所以只说事实：
+          //    这个版本的口子变了，下面照样能写。
           return fail(
-            "库里现在一篇 Markdown 笔记都没开着，借不到 Obsidian 的编辑器组件。" +
-              "随便打开一篇笔记，再点一次「编辑」就行——下面这个输入框照样能写。"
+            "借不到 Obsidian 的编辑器组件（这个版本内部的口子变了）。" +
+              "下面这个输入框照样能写，内容不会丢。"
           );
         }
 

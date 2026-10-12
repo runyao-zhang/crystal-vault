@@ -346,6 +346,29 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.16** · Fixed: **clicking Edit on a desk card (or a document) showed "the native editor did not attach".**
+
+The cause is ugly enough to be worth spelling out — **it depended on whether you happened to have a `.md` note open**, which is why it worked sometimes and not others.
+
+There are two ways to borrow Obsidian's editor component: ask the **view factory** in `viewRegistry`, or **borrow the constructor** off a live note instance. The code tried the constructor first and only fell back to the factory. A controlled test on a real machine (same leaf, same app state, even the same `view.constructor.name` — **only the single line that builds the view changed**):
+
+| How the view is built | Result |
+|---|---|
+| `creator(leaf)` (the factory) | the editor appears **on frame 0** |
+| `new ViewCtor(leaf)` (borrowed constructor) | **never appears, 60 frames** — the view mounts, the editor does not |
+
+Both produce a **class with the same name**, so the types look identical; only actually running it exposes the difference. **The symptom therefore runs against intuition: with a note open it fails** (that takes the borrowed-constructor path), and with none open it works (only then does it reach the factory).
+
+The order is now reversed — factory first, borrowed constructor only as a fallback. The old "just open any note and click Edit again" hint is gone as well: **it is now exactly backwards.**
+
+---
+
+**1.4.15** · Fixed: **after 1.4.14 the panel could still be covered — and only after you clicked another card.**
+
+1.4.14 merely raised the panel's z-index, which is **comparing sizes at the wrong level**; however you tune it, that is guesswork. The real cause was the desk layer: `position:relative` with `z-index:auto`, which **does not create a stacking context** — so every window inside it escaped and compared itself directly against the panel. Giving the desk `z-index:1` seals the layer and the windows inside it into **one unit** with a single number facing outward; the windows can climb as much as they like and still cannot get out.
+
+---
+
 **1.4.14** · Fixed: **panels opened from File ops could be covered by desk windows.**
 
 The folder tree and the new/rename crystal box used to sit at `z-index` 6 and 7 — enough to beat the pick-a-document layer, but **desk windows** (page / card / structure) raise their z-index **every time you click one** (click-to-front). So after a while they climbed above the panels: you would click Delete card, the tree would be sitting behind a card window, and nothing on screen said why it would not respond.
