@@ -544,13 +544,11 @@ async function reconcileCards(ctx) {
   if (!ctx.fs || !ctx.fs.isConnected) return;
 
   const wanted = new Set(incoming.map((c) => toStr(c && c.path)).filter(Boolean));
-  const hitFolders = new Set();
   let touched = false;
 
   // 1) 模型里有、盘上没有的 → 摘掉。改名走这一支（旧路径没了）。
   for (const c of ctx.model.allCards.slice()) {
     if (wanted.has(c.path)) continue;
-    hitFolders.add(toStr(c.folder));
     if (ctx.model.removeCard) {
       ctx.model.removeCard(c.path);
       touched = true;
@@ -571,8 +569,7 @@ async function reconcileCards(ctx) {
   //    而节点还在——`removeCard` 是**有意**留空节点的（理由是「那个文件夹在盘上
   //    确实存在」，见 model.js 那段），可改名之后它不在盘上了。
   //
-  //    所以问一次盘：这个文件夹今天还在不在。范围**只限这一趟被摘空的那些**，
-  //    不横扫所有空节点——一个本来就在那儿空着的晶体不该被这一步碰到。
+  //    所以问一次盘：这个文件夹今天还在不在。
   //
   //    ⚠️ 只在 `listFolders` 真的给出数组时才做。它的契约是「装着 .md 的文件夹、
   //    或者一个文件都没有的文件夹」，所以「被清空的合法文件夹」会被列出来、不会
@@ -580,6 +577,22 @@ async function reconcileCards(ctx) {
   // ⚠️ 3.0 刀 45：**这个守卫从 `hitFolders.size &&` 放宽成"只要有 listFolders 就跑"。**
   // 原来只在"有卡片消失"时才进来，所以**外面新建一个文件夹**永远走不到这儿
   // ——用户 10-09 报的就是这个（"在 Obsidian 里新建文件夹，晶体库看不到"）。
+  //
+  // ⚠️ 1.4.17：**扫的范围从「这一趟被摘空的那些」放宽成「树上所有的层」**
+  //    （用户 10-12 报的）。原来删的那半只认 `hitFolders`——**丢过卡的**文件夹
+  //    ——而一颗**从来没有过卡**的文件夹（名字还没起好的 `未命名`、刚建的空
+  //    文件夹）从来没有进过那张表，于是它**只进不出**：
+  //
+  //      在 Obsidian 里新建文件夹（`未命名`）→ 下面那半把它加进模型 ✓
+  //      随即改名成 `TCP`                    → `TCP` 加进来，`未命名` **永远留着**
+  //
+  //    症状就是用户报的那句：库里多出一颗「未命名」，点它说「不存在」。
+  //    根子上是**增删不对称**——下面那半扫全树，上面这半只扫"丢过卡的"。
+  //    现在两半共用同一张 `treePaths`，加和删才是同一个口径。
+  //
+  //    两条安全性：「一张卡都没有的**合法**空文件夹」不会被误删，它排在 `ok` 里
+  //    （见上面的契约）；树上那个「散卡」伪节点的 `folder` 是**卡片根目录**，
+  //    而 `removeFolder` 对根直接回 false（model.js 里写着），扫到它是空操作。
   if (typeof ctx.adapter.listFolders === "function") {
     let live = null;
     try {
@@ -589,8 +602,23 @@ async function reconcileCards(ctx) {
     }
     if (Array.isArray(live) && ctx.fs && ctx.fs.isConnected) {
       const ok = new Set(live.map((p) => toStr(p).replace(/\/+$/, "")));
-      for (const f of hitFolders) {
-        if (!f || ok.has(f)) continue; // 盘上还在，不是幽灵
+
+      // 树上现在有哪些层。拿的是**宿主路径**（`3.资产舱/知识卡片/Python`），
+      // 不是 `key`：`listFolders` 给的是宿主路径，而 `crystalKeys` 是相对
+      // 卡片根目录的 key，两者对不上。加、删两半共用这一张。
+      const treePaths = new Set();
+      const walk = (ns) => {
+        for (const n of ns || []) {
+          const p = toStr(n && n.folder).replace(/\/+$/, "");
+          if (p) treePaths.add(p);
+          walk(n && n.children);
+        }
+      };
+      walk(ctx.model.folderTree ? ctx.model.folderTree() : []);
+
+      // 摘：树上在、盘上不在的
+      for (const f of treePaths) {
+        if (ok.has(f)) continue; // 盘上还在，不是幽灵
         // 还有卡住在这个文件夹下面 → 它只是空了，不是没了
         const stillHome = incoming.some((c) => {
           const x = toStr(c && c.folder);
@@ -611,20 +639,8 @@ async function reconcileCards(ctx) {
       //
       // ⚠️ **空文件夹也算一颗晶体**（`listFolders` 的契约明文写着"一个文件都
       // 没有的文件夹"也列出来），所以这里**不能**拿"它下面有没有卡"当条件。
-      //
-      // ⚠️ 拿树上的 `folder`（宿主路径）去对，不是拿 `key`：`listFolders` 给的
-      // 是宿主路径，而 `crystalKeys` 是相对卡片根目录的 key，两者对不上。
-      const havePaths = new Set();
-      const walk = (ns) => {
-        for (const n of ns || []) {
-          const p = toStr(n && n.folder).replace(/\/+$/, "");
-          if (p) havePaths.add(p);
-          walk(n && n.children);
-        }
-      };
-      walk(ctx.model.folderTree ? ctx.model.folderTree() : []);
       for (const p of ok) {
-        if (havePaths.has(p)) continue;
+        if (treePaths.has(p)) continue;
         if (ctx.model.addFolder) {
           ctx.model.addFolder(p);
           touched = true;

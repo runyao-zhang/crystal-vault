@@ -346,6 +346,21 @@ Then link onward: [[02-Next card]] and say why you are linking
 
 Newest first. Kept current with every release, and it **only records things you can see**.
 
+**1.4.17** · Fixed: **creating a file or folder in Obsidian's file list left an extra "Untitled" entry that says "does not exist" when clicked.**
+
+The underlying flaw is an **asymmetry between adding and removing** — the two halves used two different rules:
+
+- The **add** half swept the **whole tree** against the folder list from disk, so a freshly created `Untitled` came in ✓
+- The **remove** half only swept folders that had **lost a card**, and a folder that never had a card (an `Untitled` whose name is not typed yet, a brand-new empty folder) **never entered that set**
+
+So the `Untitled` entry **could only go in, never out**: rename it to `TCP` and `TCP` is added while `Untitled` stays — and clicking it can only report that it does not exist.
+
+It follows directly from the previous release: 1.4.13 implemented "creating a folder outside the plugin now shows up", but **only the add half** — there was no matching remove. Both halves now share one table, so adding and removing finally use the same rule.
+
+Also fixed a **silent** failure on the rename path. A rename used to read the new file before reporting it to the core, and the core **never uses that content** — it only takes the signal as "reconcile everything". But if that one read failed while a download or a sync was in flight, the notification was **dropped without a word**, and the card at the old path stayed forever. Since the content goes unused, a rename now goes straight to a full reconcile, readable or not.
+
+---
+
 **1.4.16** · Fixed: **clicking Edit on a desk card (or a document) showed "the native editor did not attach".**
 
 The cause is ugly enough to be worth spelling out — **it depended on whether you happened to have a `.md` note open**, which is why it worked sometimes and not others.

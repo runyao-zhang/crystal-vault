@@ -361,12 +361,25 @@ export function createObsidianAdapter({
           markWhole();
           return;
         }
+        // ⚠️ 1.4.17：**改名一律整份对账**，不再往下走「把新卡读出来报上去」那条。
+        //
+        // 核心那边 `applyExternalChange` 见到 `from` 本来就只做一件事——
+        // `reconcileCards`，**新卡的内容它一个字都不看**（补丁改不了 `path`）。
+        // 所以原来那条 `pending` 路是白读一次盘。白读不要紧，**要紧的是读失败
+        // 就整条通知都没了**：`flush` 里 `readCard` 一抛就 `continue`，而那句
+        // `continue` 是**无声**的——"这条路径变了"从此再没人告诉核心，那张旧
+        // 路径的卡就永远留着。而「新建一个 `未命名`、随即改名」正好是这个时序。
+        //
+        // 顺带修掉另一头：原来新路径不落在卡片目录里（**把卡改成移出去**）会在
+        // 下面那句前缀判断上直接 return，同样是旧卡永远留着。整份对账两边都管。
+        if (from) {
+          markWhole();
+          return;
+        }
         // 前缀一定带斜杠：不带的话「知识卡片2」这种同前缀目录会被误伤
         if (!path || !path.startsWith(cardsFolder + "/") || !path.endsWith(".md")) return;
-        // `from` 只有改名那一支有。核心靠它知道「这张卡以前在哪儿」——
-        // 没有它的话，一个被改名的卡在核心眼里就是「一张没见过的卡」，
-        // 而那条路是直接 return 的（见 app.js 那句「不是我们的卡」）。
-        pending.set(path, { file, from: toStr(from) });
+        // 走到这儿的一定不是改名（上面已经拦下了），`from` 恒为空串。
+        pending.set(path, { file, from: "" });
         schedule();
       };
       // 3.0 刀 21：删除。**读不到文件**，所以不能走 `bump`（它里面要 readCard）——
